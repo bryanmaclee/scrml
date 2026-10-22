@@ -52,13 +52,9 @@ export function bootstrapCodes(): string[] {
  * yet. Each carries its intended severity here until the SPEC follow-up adds its row; once the row
  * exists `resolveSeverities` throws (agreeing or not) until the entry is removed, so this table can
  * never shadow §34. Keep it SHORT: every entry is owed a §34 row.
- *   W-STRING-INTERP-LITERAL (S469, s469-boot-strings-1) — a logic string literal holding `${`, which
- *   is plain text there (§5.5.3, §4.18 interpolate only in markup); a Warning (the program means what
- *   it says). Owed: its §34 row.
+ *   (empty — W-STRING-INTERP-LITERAL left when its §34 row landed, s469-spec-followup)
  */
-export const PROVISIONAL: Record<string, CompileSeverity> = {
-  "W-STRING-INTERP-LITERAL": "Warning",
-};
+export const PROVISIONAL: Record<string, CompileSeverity> = {};
 
 export type SeverityEntry = { code: string; severity: CompileSeverity; line: number; provisional?: boolean };
 export type CatalogGap = { code: string; why: string };

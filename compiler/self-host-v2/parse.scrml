@@ -1142,9 +1142,9 @@ ${
         return { es: out, tp: expectP(t, close) }
     }
 
-    // s469 — W-STRING-INTERP-LITERAL (PROVISIONAL: no §34 row yet; bryan
-    // approved provisional codes, S469; scripts/gen-bootstrap-severity.ts
-    // PROVISIONAL gives it its severity until the SPEC adds the row). A quoted
+    // s469 — W-STRING-INTERP-LITERAL (code name provisional; its §34 row, a
+    // Warning, landed in s469-spec-followup, so severity.scrml reads it from
+    // §34 like any other code). A quoted
     // string in LOGIC is plain text: `${…}` interpolates only in markup text
     // and quoted attribute values (SPEC §5.5.3, §4.18), so `"typed ${n}
     // chars"` is those characters — a trap for a JavaScript reader. A WARNING

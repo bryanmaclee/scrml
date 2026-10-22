@@ -60,10 +60,13 @@ describe("the table is §34's, and current", () => {
 // or go stale silently: each guard THROWS.
 describe("the PROVISIONAL table's guards", () => {
   const spec = (rows) => ["## 34. Diagnostics", "", "| Code | Section | Trigger | Severity |", "|---|---|---|---|", ...rows, "", "## 35. Next", ""].join("\n");
-  test("W-STRING-INTERP-LITERAL is provisional, a Warning, and the compiled table answers it", () => {
-    expect(PROVISIONAL["W-STRING-INTERP-LITERAL"]).toBe("Warning");
+  // s469-spec-followup: W-STRING-INTERP-LITERAL's §34 row landed, so its provisional entry left the table.
+  test("W-STRING-INTERP-LITERAL now has its §34 row (a Warning): no provisional entry, and the compiled table answers it", () => {
+    expect(PROVISIONAL["W-STRING-INTERP-LITERAL"]).toBeUndefined();
     const { entries } = resolveSeverities(SPEC_TEXT, bootstrapCodes());
-    expect(entries.find((e) => e.code === "W-STRING-INTERP-LITERAL")).toMatchObject({ severity: "Warning", provisional: true });
+    const e = entries.find((x) => x.code === "W-STRING-INTERP-LITERAL");
+    expect(e).toMatchObject({ severity: "Warning" });
+    expect(e.provisional).toBeUndefined();
     expect(mods.severity.severityOf("W-STRING-INTERP-LITERAL")).toBe("Warning");
   });
   test("once a §34 row exists the provisional entry is stale: it throws whether the row AGREES or not", () => {
