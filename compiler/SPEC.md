@@ -14948,8 +14948,9 @@ migrated), and the English word "boolean" in prose. Whether `integer` /
 `boolean` enter a §63 window ~~is ⚑ OPEN (not ruled)~~ — **RULED S469: yes.** `integer` and `boolean` keep working
 in type position, with **`W-TYPE-NAME-DEPRECATED`** (Info, §34) at each use naming `int` / `bool` and `scrml fix`,
 and are removed later through §63 (reserved `E-TYPE-NAME-DEPRECATED`; §63.7). The rewrite is mechanical (the
-name). The bootstrap SHALL accept `integer` during the window (it refuses it today — an owed gap,
-`g-bootstrap-integer-type-name-refused-s469`). **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — old type names: *"Deprecation window (Rec)"* (*"`integer`/`boolean` keep working with a warning under §63, then are removed. The bootstrap accepts `integer` meanwhile."*) **supersedes:** the ⚑ OPEN and the PA
+name). The bootstrap SHALL accept `integer` during the window ~~(it refuses it today — an owed gap,
+`g-bootstrap-integer-type-name-refused-s469`)~~ (it does — `g-bootstrap-integer-type-name-refused-s469`, resolved
+by s469-boot-ruled-backlog). **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — old type names: *"Deprecation window (Rec)"* (*"`integer`/`boolean` keep working with a warning under §63, then are removed. The bootstrap accepts `integer` meanwhile."*) **supersedes:** the ⚑ OPEN and the PA
 recommendation that stood here. **Direction of change:** inert (a lint; both spellings mean the same) — Nominal: the
 lint is named, not emitted, and the window opens per §63.2 when the lint, the reserved code and the `scrml fix`
 rule co-land. The three grammar productions that list primitive type names (§7.5 `primitive-type`, §15
