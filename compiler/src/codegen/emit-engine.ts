@@ -56,6 +56,8 @@ import { nsName, nsCellKey, stripNsName } from "./chunk-namespace.ts";
 import { judgeDescriptorExpr, describeJudgeType } from "./emit-predicates.ts";
 import { CGError } from "./errors.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { readShorthandBody } from "../arm-body-reader.ts";
+import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySource, guardSource } from "../engine-body-reader.ts";
 import { markupNotRenderedMessage, refuseUnrenderedStatementMarkup } from "../markup-statement-refusal.ts";
 
 /** One anchor per engine body text + refusal offset (see parseEngineSynthLogicBody). */
@@ -907,18 +909,17 @@ function emitPayloadBindingPrelude(
  * body) through BS+TAB, wrapped as a `${ … }` logic block, and return its
  * statement list — null when it does not parse to one. The single parser both
  * emitters below lower from, and that `detectRuntimeChunks` walks (s462 r3).
+ *
+ * S469 (SECURITY) — the parse is `readEngineBody` (engine-body-reader.ts), cached on
+ * the body's `owner` under `slot`: the type system's failable walk
+ * (`checkEngineRawBodies`) read the SAME statement objects, so codegen lowers what
+ * was walked (and the stamps the walk left on them).
  */
-function parseEngineSynthLogicBody(src: string, filePath: string): any[] | null {
+function parseEngineSynthLogicBody(src: string, filePath: string, owner?: object | null, slot = "body"): any[] | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const bs = require("../block-splitter.js") as {
-      runBlockSplitter: (i: { filePath: string; source: string }) => any;
-    };
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const tab = require("../ast-builder.js") as { buildAST: (bsOut: any) => any };
-    const wrapped = "${\n" + src + "\n}";
-    const bsOut = bs.runBlockSplitter({ filePath, source: wrapped });
-    const built = tab.buildAST(bsOut);
+    const read = readEngineBody(owner, slot, src, filePath);
+    const built = read.built;
+    if (!built) return null;
     // §17.6.10.1 (S464 r1 #4, r2) — markup in statement position in an engine body (a
     // message-arm body; the opener `effect=`) renders nothing: the body runs for its
     // effects. Every element of the parsed body is marked reported, so the html-fragment
@@ -952,12 +953,7 @@ function parseEngineSynthLogicBody(src: string, filePath: string): any[] | null 
         once(filePath + "\u0000" + src + "\u0000lead" + String((lead.span as any)?.start ?? 0)),
       );
     }, "effect");
-    const nodes: any[] = built?.ast?.nodes ?? [];
-    for (const n of nodes) {
-      if (n?.kind === "logic" && Array.isArray(n.body) && n.body.length > 0) return n.body;
-      if (Array.isArray(n?.body) && n.body.length > 0) return n.body;
-      if (Array.isArray(n?.children) && n.children.length > 0) return n.children;
-    }
+    return read.stmts;
   } catch (_e) {
     // fall through
   }
@@ -966,21 +962,32 @@ function parseEngineSynthLogicBody(src: string, filePath: string): any[] | null 
 
 /** A message-arm body's source text (block body: surrounding braces stripped). */
 function messageArmInnerSource(arm: MessageArmEntryShape): string {
-  let inner = (arm.bodyRaw || "").trim();
-  if (arm.isBlockBody && inner.startsWith("{") && inner.endsWith("}")) {
-    inner = inner.slice(1, -1).trim();
-  }
-  return inner;
+  return messageArmSource(arm);
 }
 
-/** A message-arm body's statement list. */
+/** A message-arm body's statement list (the parse the failable walk read, S469). */
 function parseMessageArmBody(arm: MessageArmEntryShape): any[] | null {
-  return parseEngineSynthLogicBody(messageArmInnerSource(arm), "__msg_arm__.scrml");
+  return parseEngineSynthLogicBody(messageArmInnerSource(arm), ENGINE_BODY_FILE.messageArm, arm, "arm");
 }
 
-/** The opener `effect=` body's statement list. */
-function parseOpenerEffectBody(openerEffect: string): any[] | null {
-  return parseEngineSynthLogicBody(openerEffect, "__opener_effect__.scrml");
+/** The opener `effect=` body's statement list (the parse the failable walk read, S469). */
+function parseOpenerEffectBody(openerEffect: string, meta?: object | null): any[] | null {
+  return parseEngineSynthLogicBody(openerEffect, ENGINE_BODY_FILE.openerEffect, meta ?? null, "openerEffect");
+}
+
+/** S469 — a state-child `effect=` body's statement list (the parse the failable walk read). */
+function parseStateEffectBody(child: any): any[] | null {
+  return parseEngineSynthLogicBody(String(child.effectRaw), ENGINE_BODY_FILE.stateEffect, child, "effect");
+}
+
+/**
+ * S469 — an `<onTransition>` body's statement list (the parse the failable walk read), or
+ * null when it has none or cannot be read (`onTransitionBodySource`).
+ */
+function parseOnTransitionBody(entry: any): any[] | null {
+  const src = onTransitionBodySource(entry);
+  if (!src || !("src" in src)) return null;
+  return parseEngineSynthLogicBody(src.src, ENGINE_BODY_FILE.onTransition, entry, "body");
 }
 
 /**
@@ -998,7 +1005,7 @@ export function engineDeferredStatementBodies(meta: any): any[][] {
   const out: any[][] = [];
   if (!meta || typeof meta !== "object") return out;
   if (typeof meta.openerEffect === "string" && meta.openerEffect.length > 0) {
-    const s = parseOpenerEffectBody(meta.openerEffect);
+    const s = parseOpenerEffectBody(meta.openerEffect, meta);
     if (s) out.push(s);
   }
   const sc: any[] = Array.isArray(meta.stateChildren) ? meta.stateChildren : [];
@@ -1008,6 +1015,19 @@ export function engineDeferredStatementBodies(meta: any): any[][] {
       const s = parseMessageArmBody(arm);
       if (s) out.push(s);
     }
+    // S469 — the state-child `effect=` and `<onTransition>` bodies are statement bodies too.
+    if (typeof child?.effectRaw === "string" && child.effectRaw.length > 0) {
+      const s = parseStateEffectBody(child);
+      if (s) out.push(s);
+    }
+    for (const entry of Array.isArray(child?.onTransitionElements) ? child.onTransitionElements : []) {
+      const s = parseOnTransitionBody(entry);
+      if (s) out.push(s);
+    }
+  }
+  for (const entry of Array.isArray(meta.engineOnTransitions) ? meta.engineOnTransitions : []) {
+    const s = parseOnTransitionBody(entry);
+    if (s) out.push(s);
   }
   return out;
 }
@@ -1083,7 +1103,17 @@ function emitMessageArmBodyFn(
     // Defensive: re-parse failed. Fall back to the single-expression rewrite of
     // the whole (bare) body as the target — a malformed multi-statement body
     // surfaces a loud downstream JS parse error rather than silently dropping.
-    bodyLines.push(`return ${rewriteHookExprText(messageArmInnerSource(arm))};`);
+    // S469 (SECURITY) — never the unwalked raw text: refused (the type system refuses first).
+    recordRefusedLowering(
+      new CGError(
+        "E-ERROR-002",
+        `E-ERROR-002: a \`(state × message)\` arm body cannot be read as statements, so it cannot be ` +
+        `checked for unhandled failable calls (§19.4.3); it is not emitted.`,
+        { file: "", start: 0, end: 0, line: 1, col: 1 },
+      ),
+      arm as object,
+    );
+    bodyLines.push(`return undefined;`);
   }
 
   const indented = bodyLines.map((l) => `    ${l}`).join("\n");
@@ -2054,7 +2084,7 @@ export function emitEngineOpenerEffect(
 
   // Re-parse the raw body through BS+TAB so multi-statement bodies + nested
   // `!{}` failable handlers become real AST statements.
-  const stmts = parseOpenerEffectBody(openerEffect);
+  const stmts = parseOpenerEffectBody(openerEffect, meta);
 
   lines.push(
     `// §51.0.H Form 3 opener effect= (boot-only init effect): ${meta.varName} (${meta.forType})`,
@@ -2100,12 +2130,18 @@ export function emitEngineOpenerEffect(
   lines.push(_effectIsAsync ? `(async function () {` : `(function () {`);
   for (const l of _effectBody) lines.push(l);
   if (!stmts) {
-    // Defensive fallback — re-parse failed. Fall back to the single-expression
-    // rewrite so a simple body still emits (and a malformed multi-statement
-    // body surfaces a loud downstream JS parse error rather than silently
-    // dropping the effect).
-    const lowered = rewriteHookExprText(openerEffect);
-    lines.push(`  ${lowered};`);
+    // S469 (SECURITY) — a body that does not parse to statements is never emitted unwalked
+    // (it was: the single-expression rewrite of the raw text). The type system refuses it
+    // first (`checkEngineRawBodies`); this is the codegen floor.
+    recordRefusedLowering(
+      new CGError(
+        "E-ERROR-002",
+        `E-ERROR-002: the opener \`effect=\` body of engine \`${meta.varName}\` cannot be read as ` +
+        `statements, so it cannot be checked for unhandled failable calls (§19.4.3); it is not emitted.`,
+        { file: "", start: 0, end: 0, line: 1, col: 1 },
+      ),
+      meta as object,
+    );
   }
   // A boot effect runs at module init and nothing awaits it, so an async one
   // routes a rejection (a network failure in its server call) to the scrml
@@ -2139,6 +2175,27 @@ export function emitEngineOpenerEffect(
  * substrate engines); they also reject E-ENGINE-EFFECT-ON-DERIVED at SYM, so
  * a derived engine never reaches this emitter with a non-null openerEffect.
  */
+/** S469 — the file-level engine-aware emit opts (mirrors the opener-effect / message-arm assembly). */
+function fileEngineEmitOpts(fileAST: any): import("./emit-logic.ts").EmitLogicOpts {
+  const engineBindings = buildEngineBindingsMap(fileAST);
+  const engineVarNames = collectEngineVarNames(fileAST);
+  const enginesWithHooks = collectEnginesWithHooks(fileAST);
+  const enginesWithOnTimeout = collectEnginesWithOnTimeout(fileAST);
+  const enginesWithIdleWatchdog = collectEnginesWithIdleWatchdog(fileAST);
+  const enginesWithInternalRules = collectEnginesWithInternalRules(fileAST);
+  const enginesWithHistory = collectEnginesWithHistory(fileAST);
+  return {
+    boundary: "client" as const,
+    ...(engineBindings ? { engineBindings } : {}),
+    ...(engineVarNames.size > 0 ? { engineVarNames } : {}),
+    ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}),
+    ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}),
+    ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}),
+    ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}),
+    ...(enginesWithHistory.size > 0 ? { enginesWithHistory } : {}),
+  } as import("./emit-logic.ts").EmitLogicOpts;
+}
+
 export function emitEngineOpenerEffectsForFile(fileAST: any, serverFnNames: Set<string> | null = null): string[] {
   const decls = collectC12EngineDecls(fileAST);
   if (decls.length === 0) return [];
@@ -2591,77 +2648,15 @@ function buildEngineArms(
     //     parseExprToNode → synth `logic > bare-expr` node.
     let body: any[];
     if ((sc as any).isColonShorthand === true) {
+      // S469 (SECURITY) — parsed ONCE by `readShorthandBody` (arm-body-reader.ts), cached on
+      // the state-child entry: the type system's failable walk (`checkRawArmBodies`) read these
+      // same nodes (before, nothing walked a `:`-shorthand state body: `<B : check(p) ? … : …>`
+      // compiled with the failable call unhandled).
       const trimmed = ((sc as any).bodyRaw || "").trim();
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { displayTextLiteralInner } = require("./emit-match.ts") as {
-        displayTextLiteralInner: (raw: string) => string | null;
-      };
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { nativeParseFile } = require("../../native-parser/parse-file.js") as {
-        nativeParseFile: (filePath: string, src: string) => { filePath: string; ast: any; errors: any[] };
-      };
       const synthLabel = `<engine:${meta.varName}:${tag}>`;
-      if (trimmed.length === 0) {
-        body = [];
-      } else if (/^<[A-Za-z_]/.test(trimmed)) {
-        // markup-as-value shorthand body (`<p>Idle</p>`). Same shape as the
-        // match-arm `looksLikeMarkupStart` branch (emit-match.ts:805).
-        body = [];
-        try {
-          // `<md>` (SPEC §67): the native parser has no `<md>` production — live route.
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { sourceHasMdElement } = require("../md-lower.ts") as { sourceHasMdElement: (s: string) => boolean };
-          let synthResult: any;
-          if (sourceHasMdElement(trimmed)) {
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            const { splitBlocks } = require("../block-splitter.js") as { splitBlocks: (f: string, s: string) => any };
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            const { buildAST } = require("../ast-builder.js") as { buildAST: (bs: any) => any };
-            synthResult = buildAST(splitBlocks(synthLabel, trimmed));
-          } else {
-            synthResult = nativeParseFile(synthLabel, trimmed);
-          }
-          if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
-            body = synthResult.ast.nodes;
-          }
-        } catch (_e) {
-          // Defensive — leave body empty on parse failure.
-        }
-      } else if (displayTextLiteralInner(trimmed) !== null) {
-        // §4.18.3 display-text literal — route INNER through nativeParseFile
-        // (emit-match.ts:825-831). Literal segments HTML-escape; `${...}` wire.
-        const inner = displayTextLiteralInner(trimmed) as string;
-        body = [];
-        try {
-          const synthResult = nativeParseFile(synthLabel, inner);
-          if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
-            body = synthResult.ast.nodes;
-          }
-        } catch (_e) {
-          // Defensive — leave body empty on parse failure.
-        }
-      } else {
-        // bare value-expression shorthand body (`@label` / `fn()` / `.Variant`).
-        // Synth `logic > bare-expr` so generateHtml's interpolation handling
-        // fires unchanged (emit-match.ts:835-851).
-        body = [];
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { parseExprToNode } = require("../expression-parser.ts") as {
-            parseExprToNode: (raw: string, filePath: string, offset: number, opts?: { tildeActive?: boolean }) => any;
-          };
-          const filePath = (fileAST?.filePath as string | undefined) ?? synthLabel;
-          const exprNode = parseExprToNode(trimmed, filePath, 0);
-          const span = (match as any).span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-          body = [{
-            kind: "logic",
-            body: [{ kind: "bare-expr", exprNode, expr: trimmed, span }],
-            span,
-          }];
-        } catch (_e) {
-          // Defensive — leave body empty on parse failure.
-        }
-      }
+      const filePath = (fileAST?.filePath as string | undefined) ?? synthLabel;
+      const span = (match as any).span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+      body = readShorthandBody(sc as object, "shorthand", trimmed, synthLabel, filePath, span, trimmed);
     } else {
       body = filterRenderableChildren(rawChildren);
     }
@@ -4267,14 +4262,16 @@ export function emitCrossFileEngineMountsForFile(
  *   - `kind: "to"`       — `<onTransition to=.X>` (Form 2 outgoing)
  *   - `kind: "from"`     — `<onTransition from=.X>` (Form 2 incoming-inverted)
  */
+// S469 — `owner` is the state-child (effect arm) or `<onTransition>` entry the body text
+// lives on: the key its one parse (engine-body-reader) is cached under.
 type EngineHookArm =
-  | { kind: "effect"; from: string; to: string; bodyRaw: string }
-  | { kind: "to"; from: string; to: string; bodyRaw: string; ifExprRaw: string | null; once: boolean; onceIdx: number | null }
-  | { kind: "from"; from: string; to: string; bodyRaw: string; ifExprRaw: string | null; once: boolean; onceIdx: number | null }
+  | { kind: "effect"; from: string; to: string; bodyRaw: string; owner?: any }
+  | { kind: "to"; from: string; to: string; bodyRaw: string; ifExprRaw: string | null; once: boolean; onceIdx: number | null; owner?: any }
+  | { kind: "from"; from: string; to: string; bodyRaw: string; ifExprRaw: string | null; once: boolean; onceIdx: number | null; owner?: any }
   // §51.0.H (Bug-AB) — engine-DIRECT <onTransition from=.X to=.Y>: BOTH endpoints
   // explicit (no enclosing-state-child inference). Same predicate + body shape
   // as "to"/"from"; distinct kind only for the placement comment.
-  | { kind: "direct"; from: string; to: string; bodyRaw: string; ifExprRaw: string | null; once: boolean; onceIdx: number | null };
+  | { kind: "direct"; from: string; to: string; bodyRaw: string; ifExprRaw: string | null; once: boolean; onceIdx: number | null; owner?: any };
 
 /**
  * Walk a single engine's state-children and collect hook arms in source order.
@@ -4315,6 +4312,7 @@ function collectEngineHooks(meta: EngineMetadata): EngineHookArm[] {
           from: fromTag,
           to: child.rule.target,
           bodyRaw: child.effectRaw,
+          owner: child,
         });
       }
       // else: B17.3 already fired E-ENGINE-EFFECT-AMBIGUOUS; defensive skip.
@@ -4340,6 +4338,7 @@ function collectEngineHooks(meta: EngineMetadata): EngineHookArm[] {
             ifExprRaw: entry.ifExprRaw ?? null,
             once: entry.once === true,
             onceIdx,
+            owner: entry,
           });
         } else if (typeof entry.from === "string" && entry.from.length > 0) {
           // TARGET-side handler: this state-child is the target. Inverts
@@ -4352,6 +4351,7 @@ function collectEngineHooks(meta: EngineMetadata): EngineHookArm[] {
             ifExprRaw: entry.ifExprRaw ?? null,
             once: entry.once === true,
             onceIdx,
+            owner: entry,
           });
         }
         // else: B17.3 fired E-ONTRANSITION-NO-TARGET; defensive skip.
@@ -4388,6 +4388,7 @@ function collectEngineHooks(meta: EngineMetadata): EngineHookArm[] {
         ifExprRaw: entry.ifExprRaw ?? null,
         once: entry.once === true,
         onceIdx,
+        owner: entry,
       });
     }
   }
@@ -4421,37 +4422,6 @@ function engineOnceFlagName(varName: string, idx: number): string {
 }
 
 /**
- * Strip the outer wrapper from `ifExprRaw` to get the underlying expression
- * text suitable for `rewriteExpr` consumption.
- *
- * Per B17.2 SURVEY decision 1, the parser captures `ifExprRaw` verbatim with
- * its surrounding wrapper:
- *   - `if=(expr)`        — paren-form (canonical)
- *   - `if=${expr}`        — logic-context form
- *   - `if=expr`          — bare expression (rare)
- *
- * Codegen normalises by stripping ONE outer paren-pair OR one `${...}`
- * wrapper. If the wrapping mismatches (unbalanced) the captured text is
- * passed through unchanged — `rewriteExpr` will produce JS that fails to
- * parse, triggering a downstream error. (B17.3 SURVEY decision 2 confirms
- * `if=expr` type-checking is DEFERRED; B17.4 trusts the captured shape.)
- */
-function unwrapIfExprRaw(raw: string): string {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return trimmed;
-  // ${...} wrapper.
-  if (trimmed.startsWith("${") && trimmed.endsWith("}")) {
-    return trimmed.slice(2, -1).trim();
-  }
-  // (...) wrapper. Match-balanced check is overkill; rely on B17.2's
-  // greedy-stop attribute capture giving us a single-paren-pair shape.
-  if (trimmed.startsWith("(") && trimmed.endsWith(")")) {
-    return trimmed.slice(1, -1).trim();
-  }
-  return trimmed;
-}
-
-/**
  * Rewrite a raw expression text for client emission. Mirrors what
  * `emitExprField(null, raw, { mode: "client", derivedNames })` does — the
  * legacy `emit-machines.ts:466` path uses the same call shape for raw
@@ -4470,29 +4440,6 @@ function rewriteHookExprText(raw: string): string {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { rewriteExpr } = require("./rewrite.ts");
   return rewriteExpr(raw);
-}
-
-/**
- * Strip a logic-context `${...}` wrapper from a body raw text.
- *
- * `<onTransition to=.X>${ playSound("fire") }</>` → bodyRaw is
- * `${ playSound("fire") }` (verbatim from the parser per
- * `engine-statechild-parser.ts:622`). The codegen wants the inner expression
- * text. `effect=${...}` is captured WITHOUT the wrapper (parser strips at
- * line 1129); `<onTransition>` body capture preserves the wrapper because
- * `<onTransition>` bodies CAN be markup or text or `${expr}` — uniform shape.
- *
- * The unwrap is best-effort: balanced braces aren't checked. If the body has
- * multiple `${...}` blocks (rare — would be an authoring error), only the
- * outer single block strips. Otherwise the body passes through unchanged.
- */
-function unwrapBodyRawDollarBraces(raw: string): string {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return trimmed;
-  if (trimmed.startsWith("${") && trimmed.endsWith("}")) {
-    return trimmed.slice(2, -1).trim();
-  }
-  return trimmed;
 }
 
 /**
@@ -4536,31 +4483,47 @@ function unwrapBodyRawDollarBraces(raw: string): string {
  * For only-if=:  `if (<rewrittenIfExpr>) { <body>; }`
  * For neither:   `<body>;`
  */
-function emitHookArm(arm: EngineHookArm, varName: string): string[] {
+function emitHookArm(
+  arm: EngineHookArm,
+  varName: string,
+  emitOpts: import("./emit-logic.ts").EmitLogicOpts = { boundary: "client" } as import("./emit-logic.ts").EmitLogicOpts,
+): string[] {
   const lines: string[] = [];
   const fromKey = JSON.stringify(arm.from);
   const toKey = JSON.stringify(arm.to);
 
-  // For `effect=` arms, the parser stripped the `${...}` wrapper already
-  // (`engine-statechild-parser.ts:1129`). For `<onTransition>` bodies, the
-  // parser preserved it (line 622) — strip here for uniform downstream
-  // rewrite.
-  const bodyRawNormalized = arm.kind === "effect"
-    ? arm.bodyRaw
-    : unwrapBodyRawDollarBraces(arm.bodyRaw);
-  let bodyText: string;
-  try {
-    bodyText = rewriteHookExprText(bodyRawNormalized);
-  } catch {
-    // Defensive — keep the normalized text; downstream JS parse error will be loud.
-    bodyText = bodyRawNormalized;
+  // S469 (SECURITY, §19.4.3) — the body is a STATEMENT list, lowered from the one parse of
+  // its text (engine-body-reader `readEngineBody`, cached on `arm.owner`) — the parse the
+  // type system's failable walk read (`checkEngineRawBodies`). Before, the text went through
+  // the single-expression `rewriteExpr`, which no walk had read (a `check(p)` in it compiled
+  // unhandled: a wrong password logged in) and which kept only the FIRST statement of a
+  // multi-statement body (the rest was dropped silently). A body that cannot be read is
+  // refused here too — never emitted unwalked (the type system refuses it first).
+  const stmts = arm.kind === "effect" ? parseStateEffectBody(arm.owner ?? { effectRaw: arm.bodyRaw })
+    : parseOnTransitionBody(arm.owner ?? { bodyRaw: arm.bodyRaw });
+  if (!stmts) {
+    recordRefusedLowering(
+      new CGError(
+        "E-ERROR-002",
+        `E-ERROR-002: the ${arm.kind === "effect" ? "`effect=`" : "`<onTransition>`"} body for ` +
+        `.${arm.from} → .${arm.to} of engine \`${varName}\` cannot be read as statements, so it ` +
+        `cannot be checked for unhandled failable calls (§19.4.3); it is not emitted.`,
+        { file: "", start: 0, end: 0, line: 1, col: 1 },
+      ),
+      (arm.owner as object) ?? null,
+    );
+    return lines;
   }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const logic = require("./emit-logic.ts") as { emitLogicBody: (nodes: any[], opts: any) => string[] };
+  const bodyLines = logic.emitLogicBody(stmts, { ...emitOpts, boundary: "client", insideFunctionBody: true });
+  const body = (indent: string): void => { for (const l of bodyLines) lines.push(`${indent}${l}`); };
 
   // For effect arms there is no once / if=expr (Form 1 has no such attrs).
   if (arm.kind === "effect") {
     lines.push(`  if (_scrml_from === ${fromKey} && _scrml_to === ${toKey}) {`);
     lines.push(`    // §51.0.H effect= body for state-child .${arm.from} → .${arm.to}`);
-    lines.push(`    ${bodyText};`);
+    body("    ");
     lines.push(`  }`);
     return lines;
   }
@@ -4570,12 +4533,21 @@ function emitHookArm(arm: EngineHookArm, varName: string): string[] {
   const hasIfExpr = typeof arm.ifExprRaw === "string" && arm.ifExprRaw.trim().length > 0;
   let ifExprText = "true";
   if (hasIfExpr) {
-    const unwrapped = unwrapIfExprRaw(arm.ifExprRaw!);
-    try {
-      ifExprText = rewriteHookExprText(unwrapped);
-    } catch {
-      ifExprText = unwrapped;
+    // S469 — the guard text the failable walk read (`guardSource`); unreadable → refused.
+    const g = guardSource(arm.ifExprRaw);
+    if (!g || !("src" in g)) {
+      recordRefusedLowering(
+        new CGError(
+          "E-ERROR-002",
+          `E-ERROR-002: the \`if=\` guard of an \`<onTransition>\` (.${arm.from} → .${arm.to}) of engine ` +
+          `\`${varName}\` cannot be read, so it cannot be checked for unhandled failable calls (§19.4.3).`,
+          { file: "", start: 0, end: 0, line: 1, col: 1 },
+        ),
+        (arm.owner as object) ?? null,
+      );
+      return [];
     }
+    ifExprText = rewriteHookExprText(g.src);
   }
 
   const placement = arm.kind === "to"
@@ -4591,20 +4563,20 @@ function emitHookArm(arm: EngineHookArm, varName: string): string[] {
     const flag = engineOnceFlagName(varName, arm.onceIdx!);
     lines.push(`    if (!${flag} && (${ifExprText})) {`);
     lines.push(`      ${flag} = true;`);
-    lines.push(`      ${bodyText};`);
+    body("      ");
     lines.push(`    }`);
   } else if (hasOnce) {
     const flag = engineOnceFlagName(varName, arm.onceIdx!);
     lines.push(`    if (!${flag}) {`);
     lines.push(`      ${flag} = true;`);
-    lines.push(`      ${bodyText};`);
+    body("      ");
     lines.push(`    }`);
   } else if (hasIfExpr) {
     lines.push(`    if (${ifExprText}) {`);
-    lines.push(`      ${bodyText};`);
+    body("      ");
     lines.push(`    }`);
   } else {
-    lines.push(`    ${bodyText};`);
+    body("    ");
   }
 
   lines.push(`  }`);
@@ -4636,7 +4608,10 @@ function emitHookArm(arm: EngineHookArm, varName: string): string[] {
  *     // ... more arms ...
  *   }
  */
-export function emitEngineHookFiringFunction(meta: EngineMetadata): string[] {
+export function emitEngineHookFiringFunction(
+  meta: EngineMetadata,
+  emitOpts?: import("./emit-logic.ts").EmitLogicOpts,
+): string[] {
   const arms = collectEngineHooks(meta);
   if (arms.length === 0) return [];
 
@@ -4659,7 +4634,7 @@ export function emitEngineHookFiringFunction(meta: EngineMetadata): string[] {
   lines.push(`function ${fnName}(_scrml_from, _scrml_to) {`);
 
   for (const arm of arms) {
-    const armLines = emitHookArm(arm, varName);
+    const armLines = emitHookArm(arm, varName, emitOpts);
     for (const l of armLines) lines.push(l);
   }
 
@@ -4919,12 +4894,16 @@ export function maybeLowerCancelTimerCallRef(
  */
 export function emitEngineHookFiringFunctionsForFile(fileAST: any): string[] {
   const lines: string[] = [];
+  // S469 — hook bodies are lowered as statements (emitLogicBody) with the file's engine-aware
+  // opts, so an engine write inside one routes through the transition machinery like the
+  // opener effect's and a message arm's.
+  const emitOpts = fileEngineEmitOpts(fileAST);
 
   // Non-derived engines (C12-scope).
   for (const decl of collectC12EngineDecls(fileAST)) {
     const meta = decl._record?.engineMeta;
     if (!meta) continue;
-    const fnLines = emitEngineHookFiringFunction(meta);
+    const fnLines = emitEngineHookFiringFunction(meta, emitOpts);
     if (fnLines.length === 0) continue;
     if (lines.length > 0) lines.push("");
     for (const l of fnLines) lines.push(l);
@@ -4934,7 +4913,7 @@ export function emitEngineHookFiringFunctionsForFile(fileAST: any): string[] {
   for (const decl of collectC14DerivedEngineDecls(fileAST)) {
     const meta = decl._record?.engineMeta;
     if (!meta) continue;
-    const fnLines = emitEngineHookFiringFunction(meta);
+    const fnLines = emitEngineHookFiringFunction(meta, emitOpts);
     if (fnLines.length === 0) continue;
     if (lines.length > 0) lines.push("");
     for (const l of fnLines) lines.push(l);

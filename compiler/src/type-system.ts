@@ -73,6 +73,9 @@
  */
 
 import { armStatements, objectLiteralArmValue } from "./arm-body-statements.ts";
+import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySource, guardSource } from "./engine-body-reader.ts";
+import { readShorthandBody, readBareArmBody, matchArmKey } from "./arm-body-reader.ts";
+import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS, STATEMENT_CHILD_KEYS, provableSubjectCallees, failableBindingFacts } from "./failable-value-calls.ts";
@@ -11084,6 +11087,11 @@ function annotateNodes(
   // an unhandled call and E-ERROR-005 (a render-time renderability check) does
   // not. The depth also turns on scope resolution of the callee.
   let handlerCheckDepth = 0;
+  // S469 — what the handler-context walk is reading, for the E-ERROR-002 wording: an event
+  // handler, or an engine body (an `effect=`, an `<onTransition>`, a message arm) — both run
+  // after render, on an event / a transition, where no `<errorBoundary>` catches.
+  let handlerCheckWhere = "this event handler";
+  let handlerCheckKind = "event handlers";
   // S467 (§19.4.3) — context of the value-position failable-call check
   // (`checkFailableCallsInValuePositions`). `failableFnStack` holds one entry per
   // function body being walked (its `canFail`): a function body is not render-time,
@@ -15668,6 +15676,8 @@ function annotateNodes(
         // decides whether the engine's mount subtree renders, and reads nothing
         // an arm binds.
         visitStructuralIfAttr(n);
+        // S469 (SECURITY, §19.4.3) — the engine's raw-text bodies, walked for failable calls.
+        checkEngineRawBodies(n);
         // §18.2 / §51.0.J / §34 — W-MATCH-ARROW-LEGACY (S171). A derived engine
         // `<engine for=T derived=match @VAR { .A => .X  _ -> .Y }>` is a match-
         // shaped construct whose arms join the `:>` arm-separator deprecation.
@@ -15835,6 +15845,7 @@ function annotateNodes(
         const bindingsByVariant = extractMatchArmPayloadBindingsByVariant(
           (n as { armsRaw?: unknown }).armsRaw,
         );
+        const _tabArmErrStart = errors.length;
         const armWrappers = (n as { armBodyChildren?: ASTNodeLike[] }).armBodyChildren;
         if (Array.isArray(armWrappers)) {
           for (const wrapper of armWrappers) {
@@ -15947,6 +15958,32 @@ function annotateNodes(
               }
             }
             scopeChain.pop();
+          }
+        }
+        // S469 (SECURITY, §19.4.3) — the arm bodies codegen lowers are ITS OWN parse of each
+        // arm's text (emit-match `buildMatchArms` → arm-body-reader), not `armBodyChildren`:
+        // walk that parse, so the failable `match` stamps land on the nodes emitted (a
+        // `${ match check(p) {…} }` in an arm, or in a handler in one, compared the error as a
+        // plain value and a wrong password logged in) and a `:`-shorthand arm body — which
+        // `armBodyChildren` does not hold — is checked at all. Its §19.4.3 errors are reported
+        // when the `armBodyChildren` walk found none (otherwise they repeat those).
+        {
+          const armsRaw = (n as { armsRaw?: unknown }).armsRaw;
+          if (typeof armsRaw === "string" && armsRaw.length > 0) {
+            const tabFound = errors.slice(_tabArmErrStart).some((e) => isFailableCode(e as { code?: string }));
+            const mSpan = ((n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span;
+            let parsedArms: Array<{ variantName: string; bodyForm: string; bodyRaw: string }> = [];
+            try { parsedArms = parseMatchArms(armsRaw).arms as typeof parsedArms; } catch { parsedArms = []; }
+            for (const [i, entry] of parsedArms.entries()) {
+              if (!entry || !entry.bodyRaw || entry.bodyRaw.trim().length === 0 || entry.bodyForm === "self-closing") continue;
+              const tag = entry.variantName;
+              const key = matchArmKey(i, tag);
+              const label = `<match:${(n as { id?: unknown }).id}:${tag}>`;
+              const nodes = entry.bodyForm === "shorthand"
+                ? readShorthandBody(n as object, key, entry.bodyRaw, label, filePath, n.span, entry.bodyRaw)
+                : readBareArmBody(n as object, key, entry.bodyRaw, label).nodes;
+              walkCodegenCopy(nodes, bindingsByVariant.get(tag) ?? [], label, mSpan, !tabFound);
+            }
           }
         }
         // Walk any OTHER array fields generically (e.g. `bodyChildren` — the
@@ -16223,9 +16260,9 @@ function annotateNodes(
         errors.push(new TSError(
           "E-ERROR-002",
           handlerCheckDepth > 0
-            ? `E-ERROR-002: Result of failable function '${bareCallee}' is not handled in this event handler. ` +
+            ? `E-ERROR-002: Result of failable function '${bareCallee}' is not handled in ${handlerCheckWhere}. ` +
               `Catch it with '!{}' (e.g. '${bareCallee}(…) !{ | .Variant :> … }'), match the result, or call it from a ` +
-              `function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).`
+              `function that handles it. An '<errorBoundary>' does not catch errors raised in ${handlerCheckKind} (§19.6.6).`
             : `E-ERROR-002: Result of failable function '${bareCallee}' is not handled. ` +
               `Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`,
           n.span as Span,
@@ -16807,9 +16844,9 @@ function annotateNodes(
     errors.push(new TSError(
       "E-ERROR-002",
       handlerCheckDepth > 0
-        ? `E-ERROR-002: Result of failable function ${shown} is not handled in this event handler. ` +
+        ? `E-ERROR-002: Result of failable function ${shown} is not handled in ${handlerCheckWhere}. ` +
           `Catch it with '!{}' (e.g. '${calleeName}(…) !{ | .Variant :> … }'), match the result, or call it from a ` +
-          `function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).`
+          `function that handles it. An '<errorBoundary>' does not catch errors raised in ${handlerCheckKind} (§19.6.6).`
         : `E-ERROR-002: Result of failable function ${shown} is not handled. ` +
           `Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`,
       span,
@@ -17108,6 +17145,214 @@ function annotateNodes(
       ));
     }
   }
+
+  /**
+   * S469 (SECURITY, §19.4.3 — s469-engine-effect-failable) — E-ERROR-002 over every engine body
+   * the compiler keeps as RAW TEXT until codegen. An engine `effect=` (state-child and opener),
+   * an `<onTransition>` body and `if=` guard, a `(state × message)` arm, a computed
+   * `<onTimeout after=${…}>` / `<onIdle after=${…}>` delay: none was ever walked for failable
+   * calls, and each was emitted — `effect=${ @msg = check(p) ? "IN" : "OUT" }` compiled and the
+   * error object (truthy) logged a wrong password in.
+   *
+   * Each body is read by THE parse codegen lowers (engine-body-reader `readEngineBody`, cached
+   * on the body's owner), so the statements walked here are the statement objects emitted, and
+   * the stamps the walk leaves (a `match` on a failable result) reach codegen. The walk is the
+   * event-handler check walk (`withHandlerCheckContext`: no `<errorBoundary>` catches a body
+   * that runs on a transition), keeping only the §19.4.3 codes. FAIL CLOSED: a body that cannot
+   * be read is E-ERROR-002; an EXPRESSION slot (a guard, a delay) is lowered from its text by
+   * `rewriteExpr`, which does not honour a failable-`match` stamp, so a failable `match` in one
+   * is refused rather than lowered as a plain comparison.
+   */
+  function checkEngineRawBodies(engineNode: ASTNodeLike): void {
+    const meta = (engineNode as { _record?: { engineMeta?: Record<string, unknown> } })._record?.engineMeta;
+    if (!meta || typeof meta !== "object") return;
+    const engSpan = ((engineNode.span as Span | undefined)
+      ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span;
+    const rulesRaw = typeof (engineNode as { rulesRaw?: unknown }).rulesRaw === "string"
+      ? (engineNode as { rulesRaw: string }).rulesRaw : "";
+    const rawPos = (engineNode as { rulesRawPos?: { start?: number; line?: number; col?: number } }).rulesRawPos;
+    const engineName = String((meta as { varName?: unknown }).varName ?? (engineNode as { engineName?: unknown }).engineName ?? "?");
+    // The span of a body at `rawOffset` in rulesRaw (the opener of the element holding it).
+    const spanAt = (rawOffset: unknown): Span => {
+      if (typeof rawOffset !== "number" || !rawPos || typeof rawPos.start !== "number" || typeof rawPos.line !== "number") return engSpan;
+      const before = rulesRaw.slice(0, rawOffset);
+      const nl = (before.match(/\n/g) || []).length;
+      const col = nl === 0 ? (rawPos.col ?? 1) + rawOffset : rawOffset - before.lastIndexOf("\n");
+      return { file: engSpan.file ?? filePath, start: rawPos.start + rawOffset, end: rawPos.start + rawOffset, line: rawPos.line + nl, col } as Span;
+    };
+    const refuse = (what: string, span: Span, why: string): void => {
+      errors.push(new TSError(
+        "E-ERROR-002",
+        `E-ERROR-002: ${what} of engine '${engineName}' ${why} It cannot be checked for unhandled failable ` +
+        `calls (§19.4.3), so it is refused rather than run unchecked.`,
+        span,
+      ));
+    };
+    // Walk one statement list as a body run on a transition; keep the §19.4.3 codes, re-spanned
+    // onto `span` (the statements' own spans are relative to the body's synthetic parse).
+    const walk = (stmts: unknown[], what: string, span: Span, bindings: string[]): void => {
+      const before = errors.length;
+      const savedWhere = handlerCheckWhere;
+      const savedKind = handlerCheckKind;
+      handlerCheckWhere = what;
+      handlerCheckKind = "engine effects and hooks";
+      scopeChain.push(`engine-body-check:${engineName}`);
+      for (const b of bindings) {
+        if (typeof b === "string" && b.length > 0) scopeChain.bind(b, { kind: "variable", resolvedType: tAsIs() });
+      }
+      try {
+        withHandlerCheckContext(() => {
+          for (const st of stmts) if (st && typeof st === "object") visitLogicNode(st as ASTNodeLike, "client");
+        });
+      } finally {
+        scopeChain.pop();
+        handlerCheckWhere = savedWhere;
+        handlerCheckKind = savedKind;
+      }
+      const produced = errors.splice(before);
+      for (const e of produced) {
+        if (!e || (e.code !== "E-ERROR-002" && e.code !== "E-IMPL1-FAILABLE-FN-VALUE")) continue;
+        (e as { span: Span }).span = span;
+        errors.push(e);
+      }
+    };
+    const bindingNames = (raw: unknown): string[] => {
+      if (!Array.isArray(raw)) return [];
+      return raw.map((b) => (b && typeof b === "object" ? (b as { name?: unknown }).name : null))
+        .filter((n): n is string => typeof n === "string");
+    };
+    // A STATEMENT body: read, refuse when unreadable, walk.
+    const statementBody = (owner: object, slot: string, src: string, file: string, what: string, span: Span, bindings: string[]): void => {
+      const read = readEngineBody(owner, slot, src, file);
+      const parseErr = (read.built?.errors ?? []).find((e: { severity?: string; code?: string }) =>
+        e && e.severity !== "warning" && e.severity !== "info" && !/^[WI]-/.test(String(e.code ?? ""))
+          && e.code !== "E-MARKUP-STATEMENT-NOT-RENDERED");
+      if (!read.stmts) { refuse(what, span, "does not parse as statements."); return; }
+      if (parseErr) { refuse(what, span, `does not parse (${String(parseErr.code)}).`); return; }
+      walk(read.stmts, what, span, bindings);
+    };
+    // An EXPRESSION slot lowered from its text by `rewriteExpr`: one expression statement, no
+    // failable `match` (rewriteExpr would compare the error object as a plain value).
+    const expressionSlot = (owner: object, slot: string, src: string, what: string, span: Span, bindings: string[]): void => {
+      const read = readEngineBody(owner, slot, src, ENGINE_BODY_FILE.guard);
+      const stmts = read.stmts;
+      if (!stmts || stmts.length !== 1) { refuse(what, span, "is not one expression."); return; }
+      walk(stmts, what, span, bindings);
+      if (treeHasFailableMatchStamp(stmts)) {
+        refuse(what, span, "holds a 'match' on a failable result, which impl#1 cannot lower in this position so that it tells the error from a plain value. Move it into a function that handles the call.");
+      }
+    };
+
+    // 1. The opener `effect=` (boot-only).
+    const openerEffect = (meta as { openerEffect?: unknown }).openerEffect;
+    if (typeof openerEffect === "string" && openerEffect.length > 0) {
+      statementBody(meta, "openerEffect", openerEffect, ENGINE_BODY_FILE.openerEffect,
+        "the opener 'effect=' body", engSpan, []);
+    }
+    const children = Array.isArray((meta as { stateChildren?: unknown }).stateChildren)
+      ? (meta as { stateChildren: Record<string, unknown>[] }).stateChildren : [];
+    const onTransitionEntry = (entry: Record<string, unknown>, where: string, span: Span, bindings: string[]): void => {
+      const body = onTransitionBodySource(entry);
+      if (body && "unreadable" in body) refuse(`the <onTransition> body ${where}`, span, "is not one readable '${ … }' block.");
+      else if (body) statementBody(entry, "body", body.src, ENGINE_BODY_FILE.onTransition, `the <onTransition> body ${where}`, span, bindings);
+      if (entry.ifExprRaw !== undefined && entry.ifExprRaw !== null) {
+        const g = guardSource(entry.ifExprRaw);
+        if (g && "unreadable" in g) refuse(`the <onTransition if=> guard ${where}`, span, "cannot be read.");
+        else if (g) expressionSlot(entry, "if", g.src, `the <onTransition if=> guard ${where}`, span, bindings);
+      }
+    };
+    const delaySlot = (entry: Record<string, unknown>, what: string, span: Span, bindings: string[]): void => {
+      if (typeof entry.after !== "string") return;
+      const parsed = parseAfterDuration(entry.after);
+      if (parsed.kind === "computed") expressionSlot(entry, "after", parsed.exprText, what, span, bindings);
+    };
+    for (const child of children) {
+      if (!child || typeof child !== "object") continue;
+      const tag = String(child.tag ?? "?");
+      const span = spanAt(child.rawOffset);
+      const stateBindings = bindingNames(child.payloadBindings);
+      // 1b. A `:`-shorthand state body (`<B rule=.A : expr>`): rendered from codegen's own parse
+      // of its text (arm-body-reader) — walked here, the same nodes (render time).
+      if (child.isColonShorthand === true && typeof child.bodyRaw === "string" && child.bodyRaw.trim().length > 0) {
+        const trimmed = child.bodyRaw.trim();
+        const label = `<engine:${engineName}:${tag}>`;
+        walkCodegenCopy(readShorthandBody(child, "shorthand", trimmed, label, filePath, engSpan, trimmed),
+          stateBindings, label, span, true);
+      }
+      // 2. The state-child `effect=`.
+      if (typeof child.effectRaw === "string" && child.effectRaw.length > 0) {
+        statementBody(child, "effect", child.effectRaw, ENGINE_BODY_FILE.stateEffect,
+          `the 'effect=' body of state .${tag}`, span, stateBindings);
+      }
+      // 3. Its `<onTransition>` bodies and guards.
+      for (const entry of Array.isArray(child.onTransitionElements) ? child.onTransitionElements as Record<string, unknown>[] : []) {
+        if (entry && typeof entry === "object") onTransitionEntry(entry, `in state .${tag}`, span, stateBindings);
+      }
+      // 4. Its `(state × message)` arms.
+      for (const arm of Array.isArray(child.messageArms) ? child.messageArms as Record<string, unknown>[] : []) {
+        if (!arm || typeof arm !== "object") continue;
+        const armName = arm.isWildcard ? "_" : String(arm.variantName ?? "?");
+        statementBody(arm, "arm", messageArmSource(arm), ENGINE_BODY_FILE.messageArm,
+          `the message arm .${armName} of state .${tag}`, span, [...stateBindings, ...bindingNames(arm.payloadBindings)]);
+      }
+      // 5. Its computed `<onTimeout after=${…}>` delays.
+      for (const ot of Array.isArray(child.onTimeoutElements) ? child.onTimeoutElements as Record<string, unknown>[] : []) {
+        if (ot && typeof ot === "object") delaySlot(ot, `the <onTimeout after=> delay in state .${tag}`, span, stateBindings);
+      }
+    }
+    // 6. Engine-direct `<onTransition>` entries.
+    for (const entry of Array.isArray((meta as { engineOnTransitions?: unknown }).engineOnTransitions)
+      ? (meta as { engineOnTransitions: Record<string, unknown>[] }).engineOnTransitions : []) {
+      if (entry && typeof entry === "object") onTransitionEntry(entry, "(engine-direct)", spanAt(entry.rawOffset), []);
+    }
+    // 7. The `<onIdle after=${…}>` watchdog delay.
+    const idle = (meta as { idleWatchdog?: unknown }).idleWatchdog;
+    if (idle && typeof idle === "object") delaySlot(idle as Record<string, unknown>, "the <onIdle after=> delay", spanAt((idle as { rawOffset?: unknown }).rawOffset), []);
+  }
+
+  /**
+   * S469 (SECURITY, §19.4.3) — walk a body codegen lowers from its OWN parse of raw text (a
+   * `<match>` arm, an engine `:`-shorthand state body — arm-body-reader.ts) so the failable
+   * walk's stamps land on the nodes emitted, and report its §19.4.3 errors when `report`.
+   * The copy's node ids are swapped for a disjoint range during the walk (its parse numbers
+   * nodes from 1, so `nodeTypes` entries keyed by id would clobber real nodes'), then restored
+   * — codegen keys mount slots on them.
+   */
+  function walkCodegenCopy(nodes: unknown[], bindings: string[], label: string, span: Span, report: boolean): void {
+    if (!Array.isArray(nodes) || nodes.length === 0) return;
+    const saved: Array<[Record<string, unknown>, unknown]> = [];
+    const seen = new WeakSet<object>();
+    let next = _nextReparseIdBase();
+    const renumber = (v: unknown): void => {
+      if (!v || typeof v !== "object" || seen.has(v as object)) return;
+      seen.add(v as object);
+      if (Array.isArray(v)) { for (const x of v) renumber(x); return; }
+      const r = v as Record<string, unknown>;
+      if (typeof r.id === "number") { saved.push([r, r.id]); r.id = next++; }
+      for (const k of Object.keys(r)) if (k !== "span" && k !== "_record") renumber(r[k]);
+    };
+    renumber(nodes);
+    const before = errors.length;
+    scopeChain.push(`raw-arm-check:${label}`);
+    for (const b of bindings) {
+      if (typeof b === "string" && b.length > 0) scopeChain.bind(b, { kind: "variable", resolvedType: tAsIs() });
+    }
+    try {
+      for (const nd of nodes) if (nd && typeof nd === "object" && (nd as ASTNodeLike).kind) visitNode(nd as ASTNodeLike);
+    } finally {
+      scopeChain.pop();
+      for (const [r, id] of saved) r.id = id;
+    }
+    const produced = errors.splice(before);
+    if (!report) return;
+    for (const e of produced) {
+      if (!e || (e.code !== "E-ERROR-002" && e.code !== "E-IMPL1-FAILABLE-FN-VALUE")) continue;
+      (e as { span: Span }).span = span;
+      errors.push(e);
+    }
+  }
+  const isFailableCode = (e: { code?: string } | undefined): boolean =>
+    !!e && (e.code === "E-ERROR-002" || e.code === "E-IMPL1-FAILABLE-FN-VALUE");
 
   function visitAttr(attr: ASTNodeLike, parent: ASTNodeLike): void {
     if (!attr || !attr.value) return;

@@ -65,6 +65,7 @@ import { ifChainChildNodes } from "../ast-if-chain.js";
 import { desugarImpliedLiftMarkupArms } from "../implied-lift-desugar.ts";
 import { collectDerivedVarNames } from "./reactive-deps.ts";
 import { sourceHasMdElement } from "../md-lower.ts";
+import { readShorthandBody, readBareArmBody, matchArmKey } from "../arm-body-reader.ts";
 
 // Derived-cell name set is file-invariant; memoize per fileAST so resolveOnExpr
 // (called 2–3× per match block) does not re-walk the whole AST each time.
@@ -735,47 +736,11 @@ function buildMatchArms(
     };
   };
 
-  // M6.3 (M6 Wave 1, S122) — bare-body arm re-parse routes through
-  // `nativeParseFile`, the C1 drop-in analogue of `buildAST` (returns
-  // `{ filePath, ast: FileAST, errors }` with identical `ast.nodes` shape).
-  // Pre-M6.3 this site lazy-required `splitBlocks` + `buildAST` (one of the
-  // 5 hard-bound BS synthesis re-invocations per the M6 cutover plan); the
-  // arm's bodyRaw is markup-shape (nested tags, text, `${...}` interp,
-  // event handlers — all consumed downstream by `generateHtml`), squarely
-  // within `nativeParseFile`'s remit. The synth filePath label
-  // `<match:${matchBlock.id}:${tag}>` is opaque (span-attribution only).
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { nativeParseFile } = require("../../native-parser/parse-file.js") as {
-    nativeParseFile: (filePath: string, src: string) => { filePath: string; ast: any; errors: any[] };
-  };
-  // each-in-block-form-match (S153) — when an arm body contains an `<each>`,
-  // `nativeParseFile` produces a generic `markup` node (tag "each"), NOT the
-  // `each-block` AST node that emit-each + generateHtml's each-block branch
-  // require: the each-block transform lives in `buildAST` (ast-builder.js), not
-  // in the native parser. The legacy BS+TAB path DOES apply that transform, so
-  // for each-bearing arm bodies we re-parse via splitBlocks+buildAST (this is
-  // exactly the pre-M6.3 synthesis route, scoped to the each case). Without it
-  // the each renders as a LITERAL `<each>` string and its `${@.name}` lowers to
-  // an unscoped logic binding → `el.textContent = .name;` (invalid JS,
-  // E-CODEGEN-INVALID-LOGIC).
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { splitBlocks } = require("../block-splitter.js") as {
-    splitBlocks: (filePath: string, src: string) => any;
-  };
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { buildAST, attachHandlerStatementListsInTree } = require("../ast-builder.js") as {
-    buildAST: (bsOutput: any) => { filePath: string; ast: any; errors: any[] };
-    attachHandlerStatementListsInTree: (nodes: any[], filePath: string) => void;
-  };
-  // S108 Phase 4 — `:`-shorthand body codegen uses parseExprToNode directly
-  // to treat the bodyRaw as an expression (not as markup). The synthesized
-  // logic-node + bare-expr shape routes through generateHtml's existing
-  // interpolation path → either folds inline (constants) or emits placeholder
-  // + reactive binding (cells / non-constants).
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { parseExprToNode } = require("../expression-parser.ts") as {
-    parseExprToNode: (raw: string, filePath: string, offset: number, opts?: { tildeActive?: boolean }) => any;
-  };
+  // Arm bodies are parsed by arm-body-reader.ts (S469): the native parser for a bare body
+  // (M6.3), splitBlocks+buildAST for an `<each>`- / `<md>`-bearing one (S153 — the
+  // each-block transform lives in buildAST), an expression parse for a `:`-shorthand value
+  // (S108 Phase 4) — ONCE per arm, cached on the match block, the parse the type system's
+  // failable walk read.
 
   const result = parseMatchArms(matchBlock.armsRaw);
   const variantFields = resolveVariantFields(matchBlock.forType, fileAST);
@@ -798,7 +763,9 @@ function buildMatchArms(
       ? _armCellResolution.variantSubscribeName
       : null;
 
-  for (const entry of result.arms) {
+  for (const [armIndex, entry] of result.arms.entries()) {
+    // S469 — the key this arm's ONE body parse is cached under (arm-body-reader.ts).
+    const armKey = matchArmKey(armIndex, entry.variantName);
     // Wildcard arm `<_>` — S109 Match block-form Phase 5: explicit render.
     // Pre-S109 the wildcard was SKIPPED in codegen (the helper's
     // no-default-branch semantic left the mount slot unchanged for
@@ -912,115 +879,32 @@ function buildMatchArms(
     if (consumedExpandedArmBody) {
       // body already set from the expanded armBodyChildren wrapper.
     } else if (entry.bodyForm === "shorthand" && entry.bodyRaw && entry.bodyRaw.trim().length > 0) {
-      const trimmed = entry.bodyRaw.trim();
-      // S138 Bug 53 — markup-as-value `:`-shorthand body (e.g., `<Idle> : <p>Idle</p>`)
-      // routes through the bare-body markup parser instead of parseExprToNode.
-      // parseExprToNode treats markup tokens (`<p>`, `</p>`) as JS-expression
-      // input — acorn rejects them, the EscapeHatchExpr falls through to
-      // emitEscapeHatch's verbatim emit, and `generateHtml > bare-expr`
-      // ultimately produces `el.textContent = <p>Idle</p>;` — invalid JS.
-      // SPEC §4.18 / §1.4 markup-as-value pillar says markup is a first-class
-      // value; the `:`-shorthand body's single-expression discipline admits
-      // markup as one of those values. Detection: trimmed body starts with
-      // `<` followed by a tag-name char (letter / `_`) — distinguishes from
-      // less-than comparison (which has `<` followed by space / digit /
-      // identifier-starting-with-`@`).
-      const looksLikeMarkupStart = /^<[A-Za-z_]/.test(trimmed);
-      if (looksLikeMarkupStart) {
-        // Route through bare-body markup parser. Same shape as the bare-body
-        // arm-body branch below.
-        try {
-          const synthLabel = `<match:${matchBlock.id}:${tag}>`;
-          // `<md>` (SPEC §67): the native parser has no `<md>` production — live route.
-          const synthResult = sourceHasMdElement(trimmed)
-            ? buildAST(splitBlocks(synthLabel, trimmed))
-            : nativeParseFile(synthLabel, trimmed);
-          if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
-            body = synthResult.ast.nodes;
-          }
-        } catch (_e) {
-          // Defensive — leave body empty on parse failure.
-        }
-      } else if (displayTextLiteralInner(trimmed) !== null) {
-        // g-shorthand-interp-match-arm-codegen (S196 Bucket 4) — a §4.18.3
-        // display-text literal (`"Failed: ${reason}"`). Route its INNER content
-        // through the SAME free-text fragment lowering the bare-body form uses,
-        // so literal segments HTML-escape (§4.18.6) and `${...}` interpolations
-        // wire (§4.18.4) — byte-equivalent to the bare-body `<Variant ...>...</>`
-        // form. (Pre-fix parseExprToNode parsed it as a plain JS string literal
-        // and emitted `return "Failed: ${reason}"` literally — silent wrong output.)
-        const inner = displayTextLiteralInner(trimmed) as string;
-        try {
-          const synthLabel = `<match:${matchBlock.id}:${tag}>`;
-          const synthResult = nativeParseFile(synthLabel, inner);
-          if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
-            body = synthResult.ast.nodes;
-          }
-        } catch (_e) {
-          // Defensive — leave body empty on parse failure.
-        }
-      } else {
-        try {
-          const filePath = (fileAST?.filePath as string | undefined) ?? `<match:${matchBlock.id}:${tag}>`;
-          const exprNode = parseExprToNode(entry.bodyRaw, filePath, 0);
-          // Synthesize `logic` > `bare-expr` AST node so generateHtml's
-          // existing interpolation handling fires unchanged.
-          const span = matchBlock.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-          body = [{
-            kind: "logic",
-            body: [{
-              kind: "bare-expr",
-              exprNode,
-              expr: entry.bodyRaw.trim(),
-              span,
-            }],
-            span,
-          }];
-        } catch (_e) {
-          // Defensive — leave body empty on parse failure; SYM PASS 20 surfaces
-          // an explicit diagnostic at adopter side.
-        }
-      }
+      // S138 Bug 53 / S196 Bucket 4 / S108 Phase 4 — a markup value, a §4.18.3 display-text
+      // literal, or a value expression. S469 (SECURITY) — parsed ONCE by `readShorthandBody`
+      // (arm-body-reader.ts), cached on the match block: the type system's failable walk
+      // (`checkRawArmBodies`) read these same nodes, so the stamps it left are emitted.
+      const filePath = (fileAST?.filePath as string | undefined) ?? `<match:${matchBlock.id}:${tag}>`;
+      const span = matchBlock.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+      body = readShorthandBody(matchBlock as object, armKey, entry.bodyRaw, `<match:${matchBlock.id}:${tag}>`, filePath, span, entry.bodyRaw);
     } else if (entry.bodyForm !== "self-closing" && entry.bodyRaw && entry.bodyRaw.trim().length > 0) {
-      // bare-body: re-parse as markup fragment (Phase 3 path).
-      // M6.3 — native-parser route (see import above for rationale).
+      // bare-body: re-parse as markup fragment (Phase 3 path; M6.3 native-parser route;
+      // S153 each-in-block-form-match and `<md>` take splitBlocks+buildAST). S469 (SECURITY) —
+      // parsed ONCE by `readBareArmBody` (arm-body-reader.ts), cached on the match block, with
+      // the handler statement lists attached before the type system's failable walk reads it.
       try {
-        const synthSrc = entry.bodyRaw;
         const synthLabel = `<match:${matchBlock.id}:${tag}>`;
-        // each-in-block-form-match (S153) — when the arm body contains an
-        // `<each>`, route through splitBlocks+buildAST so the each-block
-        // transform runs (nativeParseFile yields a generic markup tag="each"
-        // that generateHtml renders as literal text + leaks `${@.}`). Cheap
-        // pre-check on the raw text gates the heavier re-parse to the each case
-        // only — every other arm body keeps the M6.3 native-parser route.
-        // `<md>` (SPEC §67) takes the same live route: the native parser has no `<md>` production.
-        if (/<\s*each\b/.test(synthSrc) || sourceHasMdElement(synthSrc)) {
-          const bsOutput = splitBlocks(synthLabel, synthSrc);
-          const tabResult = buildAST(bsOutput);
-          const tabNodes = tabResult?.ast?.nodes;
-          if (Array.isArray(tabNodes)) {
-            // Re-stamp each-block ids (and any nested each-block ids) to a
-            // globally-unique namespace derived from the match-block id + arm
-            // tag, so the `each_<id>` mount-attr / render-fn name cannot collide
-            // with a file-level each-block. `restampEachBlockIds` mutates in
-            // place and returns the each-blocks it found (for fileAST
-            // attachment). The bare match.id alone is not enough — multiple
-            // arms could each hold an each, so we mix in a per-arm offset.
-            const found = restampEachBlockIds(tabNodes, matchBlock.id, tag);
-            collectedEachBlocks.push(...found);
-            body = tabNodes;
-          }
-        } else {
-          const synthResult = nativeParseFile(synthLabel, synthSrc);
-          if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
-            body = synthResult.ast.nodes;
-            // S437 — the native re-parse does not produce the §5.2.3 handler
-            // statement lists (`value.handlerBlock`) the TAB copy of this arm
-            // carried; attach them with the SAME function-body statement parser
-            // so a multi-statement handler in a match arm lowers every statement.
-            attachHandlerStatementListsInTree(body, synthLabel);
-          }
+        const read = readBareArmBody(matchBlock as object, armKey, entry.bodyRaw, synthLabel);
+        if (read.viaTab) {
+          // Re-stamp each-block ids (and any nested each-block ids) to a
+          // globally-unique namespace derived from the match-block id + arm
+          // tag, so the `each_<id>` mount-attr / render-fn name cannot collide
+          // with a file-level each-block. `restampEachBlockIds` mutates in
+          // place and returns the each-blocks it found (for fileAST
+          // attachment).
+          const found = restampEachBlockIds(read.nodes, matchBlock.id, tag);
+          collectedEachBlocks.push(...found);
         }
+        body = read.nodes;
       } catch (_e) {
         // Defensive: same recovery shape as the shorthand path.
       }
