@@ -15,8 +15,8 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, existsSync, rmSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, existsSync, rmSync, symlinkSync } from "node:fs";
+import { join, dirname, delimiter } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -49,6 +49,8 @@ function ledger(entries, table) {
   return draft.replace("__T__", t);
 }
 const tableOf = (text) => text.slice(text.indexOf(START) + START.length + 1, text.indexOf(END) - 1);
+/** LF → CRLF: what a Windows clone's CRLF blobs / CRLF checkout look like. */
+const crlf = (s) => s.replace(/\r?\n/g, "\r\n");
 
 const BASE_ENTRIES = [
   { id: "g-a", sev: "HIGH" },
@@ -155,6 +157,20 @@ describe("UNION of same-spot gap-entry additions (S469)", () => {
     expect(r.selfCheck).toEqual({ dropped: [], duplicated: [], ambiguous: [] });
     // the ledger stays well-formed: each union'd entry is its own block, separated by a blank line
     expect(r.text).toMatch(/status=open -->\n\n### g-tail-theirs/);
+  });
+
+  test("BITE (Windows, CRLF blobs): a CRLF ledger still unions, and the table keeps the file's CRLF", () => {
+    // A clone with `core.autocrlf=false` and a CRLF editor commits CRLF blobs, and the driver gets
+    // CRLF inputs. Pre-fix: the union never fired (git emits `<<<…\r` marker lines, the exact match
+    // missed them → a conflict), and in a clean merge the regenerated table was spliced in LF-only.
+    const r = mergeGenerated(crlf(o), crlf(a), crlf(b), "docs/known-gaps.md");
+    expect(r.conflicts).toBe(0);
+    expect(r.unioned).toBe(1);
+    expect(r.text).not.toMatch(/(^|[^\r])\n/); // every line break CRLF — none mixed in
+    const lf = r.text.replace(/\r\n/g, "\n");
+    expect(lf).toBe(mergeGenerated(o, a, b, "docs/known-gaps.md").text); // same merge as the LF ledger
+    expect(tableOf(lf)).toBe(gapCountsSection(lf));
+    expect(r.selfCheck).toEqual({ dropped: [], duplicated: [], ambiguous: [] });
   });
 
   test("BITE: the SAME id filed on both sides is NOT unioned (a real conflict)", () => {
@@ -320,6 +336,17 @@ describe("cross-file sections — one-sided change taken; a TWO-sided change STO
     expect(stripRegenBlock(blocked + `${OPEN} x\na\n${"=".repeat(7)}\nb\n${CLOSE} y\n`)).toBeNull();
   });
 
+  test("BITE (Windows checkout, CRLF): the regen block still strips, and a CRLF conflict marker is still refused", () => {
+    // `core.autocrlf=true` checks the stopped file out CRLF; `--regen` reads that worktree copy.
+    const body = crlf(facts("0.8.0", "1,754"));
+    const blocked = crlf(regenBlock(7, ["facts-table"])) + body;
+    expect(stripRegenBlock(blocked)).toBe(body); // pre-fix: null — `=======\r` failed the block match
+    // pre-fix (with the block match fixed alone): `$` does not match before `\r`, so this real
+    // conflict was taken for a pure regen stop and handed to the producers
+    expect(stripRegenBlock(blocked + crlf(`${OPEN} x\na\n${"=".repeat(7)}\nb\n${CLOSE} y\n`))).toBeNull();
+    expect(stripRegenBlock(blocked + crlf(`a\n${"=".repeat(7)}\nb\n`))).toBeNull();
+  });
+
   test("a section only ONE side changed takes that side's value — no stop", () => {
     const o = facts("0.8.0", "1,750"), a = facts("0.8.0", "1,750").replace("more prose", "more prose, ours"), b = facts("0.8.0", "1,751");
     const r = mergeGenerated(o, a, b, "docs/FACTS.md");
@@ -375,12 +402,33 @@ describe("end to end through `git merge`, with the config the installer ships", 
   // opt-out set (so the REAL clone's config is left alone) must still exercise the installer here.
   const cleanEnv = () =>
     Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_") && k !== "SCRML_SKIP_MERGE_DRIVER_INSTALL"));
-  const sh = (cwd, cmd, args, env) => spawnSync(cmd, args, { cwd, encoding: "utf8", env: { ...cleanEnv(), ...env } });
+  // Windows env names are case-insensitive and the variable is usually spelled `Path`: an override
+  // must REPLACE it, not sit beside it as a second `PATH` (which one a child then sees is unspecified).
+  const isPathKey = (k) => k.toUpperCase() === "PATH";
+  const sh = (cwd, cmd, args, env = {}) => {
+    const base = cleanEnv();
+    if (Object.keys(env).some(isPathKey)) for (const k of Object.keys(base)) if (isPathKey(k)) delete base[k];
+    return spawnSync(cmd, args, { cwd, encoding: "utf8", env: { ...base, ...env } });
+  };
+  // Every test here spawns a dozen-plus git processes plus the driver; Windows process creation
+  // makes that several seconds (S469: 1.7–5.4 s on the runner) — past bun's 5 s default.
+  const E2E_TIMEOUT = 60_000;
+  /**
+   * This process's PATH with every directory that holds a bun executable removed — a contributor
+   * without bun, everything else (git, sh, coreutils) intact. Built from the REAL PATH with the
+   * platform's own delimiter (`;` on Windows) and executable names (`bun.exe`): the first cut joined
+   * POSIX dirs with `:`, which on Windows is one nonexistent entry, so the merge never reached the
+   * wrapper and the test failed on ours' untouched file.
+   */
+  const pathWithoutBun = () => {
+    const raw = Object.entries(process.env).find(([k]) => isPathKey(k))?.[1] ?? "";
+    return raw.split(delimiter).filter((d) => d && !["bun", "bun.exe", "bun.cmd"].some((f) => existsSync(join(d, f)))).join(delimiter);
+  };
   const ID = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
   const SCRIPTS = ["git-merge-generated.ts", "git-merge-generated.sh", "state.ts"];
 
   /** A throwaway repo. `scripts`: copy the driver into the checkout (gitignored, so it is in ours' tree). */
-  function repo(scripts, { attrs = true } = {}) {
+  function repo(scripts, { attrs = true, autocrlf } = {}) {
     const root = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "scrml-mgd-test-"));
     const g = (...args) => {
       const r = sh(root, "git", args, ID);
@@ -390,6 +438,7 @@ describe("end to end through `git merge`, with the config the installer ships", 
     g("init", "-q", "-b", "main");
     g("config", "core.hooksPath", "/dev/null");
     g("config", "rerere.enabled", "false");
+    if (autocrlf !== undefined) g("config", "core.autocrlf", autocrlf);
     const cfg = sh(root, "bash", [join(REPO, "scripts/install-merge-driver.sh"), "--quiet"]);
     expect(cfg.status).toBe(0);
     if (scripts) {
@@ -409,7 +458,12 @@ describe("end to end through `git merge`, with the config the installer ships", 
     g("commit", "-qam", "ours");
     return { root, g };
   }
-  const kg = (root) => readFileSync(join(root, "docs/known-gaps.md"), "utf8");
+  // The WORKTREE copy, line endings normalised: these temp repos inherit the machine's git config,
+  // and on a Windows clone (the runner included) `core.autocrlf=true` checks the merged file out
+  // CRLF — the S469 windows failure was `tableOf` slicing `\r` into the table, not a wrong merge. The
+  // CRLF behaviour itself is pinned by the explicit `core.autocrlf=true` test below.
+  const kgRaw = (root) => readFileSync(join(root, "docs/known-gaps.md"), "utf8");
+  const kg = (root) => kgRaw(root).replace(/\r\n/g, "\n");
   const done = (root) => rmSync(root, { recursive: true, force: true });
 
   test("with the driver: the merge commits cleanly, both entries present, table exact", () => {
@@ -426,7 +480,52 @@ describe("end to end through `git merge`, with the config the installer ships", 
       expect(tableOf(text)).toContain("| MED | 1 | 0 |");
       expect(existsSync(join(root, ".git/MERGE_HEAD"))).toBe(false);
     } finally { done(root); }
-  });
+  }, E2E_TIMEOUT);
+
+  test("Windows checkout (core.autocrlf=true): worktree CRLF, committed blob LF, table exact — on any OS", () => {
+    // What every Windows clone (and the windows CI runner) does by default. git hands the driver the
+    // LF blobs and converts only on checkout, so the merge itself is the LF one; this pins that the
+    // CRLF checkout is not mistaken for a wrong merge, and that no CR reaches the committed blob.
+    const { root, g } = repo(true, { autocrlf: "true" });
+    try {
+      const r = g("merge", "--no-edit", "side");
+      expect(r.status).toBe(0);
+      expect(kgRaw(root)).toContain("\r\n"); // the condition that broke the S469 table assertions
+      expect(kgRaw(root)).not.toMatch(/(^|[^\r])\n/);
+      const blob = g("show", "HEAD:docs/known-gaps.md").stdout;
+      expect(blob).not.toContain("\r");
+      expect(blob).toContain("g-new-ours");
+      expect(blob).toContain("g-new-theirs");
+      expect(tableOf(blob)).toBe(gapCountsSection(blob));
+      expect(tableOf(blob)).toContain("| HIGH | 3 | 0 |");
+      expect(kg(root)).toBe(blob);
+    } finally { done(root); }
+  }, E2E_TIMEOUT);
+
+  // POSIX only: the condition is built from per-binary symlinks (Windows needs a privilege for those,
+  // and Git for Windows ships cp in the same usr\bin as sh, so it cannot be removed alone there). The
+  // code path under test is the same shell script on every platform.
+  test.skipIf(process.platform === "win32")("BITE: a PATH holding ONLY git (no sh, no cp, no bun) → still git's 3-way with markers, never pure ours", () => {
+    const { root, g } = repo(true);
+    const bin = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "scrml-mgd-bin-"));
+    try {
+      symlinkSync(spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim(), join(bin, "git"));
+      for (const tool of ["sh", "cp", "bun"]) {
+        expect(spawnSync("/bin/sh", ["-c", `command -v ${tool}`], { env: { PATH: bin } }).status).not.toBe(0);
+      }
+      const r = sh(root, "git", ["merge", "--no-edit", "side"], { ...ID, PATH: bin });
+      expect(r.status).not.toBe(0);
+      // pre-fix: the configured command's own `sh -c` / `exec sh` lookups failed ("sh: command not
+      // found", exit 127) and git kept PURE OURS, no markers; with sh found, `cp … || exit 1` did the same
+      expect(r.stderr).not.toContain("sh: command not found");
+      expect(r.stderr).toContain("could not copy");
+      const text = kg(root);
+      expect(text).toContain(OPEN);
+      expect(text).toContain("g-new-ours");
+      expect(text).toContain("g-new-theirs");
+      expect(g("ls-files", "-u").stdout).toContain("docs/known-gaps.md");
+    } finally { done(root); done(bin); }
+  }, E2E_TIMEOUT);
 
   test("UNION end to end: two branches each append an entry at the tail → auto-merged, both kept, counts exact", () => {
     const { root, g } = repo(true);
@@ -446,7 +545,7 @@ describe("end to end through `git merge`, with the config the installer ships", 
       expect(tableOf(text)).toBe(gapCountsSection(text));
       expect(tableOf(text)).toContain("| HIGH | 3 | 0 |");
     } finally { done(root); }
-  });
+  }, E2E_TIMEOUT);
 
   test("BITE (S469 review #1): the driver CRASHES at import → markers + BOTH sides on the page, never pure ours", () => {
     const { root, g } = repo(true);
@@ -464,21 +563,24 @@ describe("end to end through `git merge`, with the config the installer ships", 
       expect(g("ls-files", "-u").stdout).toContain("docs/known-gaps.md");
       expect(existsSync(join(root, "docs/known-gaps.md.scrml-ours"))).toBe(false); // no litter
     } finally { done(root); }
-  });
+  }, E2E_TIMEOUT);
 
   test("BITE (S469 review #1): no bun on PATH → the same fail-closed plain 3-way with markers", () => {
     const { root, g } = repo(true);
     try {
-      const gitDir = dirname(spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim());
-      const PATH = [gitDir, "/usr/bin", "/bin"].filter((d) => !existsSync(join(d, "bun"))).join(":");
+      const PATH = pathWithoutBun();
+      // the simulation's own precondition, so a broken simulation fails HERE, by name
+      expect(sh(root, "sh", ["-c", "command -v bun"], { PATH }).status).not.toBe(0);
+      expect(sh(root, "git", ["--version"], { PATH }).status).toBe(0);
       const r = sh(root, "git", ["merge", "--no-edit", "side"], { ...ID, PATH });
+      expect(r.stderr).toContain("DRIVER UNAVAILABLE");
       expect(r.status).not.toBe(0);
       const text = kg(root);
       expect(text).toContain("DRIVER UNAVAILABLE");
       expect(text).toContain("g-new-theirs");
       expect(g("ls-files", "-u").stdout).toContain("docs/known-gaps.md");
     } finally { done(root); }
-  });
+  }, E2E_TIMEOUT);
 
   test("BITE (S469 review #4): a branch WITHOUT the driver scripts gets git's own merge, not any stored copy", () => {
     const { root, g } = repo(false);
@@ -496,7 +598,7 @@ describe("end to end through `git merge`, with the config the installer ships", 
       expect(sh(root, "bash", [join(REPO, "scripts/install-merge-driver.sh"), "--quiet"]).status).toBe(0);
       expect(existsSync(join(root, ".git/scrml-generated-driver"))).toBe(false);
     } finally { done(root); }
-  });
+  }, E2E_TIMEOUT);
 
   test("a branch with no `merge=scrml-generated` attribute never runs the driver, even with it installed", () => {
     const { root, g } = repo(true, { attrs: false });
@@ -504,7 +606,7 @@ describe("end to end through `git merge`, with the config the installer ships", 
       const r = g("merge", "--no-edit", "side");
       expect(r.stderr).not.toContain("scrml-generated-merge");
     } finally { done(root); }
-  });
+  }, E2E_TIMEOUT);
 
   test("BITE (S469 review #7): a pending record does not survive `git merge --abort` into the next merge", () => {
     const { root, g } = repo(true);
@@ -517,7 +619,7 @@ describe("end to end through `git merge`, with the config the installer ships", 
       expect(r.stdout.trim()).toBe("");
       expect(existsSync(join(root, ".git/scrml-generated-pending"))).toBe(false);
     } finally { done(root); }
-  });
+  }, E2E_TIMEOUT);
 
   test("SCRML_SKIP_MERGE_DRIVER_INSTALL leaves the clone untouched", () => {
     const root = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "scrml-mgd-skip-"));
@@ -526,7 +628,7 @@ describe("end to end through `git merge`, with the config the installer ships", 
       expect(sh(root, "bash", [join(REPO, "scripts/install-merge-driver.sh")], { SCRML_SKIP_MERGE_DRIVER_INSTALL: "1" }).status).toBe(0);
       expect(sh(root, "git", ["config", "--get", "merge.scrml-generated.driver"]).status).not.toBe(0);
     } finally { done(root); }
-  });
+  }, E2E_TIMEOUT);
 
   test("install.sh: sets the driver idempotently, removes legacy state; --uninstall removes everything", () => {
     const root = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "scrml-mgd-install-"));
@@ -545,7 +647,9 @@ describe("end to end through `git merge`, with the config the installer ships", 
       );
       for (let i = 0; i < 2; i++) expect(sh(root, "bash", ["scripts/git-hooks/install.sh"]).status).toBe(0);
       const drv = sh(root, "git", ["config", "--get", "merge.scrml-generated.driver"]).stdout;
-      expect(drv).toContain("sh scripts/git-merge-generated.sh");
+      expect(drv).toContain("s=/bin/sh;"); // S469 windows: the wrapper is never looked up as `sh` on PATH first
+      expect(drv).toContain("exec \"$s\" scripts/git-merge-generated.sh");
+      expect(drv).not.toContain("sh -c");
       expect(drv).not.toContain("exec bun"); // review #1: exec'ing bun skipped every fallback
       expect(drv).toContain("%O %A %B %P %L %S %X %Y");
       expect(readFileSync(join(root, ".git/info/attributes"), "utf8")).toBe("*.bin binary\n"); // legacy block gone, user line kept
@@ -556,5 +660,5 @@ describe("end to end through `git merge`, with the config the installer ships", 
       expect(un.status).toBe(0);
       expect(sh(root, "git", ["config", "--get-regexp", "^merge\\.scrml-generated\\."]).stdout).toBe("");
     } finally { done(root); }
-  });
+  }, E2E_TIMEOUT);
 });

@@ -365,6 +365,25 @@ export function gitMergeFile(o: string, a: string, b: string, markerSize: number
   }
 }
 
+/**
+ * True when every line break in `s` is CRLF (and there is at least one). Such input arrives when the
+ * BLOBS themselves are CRLF: a Windows clone with `core.autocrlf=false` and a CRLF editor (hand-off.md
+ * was committed that way once, S436). The common Windows case — `core.autocrlf=true` — hands the
+ * driver LF blobs and converts only on checkout, so it never takes this path.
+ */
+export function isCrlf(s: string): boolean {
+  return s.includes("\r\n") && !/(^|[^\r])\n/.test(s);
+}
+const toLf = (s: string) => s.replace(/\r\n/g, "\n");
+const toCrlf = (s: string) => s.replace(/\r?\n/g, "\r\n");
+
+/**
+ * The merge, line-ending-agnostic. When OURS is all-CRLF, all three inputs are merged as LF and the
+ * result is put back to CRLF. Without this, a CRLF ledger got an LF-only regenerated table spliced
+ * into it (mixed endings), and the union rule never fired: `git merge-file` emits CRLF marker lines
+ * for CRLF input, which the exact-line marker match does not accept — a same-spot addition then
+ * stayed a conflict (safe, but the feature was dead on a CRLF ledger).
+ */
 export function mergeGenerated(
   o: string,
   a: string,
@@ -372,6 +391,19 @@ export function mergeGenerated(
   path: string,
   markerSize = 7,
   labels: Labels = { ours: "ours", base: "base", theirs: "theirs" },
+): MergeResult {
+  if (!isCrlf(a)) return mergeGeneratedLf(o, a, b, path, markerSize, labels);
+  const r = mergeGeneratedLf(toLf(o), toLf(a), toLf(b), path, markerSize, labels);
+  return { ...r, text: toCrlf(r.text) };
+}
+
+function mergeGeneratedLf(
+  o: string,
+  a: string,
+  b: string,
+  path: string,
+  markerSize: number,
+  labels: Labels,
 ): MergeResult {
   const mo = mask(o, path), ma = mask(a, path), mb = mask(b, path);
   const regenerated: string[] = [];
@@ -607,13 +639,20 @@ export function regenBlock(n: number, sections: string[]): string {
 
 /** If `text` starts with a regen block (and holds no OTHER conflict marker), the text without it. */
 export function stripRegenBlock(text: string): string | null {
-  const m = /^(<{7,}) scrml-generated-merge: REGENERATION REQUIRED[^\n]*\n[^\n]*\n(={7,})\n(>{7,}) [^\n]*\n/.exec(text);
+  // CRLF-tolerant: on a Windows clone (`core.autocrlf=true`) the stopped file is checked out CRLF, so
+  // the block's lines end `\r\n`. Before S469-windows the `=======` line failed to match there (so
+  // `--regen` refused a genuine stop), and — worse — `$` in multiline mode does not match before `\r`,
+  // so a REAL `=======\r` conflict marker in the rest of the file went unseen.
+  const m = /^(<{7,}) scrml-generated-merge: REGENERATION REQUIRED[^\n]*\n[^\n]*\n(={7,})\r?\n(>{7,}) [^\n]*\n/.exec(text);
   if (!m || m[1].length !== m[2].length || m[1].length !== m[3].length) return null;
   const rest = text.slice(m[0].length);
   const n = m[1].length;
-  const marker = new RegExp(`^(${"<".repeat(n)}|${"=".repeat(n)}|${">".repeat(n)})( |$)`, "m");
+  const marker = new RegExp(`^(${"<".repeat(n)}|${"=".repeat(n)}|${">".repeat(n)})( |\\r?$)`, "m");
   return marker.test(rest) ? null : rest;
 }
+
+/** A marker block in the line ending of the text it sits on top of. */
+const inEolOf = (block: string, text: string) => (isCrlf(text) ? toCrlf(block) : block);
 
 function label(s: string | undefined, dflt: string): string {
   return !s || s.startsWith("%") ? dflt : s;
@@ -634,7 +673,7 @@ function runDriver(argv: string[]): number {
   try {
     r = mergeGenerated(o, a, b, path, markerSize, labels);
   } catch (e) {
-    writeFileSync(pA, failBlock(markerSize, `INTERNAL ERROR: ${String((e as Error)?.message ?? e).split("\n")[0]}`) + plainOr());
+    writeFileSync(pA, inEolOf(failBlock(markerSize, `INTERNAL ERROR: ${String((e as Error)?.message ?? e).split("\n")[0]}`), a) + plainOr());
     console.error(`${tag}: INTERNAL ERROR — fell back to git's plain 3-way merge; resolve by hand.\n${(e as Error)?.stack ?? e}`);
     return done(1);
   }
@@ -645,7 +684,7 @@ function runDriver(argv: string[]): number {
       sc.duplicated.length ? `gap ids DUPLICATED: ${sc.duplicated.join(", ")}` : "",
       sc.ambiguous.length ? `gap ids whose count BOTH sides changed: ${sc.ambiguous.join(", ")}` : "",
     ].filter(Boolean).join("; ");
-    writeFileSync(pA, failBlock(markerSize, `GAP-ID SELF-CHECK FAILED — ${why}`) + plainOr());
+    writeFileSync(pA, inEolOf(failBlock(markerSize, `GAP-ID SELF-CHECK FAILED — ${why}`), a) + plainOr());
     console.error(`${tag}: GAP-ID SELF-CHECK FAILED — ${why}. The merge would have lost or double-filed a ledger entry; refusing it.`);
     return done(1);
   }
@@ -661,7 +700,7 @@ function runDriver(argv: string[]): number {
     return done(1);
   }
   if (r.needsRegen.length > 0) {
-    writeFileSync(pA, regenBlock(markerSize, r.needsRegen) + r.text);
+    writeFileSync(pA, inEolOf(regenBlock(markerSize, r.needsRegen), r.text) + r.text);
     addPending(path);
     console.error(`${tag}: both sides changed derived content (${r.needsRegen.join(", ")}) — left CONFLICTED; run \`bun scripts/git-merge-generated.ts --regen\` to derive it from the merged tree.${bits ? " " + bits : ""}`);
     return done(1);
@@ -719,7 +758,7 @@ function runRegen(all: boolean): number {
   // A regeneration stop is staged only once its producer succeeded; otherwise the block goes back.
   for (const [p, text] of blocked) {
     if (remaining.has(p)) {
-      writeFileSync(join(root, p), regenBlock(7, ["(regeneration failed — see above)"]) + text);
+      writeFileSync(join(root, p), inEolOf(regenBlock(7, ["(regeneration failed — see above)"]), text) + text);
     } else {
       git(["add", "--", p], root);
       console.log(`--regen: staged ${p} (regenerated from the merged tree)`);
