@@ -146,6 +146,67 @@ Never fail-open: the runtime check is authoritative in both directions; the nati
 
 Without a §34 row, `E-TAPE-JS-METHOD` resolves fail-closed to Error (correct). `W-STRING-INTERP-LITERAL` takes Warning from the generator's PROVISIONAL table; once a §34 row lands the row decides, and the generator throws if they disagree (remove the entry then). The §66.20 row's "the bootstrap's method allowlist still uses the JS names and is owed the rename" is now stale (renamed in s469-boot-strings-1), as is the README item 4 (`@audit.push` → `@audit.append`).
 
+### g-nested-each-if-guard-dropped-s469 — (security) the `if=` on an `<each>` nested inside another `<each>`'s row was silently dropped: `<each in=@xs as y><each in=@xs as x if=(@pw == "secret")>LOGGED IN</each></each>` rendered LOGGED IN with `@pw = "wrong"`, and so did the handled-failable guard `if=${ @pw != "" && (check(@pw) !{ _ :> false }) }` — `NEW S469; HIGH; RESOLVED S469`
+
+<!-- @gap id=g-nested-each-if-guard-dropped-s469 sev=HIGH status=resolved locus=compiler/src/codegen/emit-each.ts(renderTemplateChildToJs each-block branch never read innerNode.ifCond; now lowerRowScopedEachIfGate + emitRowScopedEachIfGateLines)+compiler/src/codegen/if-gate-condition.ts(the one if= condition lowering, moved out of emitEventWiring) prov=spec:§17.1.2("`<each>` … the whole iterated list, including `<empty>`");spec:§17.1.2.1("the iterated collection is not read and no rows are reconciled while `expr` is false");review:S469(reviewer reading emit-each.ts ~1930-1990);empirical:S469(reproduced on ea871fdfe — 10 of 10 security-failable-pack n18 shapes FAIL) -->
+
+**Cause.** A top-level `<each if=…>` is gated by the §17.1 mount controller (emit-html `emitGatedStructural` → a
+`<template>` + marker and a mount/unmount effect wired at boot). A nested `<each>` has no static HTML — the outer row
+factory builds it at run time — and its branch (`renderTemplateChildToJs`, `child.kind === "each-block"`) read the
+iteration source, `as`, `key=` and `<empty>` but never `ifCond`. Silent: no diagnostic, and DG credited the cell. The
+lifted-markup twin (`eachBlockFromMarkupNode`) dropped it too ([[g-lifted-each-if-attribute-silently-ignored]]).
+
+**Fix** (branch `s469-nested-each-if`). The gate is the inner list's own effect: false → clear the inner mount and
+return before the collection is read (no rows, no `<empty>`); the effect read the condition, so it re-runs on every
+change, both ways. The condition is lowered by `lowerMountToggleCondition` — the top-level mount controller's
+function, moved with `computeDisplayToggleCondition` into `if-gate-condition.ts` and parameterised on its file inputs
+(derived names, synth-cell keys, encoding, request ids) — from `ifGateConditionFields`, the mapping `pushIfGuard` and
+the mount registration now share. The only row-specific step is scope: `@.` names the enclosing row's item, a row
+alias (`y`, `y.ok`) is an identifier rather than a cell, and an outer-outer row the guard reads is re-resolved live
+(the S294 prelude). An `if=` value the gate cannot lower is refused (E-CG-003) and emitted as `false`. The inner-list
+effect now passes the R7-1 render-gate flag, as its Tier-0 sibling and the top-level render fn already did.
+
+**Opener-attribute audit of the nested branch** (vs the top-level `emitEachBodyRenderForFile` + `emitGatedStructural`):
+`in=` / `of=` / `as` / `as (k, v)` / `key=` / `<empty>` were already handled (shared `emitEachReconcileLines`);
+`if=` was DROPPED (fixed). `in=` was handled DIFFERENTLY (fixed): the nested branch took the row-scope text
+lowering, not the top level's map/set-aware one, so `in=@m.entries()` threw (`.entries is not a function` on the
+value-native map) and a bare set `in=@s` iterated the map object instead of its elements; and a lifted `<each>`'s
+`in=items()` / `in=@m.entries()` lost its call (`eachAttrRawText` read a `call-ref`'s callee name only) and iterated the
+function itself. `else` / `else-if=` / `show=` are not honoured on a structural `<each>` at ANY position
+([[g-structural-element-if-chain-and-show-composition-nominal]] — the nested branch matches the top level there);
+transitions are not captured on the structural openers at all.
+
+Corpus (`scripts/corpus-emit-differential.ts`, samples / examples / compiler/tests/fixtures / stdlib / conformance,
+base = archive of `ea871fdfe`, head = archive of `1e3ee8f4b`): 2893 sources on both sides, 0 newly failing, 0 diagnostic
+changes, 8754 artifacts compared — 8581 byte-identical, 171 server bundles differing ONLY in the embedded project-root
+path (verified by normalising it), and 2 client bundles (`examples/25-triage-board`, `conformance/cases/each/nested`)
+whose one change is the nested list effect's render-gate flag (`}));` → `}, true));`). No corpus source has a nested
+`<each if=…>` or a nested map / set / call `in=`. Full `compiler/tests/browser` per-test JUnit compare, same archives:
+0 tests changed outcome (the 48 failures are identical on both sides), +21 new, all passing (20 of them fail on base). Pins: `compiler/tests/unit/nested-each-if-guard-s469.test.js`,
+`compiler/tests/browser/nested-each-if-guard-s469.browser.test.js`, security-failable-pack `n18` (10 shapes: FAIL on
+base, PASS after).
+
+### g-structural-if-failable-call-unchecked-s469 — (security) a `!` call in the `if=` of a STRUCTURAL element (`<each>` / `<match>` / `<engine>`) is never E-ERROR-002, and a `match` on one is not discriminated: `<each in=@xs as x if=check(@pw)>LOGGED IN</each>` logs in on a WRONG password — `NEW S469; HIGH; open`
+
+<!-- @gap id=g-structural-if-failable-call-unchecked-s469 sev=HIGH status=open locus=compiler/src/type-system.ts(checkFailableCallsInAttrValues reads only `n.attrs`; a structural element carries its `if=` as `ifCond` — visitStructuralIfAttr routes it to visitAttr for scope checks but not to the failable-call / match-stamp checks) prov=empirical:S469(found during s469-nested-each-if; executed through the security-failable-pack harness on ea871fdfe AND on the fix branch — identical) -->
+
+Found while adding the nested-`<each if=>` shapes to the pack. NOT the dropped-guard defect: the guard is applied; what
+it evaluates is wrong. Measured (wrong password → `#out`), identical on `ea871fdfe` and on `s469-nested-each-if`:
+
+| `if=` value | `<p if=…>` (markup) | `<each if=…>` | `<match if=…>` | `<engine if=…>` | nested `<each if=…>` |
+|---|---|---|---|---|---|
+| `check(@pw)` | PASS-REFUSED (E-ERROR-002) | **FAIL** | **FAIL** | **FAIL** | **FAIL** |
+| `${check(@pw)}` | PASS-REFUSED (E-ERROR-002) | **FAIL** | — | — | **FAIL** |
+| `${ match check(@pw) { .Denied :> false  _ :> true } }` | PASS | **FAIL** | **FAIL** | — | **FAIL** |
+
+The error object is truthy, so an unhandled call opens the gate; the `match` compares it as a plain value
+(`=== "Denied"`), the S468 class. Cause: `checkFailableCallsInAttrValues` (type-system.ts) walks `n.attrs`, and the
+three structural nodes have no `attrs` — their `if=` lives on the node as `ifCond`. `visitStructuralIfAttr` already
+routes `ifCond` through `visitAttr` (scope checks); the failable-call check and the match stamp never see it. Fix
+direction: route `ifCond` through the same value-position check the markup `if=` gets (one routing, not a copy). The
+security-failable-pack has no shape for it yet; the probe scripts are in the S469 nested-each-if report. Handled
+forms (`check(@pw) !{ _ :> false }`) are correct in every position.
+
 ### g-value-form-if-for-failable-call-unchecked-s469 — (security) a `!` call reached through a VALUE-FORM `if` / `for` was never E-ERROR-002: `const ok = if (check(p)) { lift true } else { lift false }`, `… { lift check(p) } …`, `const vs = for (x of [p]) { lift check(x) }`, a failable fn LIFTED as a value (`const g = if (c) { lift check } else { lift plain }; g(p)`) compiled, and a WRONG PASSWORD LOGGED IN — `NEW S469 (#1444 re-review); HIGH; RESOLVED S469`
 
 <!-- @gap id=g-value-form-if-for-failable-call-unchecked-s469 sev=HIGH status=resolved locus=compiler/src/failable-value-calls.ts(ifExpr / forExpr / lift-expr never read; decl keys not classified)+compiler/src/type-system.ts(reportUnhandledFailableValueCall) prov=spec:§19.4.3("Failing to handle the result of a `!` function call in any of these ways SHALL be a compile error: E-ERROR-002");review:S468-1444-re-review;dispatch:s469-value-form-if-for-failable -->
@@ -14177,7 +14238,17 @@ reviewer's claim that the branch "cannot commit through the hook" — it can, wh
 problem. The required-check half is mine, found verifying their correction rather than accepting it.
 
 <!-- @gap id=g-structural-if-inside-each-row-template-fails-open sev=MED status=open -->
-### G-STRUCTURAL-IF-INSIDE-EACH-ROW-TEMPLATE-FAILS-OPEN — a gated `<each>`/`<match>` inside an `<each>` row template silently ships the content it was told to withhold — `NEW S302; MED; open`
+### G-STRUCTURAL-IF-INSIDE-EACH-ROW-TEMPLATE-FAILS-OPEN — a gated `<each>`/`<match>` inside an `<each>` row template silently ships the content it was told to withhold — `NEW S302; MED; open (the <each> half RESOLVED S469; the <match> half open)`
+
+⛑ **S469 — the `<each>` half is RESOLVED** by [[g-nested-each-if-guard-dropped-s469]]: `<each … if=…>` inside a row is
+now gated, reactively, both ways. **The `<match … if=…>` half is still OPEN and still fails open** — re-measured on the
+fix branch through the security-failable-pack harness: `<each in=@xs as y><match for=Phase on=@ph if=(@pw == "secret")>…`
+renders its arm with `@pw = "wrong"` (FAIL), while the same `<match if=>` at top level is gated (PASS). The per-row
+match dispatch (emit-each.ts `match-block` branch → emit-variant-guard `itemScopedDispatch`) never reads `ifCond`;
+gating it needs the per-mount teardown the dispatcher owns (its dispose / last-value keys), so it was not folded in.
+The "Fix direction" paragraph below (one diagnostic, do not fix the structural half alone) predates S469: the
+structural half is now honoured rather than diagnosed, which leaves the markup NON-ROOT fail-CLOSED case as the
+diagnostic's remaining job.
 
 Found by the S239 re-review of the `if=`-on-structural-elements landing, which **refuted the
 implementing agent's own parity claim** — that structural behaviour here is *"CONSISTENT with markup,
@@ -17761,8 +17832,14 @@ arm name, so it is re-wired per entry), `show=@cf` does not. The fix is to wire 
 ### g-e-attr-013-not-raised-inside-arm-bodies — `class:on=note` inside a `<match>` arm compiles and reads a CELL named `note`, even with a payload `note` in scope; outside an arm it is E-ATTR-013 + E-SCOPE-001 — `NEW S429-peter; MED; open`
 <!-- @gap id=g-e-attr-013-not-raised-inside-arm-bodies sev=MED status=open locus=compiler/src/ast-builder.js(E-ATTR-013 raise site does not reach arm bodies) prov=review:S429-arm-bindings-review-identical-on-main-and-head -->
 
-### g-lifted-each-if-attribute-silently-ignored — `if=` on an `<each>` inside lifted markup is never read; the list always renders — `NEW S429-peter; MED; open`
-<!-- @gap id=g-lifted-each-if-attribute-silently-ignored sev=HIGH status=open locus=compiler/src/codegen/emit-each.ts(eachBlockFromMarkupNode never reads if=) prov=empirical:S429-each-alias-dev-agent-reported-on-main-085ddbe8-NOT-PA-verified -->
+### g-lifted-each-if-attribute-silently-ignored — `if=` on an `<each>` inside lifted markup is never read; the list always renders — `NEW S429-peter; MED; RESOLVED S469`
+<!-- @gap id=g-lifted-each-if-attribute-silently-ignored sev=HIGH status=resolved locus=compiler/src/codegen/emit-each.ts(eachBlockFromMarkupNode never read if=; now carried as ifCond and gated by lowerRowScopedEachIfGate in emitNestedEachFromMarkup)+compiler/src/attribute-registry.js(`if` missing from the <each> allowlist → the false W-ATTR-001) prov=empirical:S429-each-alias-dev-agent-reported-on-main-085ddbe8-NOT-PA-verified;empirical:S469(reproduced on ea871fdfe — `${ for (r of @rows) { lift <div><each in=r.cells as c if=(@pw == "secret")>LOGGED IN</each></div> } }` renders LOGGED IN with @pw = "wrong");dispatch:s469-nested-each-if -->
+
+**RESOLVED S469** (branch `s469-nested-each-if`, with [[g-nested-each-if-guard-dropped-s469]]): the lifted `<each>`'s `if=`
+is carried as `ifCond` and gated by the same row-scoped gate as a nested `<each>`; `if` is in the `<each>` attribute
+allowlist, so the false `W-ATTR-001` ("no compile-time effect") is gone. Pins:
+`compiler/tests/unit/nested-each-if-guard-s469.test.js`, `compiler/tests/browser/nested-each-if-guard-s469.browser.test.js`,
+the security-failable-pack `n18` lifted-markup shapes.
 
 Reported by the S429 lifted-each dev agent, identical on main; not yet PA-verified. Silent (the author's condition
 is dropped). Also recorded: a three-name `as (a, b, x)` on a lifted `<each>` falls back to the string path and fails
