@@ -46,3 +46,12 @@ the one mechanism `<each>` rows use) instead of a `style.display` toggle. Primar
       server.js, 12 trucking shared-module renumbering, 4 conformance for-lift row-gate self-dispose, 7 lift if=
       (display toggle / token subs -> swap + tracking effect + row self-dispose + bind guard: todomvc, invoices,
       load-detail, odin-filebrowser, 12-snippets-slots, rust-orders), 1 bind guard only (go-contacts).
+
+## Round 3 (review of 060495fe2 — FIX)
+
+- [x] F1 HIGH: body locals read by a lifted gate are snapshot at render (effect scope params); outside a row
+      the condition is also read inline. Browser + pack n23 body-local shapes (568 shapes).
+- [x] F2 MED: filed g-lift-gate-not-released-on-outer-owner-teardown-s469 (needs s469-effect-scope-dispose's
+      owner-scope teardown; measured 2->4->6->8 buckets over arm toggles).
+- [x] filed LOW: top-level bare show, top-level quoted show, lifted disabled=@ok set once, test-isolation
+      TypeError leak; and MED g-while-lift-in-reconciled-row-escapes-the-row-s469 (found writing the tests).
