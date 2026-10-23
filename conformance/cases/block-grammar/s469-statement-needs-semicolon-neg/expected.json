@@ -1,0 +1,21 @@
+{
+  "id": "block-grammar-s469-statement-needs-semicolon-neg",
+  "description": "A statement that is not block-like ends with `;`; a line break does not end it (`const a = n + 1⏎return a;`). The missing `;` is E-STMT-MISSING-SEMICOLON (§7.2.2 rule 1, S469).",
+  "language-version": "1.0",
+  "spec": "§7.2.2",
+  "provenance": "ruling:user-voice-scrml.md S469 \"⭐⭐⭐ RULED — dpa-073 F1 = (a)\" — `;` terminates; newlines carry no grammar · ruling:user-voice-scrml.md S469 \"⭐ RULED — statement termination follow-ups, §7.2.2\" item 1 (the termination code confirmed)",
+  "rationale": "§7.2.2 rule 1: every non-block-like statement SHALL end with `;`, and a statement with no `;` is E-STMT-MISSING-SEMICOLON. impl#1 does not enforce `;` (dpa-073 F5: a carried, impl#1-labelled divergence, g-dpa063-termination-unbuilt-impl1-legacy); the bootstrap does.",
+  "expect": {
+    "codes": ["E-STMT-MISSING-SEMICOLON"]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-dpa063-termination-unbuilt-impl1-legacy",
+      "fails": {
+        "codes": [
+          "missing:E-STMT-MISSING-SEMICOLON"
+        ]
+      }
+    }
+  }
+}

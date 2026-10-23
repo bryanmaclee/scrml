@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1808 of 1808 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1809 of 1809 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 217 | 12.0% |
+| PASS | 218 | 12.1% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 51 | 2.8% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 679 | 37.6% |
+| NOT-TWINNED | 679 | 37.5% |
 | UNSUPPORTED | 861 | 47.6% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 268; of those, 217 hold (81.0%). Runtime half executed on the bootstrap for 77 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 269; of those, 218 hold (81.0%). Runtime half executed on the bootstrap for 77 case(s).
 
-- **Vacuous** passes: 16 of 217 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **201**.
+- **Vacuous** passes: 16 of 218 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **202**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 29 of 51; the other 22 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -30,7 +30,7 @@ UNSUPPORTED by reason: bootstrap-unsupported 504 · parse-reject 357.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **794** — PASS 117 · FAIL 37 · UNSUPPORTED 640. Twin holds 117 (non-vacuous 105). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **795** — PASS 118 · FAIL 37 · UNSUPPORTED 640. Twin holds 118 (non-vacuous 106). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 6 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -101,7 +101,7 @@ NOT-TWINNED by reason (679 cases; a case counts once per distinct reason):
 | apply | 7 | · | · | · | · | · | 7 | · | · |
 | attr-executable-sink | 23 | 5 | · | · | · | 11 | 7 | · | · |
 | auth | 65 | 7 | · | · | · | 12 | 46 | · | · |
-| block-grammar | 13 | 9 | · | · | · | 1 | 3 | · | · |
+| block-grammar | 14 | 10 | · | · | · | 1 | 3 | · | · |
 | body-top | 27 | · | · | · | · | 2 | 25 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 49 | · | · | · | · | 37 | 12 | · | · |
@@ -315,7 +315,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (217)
+### PASS / CODES-ONLY (218)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -332,6 +332,7 @@ none
 - `block-grammar/block-028-leading-equals-text-pos` — PASS · TWIN
 - `block-grammar/block-029-leading-equals-quote-prose-pos` — PASS · TWIN
 - `block-grammar/block-ctx-001-closed-raw-content-neg` — PASS · TWIN
+- `block-grammar/s469-statement-needs-semicolon-neg` — PASS · TWIN
 - `block-grammar/script-001-bound-src-pos` — PASS
 - `block-grammar/script-001-case-insensitive-pos` — PASS
 - `block-grammar/script-001-interp-body-pos` — PASS

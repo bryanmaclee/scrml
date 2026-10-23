@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 262 | 4 |
+| HIGH | 261 | 5 |
 | MED | 676 | 8 |
 | LOW | 472 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -43,20 +43,19 @@ Found by the s469-boot-semicolons `;` codemod (round 1), which inserted a `;` af
 
 ### g-bootstrap-newline-sensitive-rules-remain-s469 — after the S469 `;` enforcement the bootstrap still decides several constructs by LINE, which dpa-073 F1 (a) ("a newline ends nothing") says it must not — `NEW S469; MED; open (owed bootstrap change)`
 
-<!-- @gap id=g-bootstrap-newline-sensitive-rules-remain-s469 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(parsePostfixFrom `(` / `[` / `!{` same-line tests, isPresenceTest, isPropagate, failAhead / deferAhead / transaction, parseStmt `return`, parseArmBlock `lift`, statement `match` boundary) prov=ruling:user-voice-scrml.md S469 "⭐⭐⭐ RULED — dpa-073 F1 = (a)" · ruling:user-voice-scrml.md S469 dpa-073 F2(i)/F3(i)/F4(ii) · dispatch:s469-boot-semicolons(review of 151366efc, round 2) -->
-The s469-boot-semicolons slice made `;` and arm `,` mandatory (E-STMT-MISSING-SEMICOLON / E-MATCH-ARM-SEPARATOR) and made a line break whitespace inside an arm body, but these rules still read the line. Each fails closed (the one exception, the statement-`match` boundary, was fixed in s469 r3):
-- `x⏎(y)` — a call `(` continues only on the same line; the next line is a new statement (with `;` enforced: E-STMT-MISSING-SEMICOLON after `x`). F4 (ii) rules this an error naming the split; today's code is the generic one.
-- `x⏎[y]` — an index `[` continues only when touching; same outcome.
-- `x⏎!{ … }` — a handler attaches only on the same line.
-- `x⏎is given` / `x⏎is not` — the presence test is read only on the same line (E-PARSE-* / E-SYNTAX-044 cascade; pinned in typer-s460.test.js).
-- `x⏎?` — propagation vs a conditional `?` is partly decided by end-of-line.
-- `return⏎expr` — refused fail closed (E-STMT-MISSING-SEMICOLON after `return`; F6 rules it returns `expr`, deferred until the newline-terminated corpus is migrated).
-- `lift⏎expr` — refused fail closed the same way (s469 r2; before r2 it was silently read as `lift expr`).
-- `fail⏎.E` — `fail` is a statement only before a same-line token, so the split form is read as the name `fail`: E-STMT-MISSING-SEMICOLON after it plus a misleading E-SCOPE-001 (`fail` is not declared) (probed S469 r2); `defer⏎…` and `transaction⏎{` likewise (route-to-PA R8 in the dpa-073 deep-dive: newline-free keyword decisions need design).
+<!-- @gap id=g-bootstrap-newline-sensitive-rules-remain-s469 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(parsePostfixFrom `(` / `[` / `!{` same-line tests, isPresenceTest, isPropagate, failAhead / deferAhead / transaction, parseStmt `return`, parseArmBlock `lift`, statement `match` boundary) prov=ruling:user-voice-scrml.md S469 "⭐⭐⭐ RULED — dpa-073 F1 = (a)" · ruling:user-voice-scrml.md S469 dpa-073 F2(i)/F3(i)/F4(ii) · dispatch:s469-boot-semicolons(review of 151366efc, round 2) · ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" -->
+
+The s469-boot-semicolons slice made `;` and arm `,` mandatory (E-STMT-MISSING-SEMICOLON / E-MATCH-ARM-SEPARATOR) and made a line break whitespace inside an arm body, but these rules still read the line. **S469 (s469-spec-small round 2): every item now has a ruling** — SPEC §7.2.2 (rewritten for dpa-073 F1 (a)) states each, and its "Remaining newline-sensitive readings" table labels them. Each item below is **OWED TO BUILD** in the bootstrap (a separate bootstrap lane):
+- `x⏎(y)`, `x⏎[y]`, `x⏎` + a template — RULED an error (F4 (ii), §7.2.2 rule 5), with its own code **E-STMT-SPLIT-CONTINUATION**, message "add `;` to the line above, or join the lines" (ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 4). Today: the generic E-STMT-MISSING-SEMICOLON after `x` (a template: E-PARSE-TEMPLATE). **Owed:** emit the minted code. (A spaced same-line `x [y]`, which the adjacency test also splits, has no ruling — still INTERIM.)
+- `x⏎!{ … }` — RULED: the handler attaches to `x` (§7.2.2 rule 4; ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 2). Today: refused, fails closed (a parse cascade). **Owed.**
+- `x⏎is given` / `x⏎is not` — RULED: the test applies to `x` (§7.2.2 rule 4; item 2). Today: refused, fails closed (E-PARSE-* / E-SYNTAX-044 cascade; pinned in typer-s460.test.js). **Owed.**
+- `?` — RULED: decided by adjacency only (glued = propagation, spaced = conditional); the end-of-line test is dropped (§7.2.2 rule 4; item 2). Today: `isPropagate` still reads the end of the line. **Owed.**
+- `return⏎expr` / `lift⏎expr` — RULED: they return / lift `expr` (F6 confirmed, §7.2.2 rule 8; item 1). Today: refused fail closed (E-STMT-MISSING-SEMICOLON after the keyword) — the refusal is the ruled INTERIM, kept "until the SPEC, docs and corpus are migrated, then switches to the ruled reading". **Owed after migration.**
+- `fail⏎.E`, `defer⏎…`, `transaction⏎{` — RULED: each is a keyword at statement start whenever the next token can begin its operand, regardless of line; the bare name `fail` is reserved in statement position (§7.2.2 rule 10; item 3 — answers dpa-073 R8). Today: read as a name — E-STMT-MISSING-SEMICOLON plus a misleading E-SCOPE-001 (fails closed). **Owed.**
 - ~~**Not fail-closed:** a statement `match`'s `}` was not a statement boundary — `match k { … }⏎-1;` glued into one expression.~~ **Fixed s469 r3:** a `match` that starts a statement ends at its `}` (F3 (i) block-like): the next line is a new statement, and a same-line continuation (`match k { … } + 2`) is E-PARSE-TRAILING. Pinned in `compiler/self-host-v2/slice-m4/terminators-s469.test.js` ("r3 —").
-- **Silent split (no signal):** after a statement `match … }` — or any block-like `}` (`if` / `for` / `given` / `defer { }`) — a PURE expression on the NEXT line (`-1;`, `(x);`, `[1];`, a template) is read as a statement of its own and silently does nothing, while the same token on the SAME line is refused (E-PARSE-TRAILING after a statement `match`). Correct under F1 / F3 (two statements), but a writer who meant one expression gets no word. Suggested: build the kept language-wide `E-STMT-NO-EFFECT` (dpa-073 F6 "KEPT"; `g-stmt-no-effect-language-wide-unbuilt`) in the bootstrap, or at least a no-effect warning for an expression statement with no call, assignment or write, which would flag exactly these.
-- `break⏎label` / `continue⏎label` — a label is read only on the same line (fails closed: E-STMT-MISSING-SEMICOLON).
-Owed: one newline-free decision per construct (F1 (a)), the F4 (ii) diagnostic for `(` / `[` / template continuations, and the R8 keyword design; then the ruled `return⏎expr` / `lift⏎expr` readings.
+- **Silent (not fail-closed):** a PURE expression statement after a block-like `}` — next line, or the same line after `if` / `for` / `given` / `defer` (`if (c) { … } -1;`, probed s469-spec-small) — is read as a statement that does nothing, with no signal. RULED: it is **E-STMT-NO-EFFECT** on either line, built in the bootstrap (§7.2.2 rule 9; item 4, "Build both"; see also `g-stmt-no-effect-language-wide-unbuilt`). **Owed.**
+- `break⏎label` / `continue⏎label` — a label is read only on the same line (fails closed: E-STMT-MISSING-SEMICOLON). No ruling names it; under F1 (a) the label continues across the line break. Still INTERIM.
+Owed: the bootstrap builds of the items above; the `return⏎` / `lift⏎` switch after migration.
 
 ### g-impl1-duplicate-function-silently-overrides-s469 — impl#1 accepts two `function` declarations of one name at file scope with exit 0 and no diagnostic, and the later one wins: `function pick(n: int) -> int { return 1; }` then a second `pick` returning `2` compiles, and `pick(0)` is `2` — `NEW S469 (owner: file as a gap); MED; open`
 
@@ -24710,16 +24709,16 @@ Build owed FIRST (Call 6 order: the bootstrap by construction). Today (dd C3, dd
 **SUPERSEDED + RESOLVED S469.** The S446 rule this entry tracked was superseded by dpa-073 F1 (a) (`;` terminates, a newline is whitespace); §7.2.2 is rewritten (s469-spec-small) and the bootstrap enforces the new rule (s469-boot-semicolons, #1510). The remaining line-sensitive readings are tracked at [[g-bootstrap-newline-sensitive-rules-remain-s469]].
 
 ### g-dpa063-termination-unbuilt-impl1-legacy — impl#1's default parser runs its pre-S446 termination heuristic (JS-ASI-shaped joins), not §7.2.2
-<!-- @gap id=g-dpa063-termination-unbuilt-impl1-legacy sev=HIGH status=open locus=compiler/src/ast-builder.js(collectExpr BUG-ASI-NEWLINE continuation ~L6180; return ASI) prov=ruling:user-voice-scrml.md S446 dpa-063 Calls 1, 6 · dd:statement-termination-dpa-063-2026-09-30 C3 -->
+<!-- @gap id=g-dpa063-termination-unbuilt-impl1-legacy sev=HIGH status=carried locus=compiler/src/ast-builder.js(collectExpr BUG-ASI-NEWLINE continuation ~L6180; return ASI) prov=ruling:user-voice-scrml.md S446 dpa-063 Calls 1, 6 · dd:statement-termination-dpa-063-2026-09-30 C3 -->
 `console.log("m")⏎-3102` compiles as `console.log("m") - 3102` in `${}`, function bodies, handler blocks, the body top and `^{}` (dd probes P1–P4, P13, dd-executed at `29eb80c31`, not re-executed here); `let b = a⏎(a + 1).toString()` joins into a call; leading `.` / `?` / `:` / `&&` / `+` lines continue. Parity is owed under the S435 security/bootstrap exception (S446 Call 6: *"impl#1 parity under the security/bootstrap exception so the two compilers agree"*). Subsumes the S440 JS-WAT #6 non-implementation (dd R4) and closes `g-body-top-next-line-continuation-runtime-crash` when built.
 
-**CARRIED S469 — not to be built** (status kept `open` until an xfail conformance case pins it; `status=carried` requires one). dpa-073 F5: *"impl#1 does NOT enforce `;`/commas — it keeps accepting newline-terminated code as a carried, impl#1-labelled divergence"*. The S446 rule this entry tracked is superseded (§7.2.2, rewritten S469).
+**CARRIED S469 — not to be built.** Pinned by `conformance/cases/block-grammar/s469-statement-needs-semicolon-neg` (xfail on impl1-ts). dpa-073 F5: *"impl#1 does NOT enforce `;`/commas — it keeps accepting newline-terminated code as a carried, impl#1-labelled divergence"*. The S446 rule this entry tracked is superseded (§7.2.2, rewritten S469).
 
 ### g-dpa063-termination-unbuilt-impl1-native — `--parser=scrml-native` runs ECMAScript ASI, not §7.2.2
 <!-- @gap id=g-dpa063-termination-unbuilt-impl1-native sev=MED status=open locus=compiler/native-parser/parse-stmt.scrml(canInsertSemicolon / consumeSemicolon L274–325) prov=ruling:user-voice-scrml.md S446 dpa-063 Calls 1, 6 · dd:statement-termination-dpa-063-2026-09-30 C3 -->
 Native inserts a `;` only when the next token cannot continue (ECMAScript ASI rule 1), so every hazard join of the legacy entry above happens here too, then fails in E-CODEGEN on some shapes. Owed alongside `g-native-trailing-operator-ternary-rejected`. Opt-in parser.
 
-**CARRIED S469 — not to be built** (status kept `open`, as the legacy entry). As [[g-dpa063-termination-unbuilt-impl1-legacy]]: dpa-073 F5 keeps impl#1 (both parsers) on its own termination reading as a carried divergence; the S446 rule is superseded.
+**CARRIED S469 — not to be built** (status kept `open`: `status=carried` needs a pinning xfail case, and the conformance runner has only the impl1-ts adapter — the default parser — so no case reaches `--parser=scrml-native`). As [[g-dpa063-termination-unbuilt-impl1-legacy]]: dpa-073 F5 keeps impl#1 (both parsers) on its own termination reading as a carried divergence; the S446 rule is superseded.
 
 ### g-stmt-no-effect-language-wide-unbuilt — `E-STMT-NO-EFFECT` fires only at a `<program>` / `<page>` / `<channel>` body top; S446 Call 5 made it language-wide
 <!-- @gap id=g-stmt-no-effect-language-wide-unbuilt sev=MED status=open locus=compiler/native-parser/body-top-coverage.js(liveExprHasEffect — body-top caller only)+compiler/src/ast-builder.js(noEffectError)+compiler/self-host-v2 prov=ruling:user-voice-scrml.md S446 dpa-063 Call 5 "(i), your rec, and yes on +/-" -->

@@ -17,3 +17,12 @@ SPEC-only lane (compiler/SPEC.md + docs/known-gaps.md). Branch `s469-spec-small`
 
 Probe sources live in the session scratchpad (`sm/`), run against main @ d80739b7c with `scripts/scrml-boot.ts`
 and `compiler/src/cli.js`.
+
+## Round 2 (bryan's "statement termination follow-ups" ruling, scrml-support ef99b4e)
+
+- [x] F6 confirmed — "PA reading" labels dropped (§7.2.2 rules 1, 2 (`lift <…>;`), 8; §6.7 amendment; §34 rows). `lift⏎expr` lifts `expr`. Bootstrap refusal of `return⏎`/`lift⏎` stays INTERIM until migration.
+- [x] Line starts RULED (§7.2.2 rule 4): `!{`, `is given`/`is not`, `?` attach to the expression before; `?` by adjacency only.
+- [x] Contextual keywords RULED — new §7.2.2 rule 10; bare `fail` reserved in statement position.
+- [x] E-STMT-NO-EFFECT RULED for the bootstrap (rule 9, §34 row); E-STMT-SPLIT-CONTINUATION minted (rule 5, new §34 row, not yet emitted). severity.scrml current (no bootstrap emitter yet).
+- [x] g-bootstrap-newline-sensitive-rules-remain-s469 rewritten: each item → its ruling, owed to build.
+- [x] xfail case `conformance/cases/block-grammar/s469-statement-needs-semicolon-neg` pins g-dpa063-termination-unbuilt-impl1-legacy → status=carried (bootstrap: PASS). `-impl1-native` NOT pinned: the conformance runner has only the impl1-ts adapter (default parser), so no case can reach `--parser=scrml-native`; left open with the carried note. docs/bootstrap-conformance.md regenerated.
