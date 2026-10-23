@@ -34,3 +34,19 @@ Gap: `g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469` (dpa-073 F5(1): impl#1
 ## Re-running after s469-boot-semicolons lands
 `bun docs/changes/s469-impl1-arm-commas/arm-commas-codemod.ts --write conformance/cases` — idempotent (an arm
 already ending in `,` is skipped); an arm ending in `;` is NOT rewritten and is listed for a human.
+
+## Round 2 (review of 2f9176de0 — FIX)
+- [x] F1/F2 root fix: `compiler/src/arm-list-split.ts` reads raw arm text with `tokenizeLogic` (the lexer's own
+      regex/division decision). Used by the expression parser's arm-separator split, the emit-expr stray-`,`
+      guard, and `splitMultiArmString` (literal spans skipped whole). (fa35526ae)
+- [x] Corpus emit diff vs the pre-fix merge tree (c86790d6c): 0 content differences except the 171 server
+      bundles that embed `_scrml_project_root` (the base was captured from a scratch copy); 0 diagnostic changes.
+- [x] Tests: `compiler/tests/unit/match-arm-commas-regex-s469.test.js` (13); pack `security-failable-pack/n24.js`
+      (15 shapes; on 2f9176de0 the comma / mixed spellings with a quote in the regex are FAIL; all PASS now). 471.
+- [x] F3 reproduces at `@cell = match …` (raw-arm path); filed with the repro (plus: string alternation drops
+      its first alternate in both spellings). Not fixed (S435).
+- [x] Gaps filed (760899451): F3, nested raw-arm value match, engine template target (repro owed by reviewer),
+      arm after `else` in expression position, E-PARSE-ARM vs E-PARSE-001, regex after a binary operator lexed as
+      division (`"x" + /a,b/` → `/ a , b /`, silent, any position).
+- [x] Merged origin/land/s469-batch-5 (c86790d6c) then origin/main after #1501 landed (6c6ac6165).
+- [x] impl#1 conformance after the merge: 1728 + 80 xfail.
