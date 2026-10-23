@@ -14616,8 +14616,8 @@ ${
             .Ge :> checkNumPair(env, e, l, r, a, b, "`>=`", ts)
             .And :> checkBoolOperand(env, r, b, "`&&`", checkBoolOperand(env, l, a, "`&&`", ts))
             .Or :> checkBoolOperand(env, r, b, "`||`", checkBoolOperand(env, l, a, "`||`", ts))
-            .EqPrim :> ts
-            .NeqPrim :> ts
+            .EqPrim :> checkEqTypes(env, e, a, b, ts)
+            .NeqPrim :> checkEqTypes(env, e, a, b, ts)
             .EqStruct :> ts
             .NeqStruct :> ts
             .IsSome :> ts
@@ -14713,6 +14713,26 @@ ${
 
     // `+`: two numbers or two strings. Each operand first (a `T | not`, a
     // bool, a struct … is refused whatever the other is), then the pair.
+    // s469 (templates review r2 — found by the end-to-end fuzz: `0 != ""` compiled
+    // clean and ran strict, where a JavaScript reader means loose equality) —
+    // §45 E-EQ-001: "`==` applied to incompatible types. The type system prevents
+    // cross-type comparison before the operator is evaluated." Judged where both
+    // operands are PROVABLY primitives (`int` and `number` are one kind for this);
+    // provable-or-silent, as every operand check here.
+    fn checkEqTypes(env: TEnv, e: AExpr, a: VType, b: VType, ts: TypeState) -> TypeState {
+        const x0: Type | not = knownOf(a)
+        const y0: Type | not = knownOf(b)
+        if (x0 is not || y0 is not) return ts
+        const x: Type = unMaybe(x0)
+        const y: Type = unMaybe(y0)
+        const kx: int = kindOf(x)
+        const ky: int = kindOf(y)
+        if (kx > 3 || ky > 3) return ts
+        if (isNumericKind(x) && isNumericKind(y)) return ts
+        if (kx == ky) return ts
+        return report(ts, env, e.span, "E-EQ-001", "`==` compares values of one type, and this is `" + typeName(x) + "` with `" + typeName(y) + "` — convert one first (`T.parse(s)`, or a template for text) (§45, §14.13.1)")
+    }
+
     fn checkPlus(env: TEnv, e: AExpr, l: AExpr, r: AExpr, a: VType, b: VType, ts0: TypeState) -> TypeState {
         const ts: TypeState = plusOperand(env, r, b, plusOperand(env, l, a, ts0))
         if (ts.diags.length > ts0.diags.length) return ts

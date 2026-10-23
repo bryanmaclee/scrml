@@ -321,6 +321,16 @@ describe("found by the end-to-end fuzz — a call of a value is never silently `
   });
 });
 
+describe("found by the end-to-end fuzz — `==` across types is E-EQ-001 (§45), never a silent strict compare", () => {
+  test("int == string, string != int, bool == int are refused; int == number and like types are not", () => {
+    expect(codes(fnProg("", "n: int, s: string", "`${n == s}`"))).toEqual(["E-EQ-001"]);
+    expect(codes(fnProg("", "n: int", "`${\"\" != n}`"))).toEqual(["E-EQ-001"]);
+    expect(codes(fnProg("", "n: int, b: bool", "`${b == n}`"))).toEqual(["E-EQ-001"]);
+    expect(codes(fnProg("", "n: int, x: number", "`${n == x}`"))).toEqual([]);
+    expect(codes(fnProg("", "s: string, t: string", "`${s != t}`"))).toEqual([]);
+  });
+});
+
 describe("M1 — a backslash before U+2028 / U+2029 is a line continuation", () => {
   for (const [name, ch] of [["U+2028", " "], ["U+2029", " "]]) {
     test(`${name} in a template and in a quoted string`, () => {
