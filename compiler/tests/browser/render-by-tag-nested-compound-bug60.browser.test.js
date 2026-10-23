@@ -32,10 +32,13 @@ beforeEach(async () => {
 });
 
 // The Bug 60 reproducer — top-level compound decl + nested render-by-tag wrapper.
+// S469: `email` is not a validator predicate (§55.1 vocabulary closed at fourteen — d894e1a04 made an
+// unknown predicate E-TYPE-031); this fixture still used it, so every case failed at compile. Same
+// migration d894e1a04 applied to the unit twin (compiler/tests/unit/render-by-tag-nested-compound-bug60.test.js).
 const SRC =
   `<signupForm>\n` +
   `    <userName req length(>=2)> = <input type="text"/>\n` +
-  `    <email req email>          = <input type="email"/>\n` +
+  `    <email req pattern(/^[^@]+@[^@]+$/)> = <input type="email"/>\n` +
   `</>\n\n` +
   `<div>\n` +
   `  <signupForm>\n` +

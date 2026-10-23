@@ -43,3 +43,10 @@ beforeAll) happened to run first — in the baseline run the dist appeared at 12
 browser-todomvc had already read `distExists=false`. `scripts/compile-test-samples.sh` (the
 `pretest` step CI also runs) now builds it with the gauntlet's flags. browser-todomvc: 39 pass /
 8 skip (pre-existing, documented harness skips) / 0 fail from a deleted dist.
+
+## Step 3 — Bug 60 browser twin (FIXED, class b — stale fixture)
+
+All 5 `Bug 60 — nested compound render-by-tag …` cases failed at COMPILE: `<email req email>` →
+E-TYPE-031 (unknown validator predicate; §55.1 vocabulary closed since d894e1a04, which migrated the
+unit twin to `pattern(/^[^@]+@[^@]+$/)` but not this browser file). Same migration applied; 5/5 pass.
+Baseline pruned (48 → 43).
