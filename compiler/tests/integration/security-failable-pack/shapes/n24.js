@@ -216,4 +216,46 @@ for (const [ln, [deny, arms]] of Object.entries(PIPE_FIRST_LISTS)) {
     }
   }
 }
+
+// S469 r6 (final review of fc046f011, F2) — g-impl1-stmt-match-arm-bare-handled-call-dropped-s469:
+// a statement-match arm whose body is a BARE handled call (`1 :> check(p) !{ … }`, no braces) was
+// wrapped whole in a guarded-expr no lowering reads — the arm, and with it the password check, was
+// silently DROPPED. Here login is optimistic (`@msg = "LOGGED IN"` first) and the check's handler
+// rejects, so a dropped arm logs the wrong password in. Measured on fc046f011: the 4 first-arm shapes
+// FAIL, the 4 wildcard-arm shapes are refused (E-TYPE-006, the dropped wildcard left the match
+// non-exhaustive); all 8 PASS after the fix (the arm compiles as the braced form).
+const BARE_HANDLERS = {
+  "pipe-less handler arm": `check(p) !{ .Denied :> @msg = "rejected" }`,
+  "legacy | handler arm": `check(p) !{ | ::Denied e -> { @msg = "rejected" } }`,
+};
+const BARE_PAGE = (armLines) => `type AuthErr:enum = { Denied }
+<msg> = "init"
+<mode>: number | string = 1
+<n> = 0
+\${
+    function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied
+        return true
+    }
+    function login(p) {
+        @msg = "LOGGED IN"
+        match @mode {
+${armLines.map((l) => "            " + l).join("\n")}
+        }
+    }
+}
+<button id="wrong" onclick=login("wrong")>go</button>
+<button id="right" onclick=login("secret")>go</button>
+<p id="out">\${@msg}</p>
+`;
+for (const [hn, h] of Object.entries(BARE_HANDLERS)) {
+  for (const [where, build] of [
+    ["first arm", (b, s) => [`1 :> ${b}${s}`, `2 :> { @n = 2 }${s}`, `else :> @n = 0${s}`]],
+    ["wildcard arm", (b, s) => [`2 :> { @n = 2 }${s}`, `else :> ${b}${s}`]],
+  ]) {
+    for (const [sn, s] of [["newline", ""], ["comma", ","]]) {
+      shapes.push([`bare handled-call statement arm, ${hn}, ${where} (${sn} arms)`, BARE_PAGE(build(h, s))]);
+    }
+  }
+}
 export default shapes;
