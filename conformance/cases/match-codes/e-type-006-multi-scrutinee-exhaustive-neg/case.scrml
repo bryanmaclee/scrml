@@ -2,7 +2,7 @@ ${
   type Role:enum = { Admin, Editor }
   fn label(r: Role, u: Role | not) -> string {
     match (r, u) {
-      (.Admin, _)  :> "a"
+      (.Admin, _)  :> "a",
       (.Editor, _) :> "b"
     }
   }

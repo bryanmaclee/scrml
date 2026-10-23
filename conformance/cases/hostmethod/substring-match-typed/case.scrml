@@ -3,7 +3,7 @@ ${
     fn classify(c: Cursor) -> string {
         const ch = c.source.substring(c.pos, c.pos + 1)
         return match ch {
-            "a" :> "vowel"
+            "a" :> "vowel",
             _ :> "other"
         }
     }

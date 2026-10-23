@@ -1,14 +1,14 @@
 ${ type Health:enum = { Healthy, AtRisk } }
 ${ type Mood:enum = { Calm, Tense } }
 <engine for=Health derived=match @mood {
-  .Calm :> .Healthy
+  .Calm :> .Healthy,
   .Tense :> .AtRisk
 }>
   <Healthy/>
   <AtRisk/>
 </>
 <engine for=Mood derived=match @health {
-  .Healthy :> .Calm
+  .Healthy :> .Calm,
   .AtRisk :> .Tense
 }>
   <Calm/>

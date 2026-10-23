@@ -2,7 +2,7 @@ type LoadError:enum = { Empty, Bad }
 
 ${
     function risky()! -> LoadError { fail LoadError.Empty }
-    const Btn = <button id="b" props={ n: number } onclick={ risky() !{ | .Empty :> @r = n | .Bad :> @r = 100 } }>go</>
+    const Btn = <button id="b" props={ n: number } onclick={ risky() !{ | .Empty :> @r = n, | .Bad :> @r = 100 } }>go</>
 }
 
 <r> = 0

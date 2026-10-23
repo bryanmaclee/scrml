@@ -9,7 +9,7 @@ ${
     // chained assignment (the arm wrongly yielded 2).
     fn declRaw(kk: int) -> int {
         const r = match kk {
-            1 :> { const o = { n: 1 }; o.n = 2 }
+            1 :> { const o = { n: 1 }; o.n = 2 },
             _ :> 5
         }
         return r
@@ -17,7 +17,7 @@ ${
     // Same path, VALUE tail (control) — lifts `o.n` (member READ) → 9.
     fn declRawValue(kk: int) -> int {
         const r = match kk {
-            1 :> { const o = { n: 9 }; o.n }
+            1 :> { const o = { n: 9 }; o.n },
             _ :> 5
         }
         return r
@@ -27,13 +27,13 @@ ${
     // `.Variant :> { … }` arm in a return position. Member-assign tail → VOID.
     fn retStruct(kk: K) -> int {
         return match kk {
-            .A :> { const o = { n: 1 }; o.n = 2 }
+            .A :> { const o = { n: 1 }; o.n = 2 },
             _  :> 5
         }
     }
     fn retStructValue(kk: K) -> int {
         return match kk {
-            .A :> { const o = { n: 9 }; o.n }
+            .A :> { const o = { n: 9 }; o.n },
             _  :> 5
         }
     }
@@ -41,11 +41,11 @@ ${
     // structuredBody tilde path (emit-logic.ts emitMatchExprToTilde) — a
     // `.Variant :> { … }` arm in a derived cell. Member-assign tail → VOID.
     const <labelVoid> = match @k {
-        .A :> { const o = { n: 1 }; o.n = 2 }
+        .A :> { const o = { n: 1 }; o.n = 2 },
         _  :> 5
     }
     const <labelValue> = match @k {
-        .A :> { const o = { n: 9 }; o.n }
+        .A :> { const o = { n: 9 }; o.n },
         _  :> 5
     }
 }

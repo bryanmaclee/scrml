@@ -11,7 +11,7 @@ ${
     function viaMatchArm(m: Mode) {
         defer {
             let k = match m {
-                .A :> { return 5 }
+                .A :> { return 5 },
                 .B :> 3
             }
         }
@@ -21,7 +21,7 @@ ${
     function viaMatchArmFail(m: Mode)! -> E {
         defer {
             let k = match m {
-                .A :> { fail E.Bad }
+                .A :> { fail E.Bad },
                 .B :> 3
             }
         }

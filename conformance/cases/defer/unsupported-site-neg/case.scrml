@@ -16,7 +16,7 @@ ${
 
     function arm(m: Mode) {
         match m {
-            .A :> defer D("a;")
+            .A :> defer D("a;"),
             .B :> D("b;")
         }
     }

@@ -12,8 +12,8 @@ ${
     function lab(k: K) -> string {
         match k {
             .A :> return
-                "orphan"
-            .B :> @seen = "b"
+                "orphan",
+            .B :> @seen = "b",
             .C :> @seen = "c"
         }
         return "x"

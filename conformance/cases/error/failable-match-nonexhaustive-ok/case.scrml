@@ -11,7 +11,7 @@ ${
 
     function useIt(id: int) {
         return match loadThing(id) {
-            ::NotFound :> "nf"
+            ::NotFound :> "nf",
             ::Timeout :> "to"
         }
     }

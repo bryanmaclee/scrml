@@ -2,7 +2,7 @@ ${ type Mario:enum = { Small, Big } }
 ${ type Health:enum = { Healthy, AtRisk } }
 <marioState>: Mario = .Small
 <engine for=Health derived=match @marioState {
-  .Small :> .Healthy
+  .Small :> .Healthy,
   .Big :> .AtRisk
 }>
   <Healthy rule=.AtRisk/>

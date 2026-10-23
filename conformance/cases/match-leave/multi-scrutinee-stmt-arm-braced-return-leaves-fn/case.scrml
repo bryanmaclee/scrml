@@ -4,8 +4,8 @@ ${
     <seen> : string = "none"
     function pick(a: K, b: K) {
         match (a, b) {
-            (.A, .A) :> { return }
-            (.A, .B) :> { @seen = "ab" }
+            (.A, .A) :> { return },
+            (.A, .B) :> { @seen = "ab" },
             _ :> @seen = "other"
         }
         @after = "ran"

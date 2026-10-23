@@ -2,8 +2,8 @@ ${
     type Level:enum = { Low, Mid, High }
     <level>: Level = .Low
     const <label> = match @level {
-        .Low :> "green"
-        .Mid :> "amber"
+        .Low :> "green",
+        .Mid :> "amber",
         .High :> "red"
     }
 }

@@ -11,15 +11,15 @@ ${
     }
     function chk(k: K)! E {
         match k {
-            .A :> fail .Boom("a")
-            .B :> @seen = "b"
+            .A :> fail .Boom("a"),
+            .B :> @seen = "b",
             .C :> @seen = "c"
         }
         @after = "ran"
     }
     function go() {
         chk(K.A) !{
-            .Boom(m) :> @seen = "boom:" + m
+            .Boom(m) :> @seen = "boom:" + m,
             .Other :> @seen = "other"
         }
     }

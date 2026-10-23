@@ -23,21 +23,21 @@
     // §19.8.3 example 1's shape: a handled `?{}` as a declaration's right-hand side.
     function getHit() {
         const row = ?{`SELECT id, body FROM notes`}.get() !{
-            .QueryFailed(m) :> { return "failed:" + m }
+            .QueryFailed(m) :> { return "failed:" + m },
             _               :> not
         }
         return row is not ? "none" : row.body
     }
     function getMiss() {
         const row = ?{`SELECT id, body FROM empties`}.get() !{
-            .QueryFailed(m) :> { return "failed:" + m }
+            .QueryFailed(m) :> { return "failed:" + m },
             _               :> not
         }
         return row is not ? "none" : row.body
     }
     function getFailed() {
         const row = ?{`SELECT id, body FROM gone`}.get() !{
-            .QueryFailed(m) :> { return "failed" }
+            .QueryFailed(m) :> { return "failed" },
             _               :> not
         }
         return row is not ? "none" : row.body

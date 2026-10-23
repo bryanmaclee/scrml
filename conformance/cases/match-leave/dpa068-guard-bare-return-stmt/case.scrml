@@ -11,7 +11,7 @@ ${
     }
     function go() {
         risky(-1) !{
-            .Boom(m) :> return
+            .Boom(m) :> return,
             .Other :> @seen = "other"
         }
         @after = "ran"

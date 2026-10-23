@@ -11,7 +11,7 @@ ${
     }
     function outer(n: number)! E2 {
         const v = risky(n) !{
-            .Boom(m) :> fail .Wrapped(m)
+            .Boom(m) :> fail .Wrapped(m),
             .Other :> 0
         }
         return v

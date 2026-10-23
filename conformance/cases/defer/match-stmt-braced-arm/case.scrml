@@ -7,7 +7,7 @@ ${
             .A :> {
                 defer @trace = @trace + "MA;"
                 @trace = @trace + "ma;"
-            }
+            },
             .B :> {
                 @trace = @trace + "mb;"
             }

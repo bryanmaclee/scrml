@@ -16,7 +16,7 @@ ${
 
     function work() {
         defer release(1) !{
-            ::Busy :> @trace = @trace + "busy;"
+            ::Busy :> @trace = @trace + "busy;",
             _ :> @trace = @trace + "release-failed;"
         }
         @trace = @trace + "work;"

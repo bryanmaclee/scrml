@@ -3,7 +3,7 @@ ${
     <b> : string = "unset"
     function decl(name: string | not) -> string {
         let out = match name {
-            not -> "absent"
+            not -> "absent",
             given name -> "hi " + name
         }
         return out

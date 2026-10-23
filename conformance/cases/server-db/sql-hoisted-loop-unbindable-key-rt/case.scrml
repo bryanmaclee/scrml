@@ -11,7 +11,7 @@
     function handled() {
         let out = []
         for (const it of [{ id: 7 }, { id: { a: 1 } }, { id: 9 }, { id: 8 }]) {
-            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get() !{ .QueryFailed(m) :> "QF"  _ :> "other" }
+            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get() !{ .QueryFailed(m) :> "QF",  _ :> "other" }
             out.push(row is not ? "none" : (row.body is given ? row.body : row))
         }
         return out.join(",")
@@ -19,7 +19,7 @@
     function handledAll() {
         let out = []
         for (const it of [{ id: [1, 2] }, { id: 7 }]) {
-            const rows = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.all() !{ .QueryFailed(m) :> []  _ :> [] }
+            const rows = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.all() !{ .QueryFailed(m) :> [],  _ :> [] }
             out.push(rows.length)
         }
         return out.join(",")

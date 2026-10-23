@@ -11,7 +11,7 @@ ${
     }
     function calc(n: number) -> string {
         const v = risky(n) !{
-            .Boom(m) :> return "early:" + m
+            .Boom(m) :> return "early:" + m,
             .Other :> 0
         }
         return "got:" + v

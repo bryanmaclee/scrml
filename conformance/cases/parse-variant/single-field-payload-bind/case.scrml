@@ -11,9 +11,9 @@ ${
 
     function decode() {
         parseVariant('{"tag":"Archived"}', LoadResult) !{
-            ::MissingDiscriminator          :> { @parseError = "missing-discriminator" }
-            ::UnknownVariant(tag)           :> { @parseError = "unknown: " + tag }
-            ::InvalidPayload(field, reason) :> { @parseError = "invalid-payload:" + field }
+            ::MissingDiscriminator          :> { @parseError = "missing-discriminator" },
+            ::UnknownVariant(tag)           :> { @parseError = "unknown: " + tag },
+            ::InvalidPayload(field, reason) :> { @parseError = "invalid-payload:" + field },
             ::Malformed(reason)             :> { @parseError = "malformed" }
         }
     }

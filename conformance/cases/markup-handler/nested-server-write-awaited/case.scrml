@@ -13,4 +13,4 @@ server function save() { return 10 }
 
 <button id="nif" onclick=${ if (@c) { @x = save(); @y = @x + 1 } }>if</button>
 <button id="nchain" onclick=${ if (!@c) { @z = 0 } else if (@c) { @x = save(); @z = @x + 2 } else { @z = 5 } }>chain</button>
-<button id="nmatch" onclick=${ match (@cur) { .Note(t) => { @x = save(); @w = @x + 3 } .Empty => { @w = 0 } } }>match</button>
+<button id="nmatch" onclick=${ match (@cur) { .Note(t) => { @x = save(); @w = @x + 3 }, .Empty => { @w = 0 } } }>match</button>

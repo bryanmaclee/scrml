@@ -14,8 +14,8 @@ ${
 
     function go() {
         @result = risky(0) !{
-            .NotFound(reason) :> "recovered: " + reason
-            .Pair(a, b)       :> "pair"
+            .NotFound(reason) :> "recovered: " + reason,
+            .Pair(a, b)       :> "pair",
             else              :> "other"
         }
     }
