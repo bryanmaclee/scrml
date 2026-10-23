@@ -90,3 +90,18 @@ already ending in `,` is skipped); an arm ending in `;` is NOT rewritten and is 
       pack n24 +18 (563): on be0a7799d the 9 statement shapes FAIL.
 - [x] Corpus emit diff (pre-r5 arm code → fix, same tree): 171 diffs, all `_scrml_project_root` — no program changed.
 - [x] impl#1 conformance 1731/1811 + 80 xfail. Gap resolved; state.ts --write.
+
+## Round 6 (final review of fc046f011 — FIX)
+- [x] F1 class fix — the arm-split COVERAGE invariant (`armPiecesCover`, arm-list-split.ts): pieces + separators +
+      whitespace must account for every non-whitespace character; enforced in `emitMatchExpr` (every expression
+      position) and `collectMatchArms`; the `|`-start check also runs on the whole raw arm text. The instance: a
+      `|`-led first arm before 2+ literal arms was sliced off (the prefix before the first arm start).
+- [x] The invariant is observed in the suites: `splitMultiArmString` records every split in an opt-in audit
+      (`globalThis.__scrmlArmSplitAudit`); the seeded differential and the alternation / regex / leading-pipe
+      suites fail on any split that lost text in a clean compile. The differential now generates the 4-arm shape.
+- [x] F2 HIGH: a bare handled-call statement-match arm body compiles like the braced form (zero-width braces);
+      a value-match one refuses. Gap filed resolved: g-impl1-stmt-match-arm-bare-handled-call-dropped-s469.
+- [x] Pack n24: +12 (|-led first arm before 3 literals) +8 (bare handled-call arms) = 583.
+- [x] Reviewer fuzzers on head: fuzz5 seeds 51–60 + fuzz6 seeds 71–80, 150 lists each (21,000 list×position
+      runs × 4 spellings): 0 PIPE-NOT-REFUSED, 0 BAD-SEQ, 0 SPLIT-BAD-SEQ, 0 DIFF-OUT, 0 SPLIT-DIFF-OUT.
+- [x] Corpus emit diff (r6 vs the same tree with fc046f011's four arm files): 171 diffs, all `_scrml_project_root`.
