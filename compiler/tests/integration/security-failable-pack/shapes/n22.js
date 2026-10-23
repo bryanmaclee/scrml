@@ -43,6 +43,10 @@ const WRAPS = [
   ["function returning markup", (b) => `\${ function pill() { return <span>${b}</span> } }\n<div id="out">\${ pill() }</div>`],
   ["ternary markup value", (b) => `<div id="out">\${ true ? <span>${b}</span> : "" }</div>`],
   ["lift in each in match arm", (b) => `type Phase:enum = { Idle, Active }\n<ph>: Phase = .Idle\n<div id="out"><match for=Phase on=@ph><Idle><each in=@xs as y><span>\${ for (x of @xs) { lift <span>${b}</span> } }</span></each></Idle><Active>x</Active></match></div>`],
+  // (The component's text is an interpolation: a literal text body gains a trailing space on expansion,
+  // the S465-era whitespace gap, which would read as PASS-DENY.)
+  ["component in for-lift, gated", (b, g) => `\${ const Pill = <span>\${"LOGGED IN"}</span> }\n<div id="out">\${ for (x of @xs) { lift <div><Pill if=${g}/></div> } }</div>`],
+  ["component in for-lift, gate in its body", (b) => `\${ const Pill = <span>${b}</span> }\n<div id="out">\${ for (x of @xs) { lift <div><Pill/></div> } }</div>`],
   ["lifted each root", (b, g) => `<div id="out">\${ if (true) { lift <each in=@xs as y if=${g}>LOGGED IN</each> } }</div>`],
 ];
 
@@ -61,6 +65,26 @@ const VI = (nest) => `<pw> = "secret"
 `;
 shapes.push(["value-indexed (for-lift sole root)", VI((b) => b)]);
 shapes.push(["value-indexed (for-lift nested)", VI((b) => `<span>${b}</span>`)]);
+
+// The value-indexed predicate's ROW side: the cell holds the expected key, the button writes the
+// same-key row with the key the password names. A create-time `r.k` (and a value bucket registered
+// under it) keeps the gate open after the row is revoked.
+const VIROW = (keyed, nest) => {
+  const row = (k) => `[{ ${keyed ? "id: 1, " : ""}k: ${k} }]`;
+  return `<pw> = "secret"
+<keys> = ${row('"secret"')}
+\${
+    function keyFor(p) { return p }
+}
+<button id="wrong" onclick=\${ @keys = ${row('keyFor("wrong")')} }>go</button>
+<button id="right" onclick=\${ @keys = ${row('keyFor("secret")')} }>go</button>
+<div id="out">\${ for (r of @keys) { lift ${nest(`<b if=(@pw == r.k)>LOGGED IN</b>`)} } }</div>
+`;
+};
+for (const keyed of [true, false]) {
+  shapes.push([`value-indexed row side (sole root), ${keyed ? "id" : "index"} keys`, VIROW(keyed, (b) => b)]);
+  shapes.push([`value-indexed row side (nested), ${keyed ? "id" : "index"} keys`, VIROW(keyed, (b) => `<span>${b}</span>`)]);
+}
 
 // A guard that reads the ROW: the row starts granted, the button writes the same-key row with `ok`
 // computed from the password. Id keys and index keys; nested and multi-root positions.

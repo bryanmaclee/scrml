@@ -27,7 +27,7 @@ if (!globalThis.document) GlobalRegistrator.register();
 
 const tmpRoot = resolve(tmpdir(), "scrml-lift-if-render-gate-s469");
 
-function compileAndMount(source, baseName = "app") {
+function compileAndMount(source, baseName = "app", runtimePatch = "") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const tmpDir = resolve(tmpRoot, `case-${uniq}`);
   const outDir = resolve(tmpDir, "out");
@@ -48,7 +48,7 @@ function compileAndMount(source, baseName = "app") {
   const exec = new Function(
     "window",
     "document",
-    `${runtimeJs}\n` + captureInsideChunkScope(
+    `${runtimeJs}\n${runtimePatch}\n` + captureInsideChunkScope(
       clientJs,
       `globalThis.__s469l_set = typeof _scrml_cs_reactive_set === "function" ? _scrml_cs_reactive_set : _scrml_reactive_set;\n` +
       `globalThis.__s469l_get = typeof _scrml_cs_reactive_get === "function" ? _scrml_cs_reactive_get : _scrml_reactive_get;\n`,
@@ -191,6 +191,49 @@ describe("a markup if= in a `for … lift` row is a render gate at every positio
     expect(count("#out b")).toBe(1);
   });
 
+  test("value-indexed: a write runs the swap for the OLD and NEW rows only (O(2)), not every row", async () => {
+    // Count every swap call the runtime makes.
+    const patch = `globalThis.__s469l_swaps = 0; { const _orig = _scrml_ifrow_apply; _scrml_ifrow_apply = function (c, e, p, on) { globalThis.__s469l_swaps++; return _orig(c, e, p, on); }; }`;
+    const ids = Array.from({ length: 40 }, (_, i) => `{ id: ${i + 1} }`).join(", ");
+    const app = compileAndMount(`<sel> = 0
+<items> = [${ids}]
+<div id="out">\${ for (r of @items) { lift <div class="row"><b class="g" if=(@sel == r.id)>E</b></div> } }</div>
+`, "app", patch);
+    expect(app.errors).toEqual([]);
+    await flush();
+    globalThis.__s469l_swaps = 0;
+    await set("sel", 7);
+    expect(count("#out b.g")).toBe(1);
+    expect(globalThis.__s469l_swaps).toBe(1);   // bucket 0 is empty; bucket 7 holds one row
+    globalThis.__s469l_swaps = 0;
+    await set("sel", 9);
+    expect(count("#out b.g")).toBe(1);
+    expect(globalThis.__s469l_swaps).toBe(2);   // row 7 closes, row 9 opens
+  });
+
+  test("value-indexed, the ROW side: a same-key replace that changes the row's field moves the gate", async () => {
+    const app = compileAndMount(`<sel> = "a"
+<items> = [{ id: 1, k: "a" }, { id: 2, k: "b" }]
+<button id="edit" onclick=\${ @items[1].k = "a" }>edit</button>
+<div id="out">\${ for (r of @items) { lift <div class="row" data-k=\${r.id}><b class="g" if=(@sel == r.k)>E</b></div> } }</div>
+`);
+    expect(app.errors).toEqual([]);
+    const on = () => [...document.querySelectorAll("#out .row")].filter((r) => r.querySelector("b.g")).map((r) => r.getAttribute("data-k"));
+    await flush();
+    expect(on()).toEqual(["1"]);
+    await set("items", [{ id: 1, k: "z" }, { id: 2, k: "b" }]);   // row 1 revoked by its own data
+    expect(on()).toEqual([]);
+    await set("sel", "b");
+    expect(on()).toEqual(["2"]);
+    await set("sel", "z");                                         // the bucket moved with the row
+    expect(on()).toEqual(["1"]);
+    document.querySelector("#edit").click();                       // an in-place field write
+    await flush();
+    expect(on()).toEqual(["1"]);
+    await set("sel", "a");
+    expect(on()).toEqual(["2"]);
+  });
+
   test("the value-indexed `@sel == r.id` predicate is structural and keeps its O(2) dispatch", async () => {
     const app = compileAndMount(`<sel> = 0
 <items> = [{ id: 1 }, { id: 2 }, { id: 3 }]
@@ -247,6 +290,33 @@ describe("a markup if= in non-loop lifted markup and markup values is a render g
     await expectReactiveGate(compileAndMount(`<ok> = false
 <div id="out">\${ lift <span><b class="g" if=@ok>x</b></span> }</div>
 `), { cell: "ok", off: false, on: true, sel: "#out b.g", openCount: 1 });
+  });
+
+  test("a deep field write (`@u.ok = …`) re-evaluates the gate — bare lift, if-lift arm, for-lift row", async () => {
+    for (const wrap of [
+      (b) => `\${ lift <span>${b}</span> }`,
+      (b) => `\${ if (true) { lift <span>${b}</span> } }`,
+      (b) => `\${ for (x of @xs) { lift <span>${b}</span> } }`,
+    ]) {
+      const app = compileAndMount(`<u> = { ok: true }
+<xs> = [1]
+<button id="off" onclick=\${ @u.ok = false }>off</button>
+<button id="on" onclick=\${ @u.ok = true }>on</button>
+<div id="out">${wrap(`<b class="g" if=@u.ok>x</b>`)}</div>
+`);
+      expect(app.errors).toEqual([]);
+      await flush();
+      expect(count("#out b.g")).toBe(1);
+      document.querySelector("#off").click();
+      await flush();
+      expect(count("#out b.g")).toBe(0);
+      document.querySelector("#on").click();
+      await flush();
+      expect(count("#out b.g")).toBe(1);
+      document.querySelector("#off").click();
+      await flush();
+      expect(count("#out b.g")).toBe(0);
+    }
   });
 
   test("a function returning markup, and a ternary markup value", async () => {

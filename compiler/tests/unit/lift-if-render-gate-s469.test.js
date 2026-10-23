@@ -70,11 +70,24 @@ describe("the trigger per context", () => {
     expect(r.js).toMatch(/_scrml_resolve_item\([^)]*\);\s*if \(x === null\) return;\s*_scrml_cur_\w+ = _scrml_ifrow_apply\([^\n]*\n\s*\}, true\);/);
   });
 
-  test("the value-indexed `@cell == r.field` predicate keeps the O(2) subscribe_when dispatch", () => {
-    const r = compile(`<sel> = 0\n<xs> = [{ id: 1 }]\n<div>\${ for (r of @xs) { lift <span><b if=(@sel == r.id)>x</b></span> } }</div>\n`);
+  test("the value-indexed `@cell == lit` predicate keeps the O(2) subscribe_when dispatch", () => {
+    const r = compile(`<sel> = 0\n<xs> = [{ id: 1 }]\n<div>\${ for (r of @xs) { lift <span><b if=(@sel == 3)>x</b></span> } }</div>\n`);
     expect(r.errors).toEqual([]);
     expect(r.js).toMatch(/function (_scrml_if_\w+)\(\) \{ _scrml_cur_\w+ = _scrml_ifrow_apply\(/);
-    expect(r.js).toMatch(/_scrml_cs_reactive_subscribe_when\("sel", r\.id, _scrml_if_\w+\);/);
+    expect(r.js).toMatch(/_scrml_cs_reactive_subscribe_when\("sel", 3, _scrml_if_\w+\);/);
+    expect(r.js).not.toMatch(/style\.display\s*=/);
+  });
+
+  test("a value-indexed predicate that reads the ROW (`@sel == r.id`): the bucket follows the live row", () => {
+    const r = compile(`<sel> = 0\n<xs> = [{ id: 1 }]\n<div>\${ for (r of @xs) { lift <span><b if=(@sel == r.id)>x</b></span> } }</div>\n`);
+    expect(r.errors).toEqual([]);
+    // The updater re-resolves the row (the bucket calls it outside any effect) ...
+    expect(r.js).toMatch(/function _scrml_if_\w+\(\) \{\n\s*let r = _scrml_resolve_item\([^)]*\);\n\s*if \(r === null\) return;\n\s*_scrml_cur_\w+ = _scrml_ifrow_apply\(/);
+    // ... and a render-gate effect re-reads the row's value, moves the registration, and swaps
+    // with the cell read untracked (the bucket, not the effect, reacts to the cell).
+    expect(r.js).toMatch(/const _scrml_vi_v = \(r\.id\);/);
+    expect(r.js).toMatch(/_scrml_vi_off_\w+ = _scrml_cs_reactive_subscribe_when\("sel", _scrml_vi_v, _scrml_if_\w+\);/);
+    expect(r.js).toMatch(/_scrml_untracked\(_scrml_if_\w+\);\n\s*\}, true\);/);
     expect(r.js).not.toMatch(/style\.display\s*=/);
   });
 

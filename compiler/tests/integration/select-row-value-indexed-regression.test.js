@@ -76,13 +76,16 @@ describe("select-row value-indexed regression", () => {
     const { clientJs } = compileFixture();
     // The == predicate bind uses the value-indexed registration
     // (Step 2b wiring + S103 detector).
-    expect(clientJs).toMatch(/_scrml_cs_reactive_subscribe_when\("editingId",\s*item\.id/);
+    // S469: the bucket value is the ROW's `item.id`, re-read by a live-keyed effect so
+    // the registration follows the row (`_scrml_vi_v = (item.id)`).
+    expect(clientJs).toMatch(/const _scrml_vi_v = \(item\.id\);/);
+    expect(clientJs).toMatch(/_scrml_cs_reactive_subscribe_when\("editingId",\s*_scrml_vi_v/);
     // S103 follow-on: the != predicate ALSO uses value-indexed registration.
     // Runtime dispatch is identical for == and != (subscribers fire on
     // transitions to/from valueKey regardless of predicate polarity); the
     // bind function recomputes truthiness internally. Both halves of the
     // TodoMVC select-row hot path now narrow to O(2) per write.
-    expect(clientJs).toMatch(/_scrml_cs_reactive_subscribe_when\("editingId",\s*item\.id/);
+    expect(clientJs.match(/_scrml_cs_reactive_subscribe_when\("editingId",\s*_scrml_vi_v/g)?.length).toBe(2);
     // LEGACY _scrml_reactive_subscribe SHOULD NOT appear for editingId in
     // this fixture anymore — both bind shapes migrate.
     expect(clientJs).not.toMatch(/_scrml_reactive_subscribe\("editingId"/);
