@@ -17,7 +17,7 @@ This tutorial walks you from an empty directory to a small but complete scrml ap
 scrml is a command-line compiler that runs on [Bun](https://bun.sh). It is not published to npm; you install it from the GitHub repository. With Bun installed (`curl -fsSL https://bun.sh/install | bash`):
 
 ```
-git clone https://github.com/bryanmaclee/scrml
+git clone https://github.com/scrml-lang/scrml
 cd scrml
 bun install
 bun link          # puts the `scrml` command on your PATH
