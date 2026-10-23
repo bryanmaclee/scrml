@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 266 | 4 |
+| HIGH | 265 | 4 |
 | MED | 683 | 8 |
 | LOW | 474 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -291,9 +291,11 @@ ${
 
 → E-VALUE-FUNCTION-STORED (both arm spellings, on 6f35fa4bb and at head). It also fires on a mis-lexed arm body (`42 -> /"/.source,` — see g-impl1-regex-after-binary-operator-lexed-as-division-s469). The detector reads arm text that is not a function as one; owed: decide "the arm yields a function" from the lowered arm, not the raw text.
 
-### g-impl1-legacy-pipe-literal-match-arms-s469 — `match` arms written with a leading legacy `|` before a LITERAL pattern (`| 1 :> "one"`) are not read as arms: a statement `match` silently runs the LAST arm's body for every subject, and a value `match` is refused with E-VALUE-FUNCTION-STORED + E-CG-003 — `NEW S469; HIGH; open (silent miscompile, statement form)`
+### g-impl1-legacy-pipe-literal-match-arms-s469 — `match` arms written with a leading legacy `|` before a LITERAL pattern (`| 1 :> "one"`) are not read as arms: a statement `match` silently runs the LAST arm's body for every subject, and a value `match` is refused with E-VALUE-FUNCTION-STORED + E-CG-003 — `NEW S469; HIGH; RESOLVED S469 (s469-impl1-arm-commas r5)`
 
-<!-- @gap id=g-impl1-legacy-pipe-literal-match-arms-s469 sev=HIGH status=open locus=compiler/src/ast-builder.js(the match arm level — a `|`-led literal head is no arm form; the `|` skip in _parseRecursiveBodyInner covers only `| _` / `| else` / `| ( … )`) prov=review:s469-impl1-arm-commas(final review of 6f35fa4bb — "refused on head, broken on base");dispatch:s469-impl1-arm-commas(r4, measured);spec:§18.2,§19.4.5 -->
+<!-- @gap id=g-impl1-legacy-pipe-literal-match-arms-s469 sev=HIGH status=resolved locus=compiler/src/ast-builder.js(the match arm level — a `|`-led literal head is no arm form; the `|` skip in _parseRecursiveBodyInner covers only `| _` / `| else` / `| ( … )`) prov=review:s469-impl1-arm-commas(final review of 6f35fa4bb — "refused on head, broken on base");dispatch:s469-impl1-arm-commas(r4, measured);spec:§18.2,§19.4.5 -->
+
+RESOLVED S469 (s469-impl1-arm-commas r5, the S435 security limb — a silent miscompile that decided an auth outcome): a `|`-led `match` arm (literal, string, negative or variant head; first, later or every arm) is refused with E-PARSE-001 in EVERY position and spelling — never read past. Statement parser: at the arm level the `|` ends the previous arm body (collectExpr) and is refused (`_parseRecursiveBodyInner`); raw-arm lowering: `rawArmHasLeadingPipeArm` (arm-list-split.ts, the lexer's tokens) per split arm in `emitMatchExpr`; the raw-arm splitter no longer reads an operator's operand (`x + "|"`) as a head. Refusal, not dispatch: SPEC §19.4.5 says §18.2's `match` grammar never admitted a leading `|`. Unchanged: `| _` / `| else` / `| ( … )` (g-impl1-multi-scrutinee-pipe-wildcard-accepted-s452) and the `!{}` / engine message-arm `|`. Some value-position compiles are refused by the typer first (the filed false E-VALUE-FUNCTION-STORED) — still a refusal. Pinned by `compiler/tests/unit/match-leading-pipe-arm-s469.test.js` (7 positions × 8 lists × newline / comma / one-line), the seeded differential (`|`-led arms generated, refused in every spelling), and security-failable-pack n24 (18 shapes; on be0a7799d the 9 statement shapes logged the wrong password in). Corpus emit differential be0a7799d's arm code → fix: no artifact changed. Original entry:
 
 The leading `|` is a legacy spelling of a `!{}` handler arm (§19.4.5); a `match` arm takes no leading `|` (the bootstrap refuses it as E-PARSE-ARM). impl#1 measured S469 r4 on 6f35fa4bb and at this branch's head:
 

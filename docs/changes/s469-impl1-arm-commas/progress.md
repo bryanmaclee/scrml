@@ -80,3 +80,13 @@ already ending in `,` is skipped); an arm ending in `;` is NOT rewritten and is 
       error/handler-pipeless-arms-rt-newline-list. impl#1 conformance 1731/1811 + 80 xfail.
 - [x] Bootstrap conformance: PASS 217 (main) → 250 (+33). 7 UNSUPPORTED → FAIL (they now parse and fail later).
 - [x] Corpus emit diff (r4 fix vs the same tree with the two pre-r4 files): 171 diffs, all `_scrml_project_root`.
+
+## Round 5 (PA: fix g-impl1-legacy-pipe-literal-match-arms-s469 here, S435 security limb)
+- [x] Refuse, not dispatch (SPEC §19.4.5: "§18.2's `match` grammar never admitted a leading `|`"): a `|`-led
+      match arm is E-PARSE-001 in every position and spelling — statement parser (6b7252f89) and raw-arm lowering
+      (per split arm, via arm-list-split's tokens); the raw splitter no longer reads an operator's operand as a head
+      (8a161e3ac). `| _` / `| else` / `| ( … )` and `!{}` / message-arm pipes unchanged.
+- [x] Tests: `match-leading-pipe-arm-s469.test.js` (67); differential generates `|`-led arms (refused everywhere);
+      pack n24 +18 (563): on be0a7799d the 9 statement shapes FAIL.
+- [x] Corpus emit diff (pre-r5 arm code → fix, same tree): 171 diffs, all `_scrml_project_root` — no program changed.
+- [x] impl#1 conformance 1731/1811 + 80 xfail. Gap resolved; state.ts --write.
