@@ -171,6 +171,105 @@ function _jsReadsAnyName(js, names) {
   return hit;
 }
 
+/**
+ * The free identifiers of the emitted JS expression `js` (acorn): a member's property
+ * name and an object key are not references, a name bound by a function / arrow
+ * parameter (or a declaration) inside `js` is not free there, and `_scrml_…` names are
+ * compiler-generated. Unparseable text answers null.
+ */
+function _jsFreeNames(js) {
+  let ast;
+  try {
+    ast = acorn.parse(`(${js})`, { ecmaVersion: "latest", sourceType: "script", allowReturnOutsideFunction: true });
+  } catch {
+    return null;
+  }
+  const out = new Set();
+  const patternNames = (pat, into) => {
+    if (!pat) return;
+    if (pat.type === "Identifier") into.add(pat.name);
+    else if (pat.type === "ObjectPattern") for (const pr of pat.properties) patternNames(pr.type === "RestElement" ? pr.argument : pr.value, into);
+    else if (pat.type === "ArrayPattern") for (const el of pat.elements) patternNames(el, into);
+    else if (pat.type === "RestElement") patternNames(pat.argument, into);
+    else if (pat.type === "AssignmentPattern") patternNames(pat.left, into);
+  };
+  const walk = (node, parent, key, bound) => {
+    if (!node || typeof node.type !== "string") return;
+    if (node.type === "Identifier") {
+      const isProp = parent && (
+        (parent.type === "MemberExpression" && key === "property" && !parent.computed) ||
+        (parent.type === "Property" && key === "key" && !parent.computed && !parent.shorthand)
+      );
+      // A called name (`isAdmin()`) is a function: its binding never changes, and a
+      // file-level one is renamed after this pass — it is read live, not snapshot.
+      const isCallee = parent && parent.type === "CallExpression" && key === "callee";
+      if (!isProp && !isCallee && !bound.has(node.name) && !node.name.startsWith("_scrml_")) out.add(node.name);
+      return;
+    }
+    let inner = bound;
+    if (node.type === "ArrowFunctionExpression" || node.type === "FunctionExpression" || node.type === "FunctionDeclaration") {
+      inner = new Set(bound);
+      if (node.id) inner.add(node.id.name);
+      for (const prm of node.params) patternNames(prm, inner);
+      walk(node.body, node, "body", inner);
+      return;
+    }
+    if (node.type === "VariableDeclarator") { patternNames(node.id, bound); walk(node.init, node, "init", bound); return; }
+    if (node.type === "CatchClause") { inner = new Set(bound); patternNames(node.param, inner); walk(node.body, node, "body", inner); return; }
+    for (const k of Object.keys(node)) {
+      const v = node[k];
+      if (Array.isArray(v)) { for (const c of v) if (c && typeof c.type === "string") walk(c, node, k, inner); }
+      else if (v && typeof v.type === "string") walk(v, node, k, inner);
+    }
+  };
+  walk(ast, null, null, new Set());
+  return out;
+}
+
+// JS globals an emitted condition may name directly (never snapshot — they are not
+// locals of the lift body).
+const _LIFT_GLOBAL_NAMES = new Set([
+  "undefined", "NaN", "Infinity", "globalThis", "window", "document", "Math", "JSON", "Number", "String",
+  "Boolean", "Object", "Array", "Date", "RegExp", "Symbol", "BigInt", "Map", "Set", "Promise", "console",
+  "isNaN", "isFinite", "parseInt", "parseFloat", "Error", "arguments", "this",
+]);
+
+/**
+ * S469 round 3 — the names a gate condition `exprJS` reads that are LOCAL to the code
+ * rendering it (the lift body's `let`s, counters, accumulators, plain-loop binders).
+ * A gate's own effect re-runs LATER, when a cell it reads changes; reading such a local
+ * then would see its FINAL value (`let i = 0; while (i < 3) { lift <b if=(i == @n)>…;
+ * i = i + 1 }` — every element would test `3 == @n`). These names are SNAPSHOT: the
+ * effect is created inside a function whose parameters are bound to the locals' values
+ * at the moment the markup is rendered — the values an inline evaluation reads. Every
+ * free name of the condition is a candidate (the condition is evaluated right there, so
+ * each one is in scope); the row item and the replayed item-derived locals of a
+ * reconciled row are excluded (the per-item wrap re-resolves them live), as are JS
+ * globals and compiler-generated names.
+ */
+function _liftGateSnapshotNames(exprJS) {
+  const free = _jsFreeNames(exprJS);
+  if (!free) return [];
+  const live = new Set();
+  for (const ctx of _scrml_lift_reconcile_ctx_stack) {
+    if (ctx.iterVar) live.add(ctx.iterVar);
+    if (ctx.itemDerivedLocals) for (const l of ctx.itemDerivedLocals) for (const bn of l.bindNames) live.add(bn);
+  }
+  const out = [];
+  for (const name of free) {
+    if (live.has(name) || _LIFT_GLOBAL_NAMES.has(name)) continue;
+    out.push(name);
+  }
+  return out;
+}
+
+/** Wrap effect-creating `effectLines` so the `names` read their values at render time. */
+function _liftSnapshotWrap(effectLines, names) {
+  if (names.length === 0) return effectLines;
+  const params = names.join(", ");
+  return [`((${params}) => {`, ...effectLines.map((l) => `  ${l}`), `})(${params});`];
+}
+
 function _liftLiveActive() {
   return _scrml_lift_live_stack.length > 0 && !currentLiftReconcileCtx();
 }
@@ -727,6 +826,7 @@ function emitLiftIfGate(lines, elVar, exprJS, rawText) {
   lines.push(`const ${phVar} = _scrml_g.document.createComment("scrml-if-row");`);
   const ctx = currentLiftReconcileCtx();
   const pred = ctx ? detectPredicateShapeBind(rawText) : { matched: false };
+  const snap = _liftGateSnapshotNames(exprJS);
   if (ctx && pred.matched) {
     lines.push(`let ${curVar} = (${exprJS}) ? ${elVar} : ${phVar};`);
     const updaterVar = genVar("if");
@@ -735,11 +835,13 @@ function emitLiftIfGate(lines, elVar, exprJS, rawText) {
     lines.push(`let ${offVar} = null;`);
     lines.push(`let ${keyVar} = null;`);
     // The bucket calls the updater outside any effect: it re-resolves the row itself.
-    lines.push(`function ${updaterVar}() {`);
-    for (const l of computeItemDerivedReplay(swap, [ctx.iterVar], 'return;')) lines.push(`  ${l}`);
-    lines.push(`  ${swap}`);
-    lines.push(`}`);
-    for (const l of maybeWrapLiftPerItemEffect([
+    // It is defined inside the snapshot scope with the effect, so both read the
+    // render-time values of any body local the condition names.
+    const gateLines = [`function ${updaterVar}() {`];
+    for (const l of computeItemDerivedReplay(swap, [ctx.iterVar], 'return;')) gateLines.push(`  ${l}`);
+    gateLines.push(`  ${swap}`);
+    gateLines.push(`}`);
+    for (const l of _liftSnapshotWrap([...gateLines, ...maybeWrapLiftPerItemEffect([
       `const _scrml_vi_v = (${pred.valueExprJS});`,
       `if (${offVar} === null || _scrml_vi_v !== ${keyVar}) {`,
       `  if (${offVar} !== null) ${offVar}();`,
@@ -747,20 +849,26 @@ function emitLiftIfGate(lines, elVar, exprJS, rawText) {
       `  ${offVar} = _scrml_reactive_subscribe_when(${JSON.stringify(pred.cellName)}, _scrml_vi_v, ${updaterVar});`,
       `}`,
       `_scrml_untracked(${updaterVar});`,
-    ], true, `if (${offVar} !== null) { ${offVar}(); ${offVar} = null; }`)) lines.push(l);
+    ], true, `if (${offVar} !== null) { ${offVar}(); ${offVar} = null; }`)], snap)) lines.push(l);
     return curVar;
   }
   if (ctx) {
     lines.push(`let ${curVar} = (${exprJS}) ? ${elVar} : ${phVar};`);
-    for (const l of maybeWrapLiftPerItemEffect([swap], true)) lines.push(l);
+    for (const l of _liftSnapshotWrap(maybeWrapLiftPerItemEffect([swap], true), snap)) lines.push(l);
     return curVar;
   }
   if (_liftLiveActive() && _jsReadsAnyName(exprJS, _liftLiveArmNames())) {
     lines.push(`let ${curVar} = (${exprJS}) ? ${elVar} : ${phVar};`);
     return curVar;
   }
-  lines.push(`let ${curVar} = ${elVar};`);
-  lines.push(`_scrml_effect(function() { ${swap} }, true);`);
+  if (snap.length > 0) {
+    // A body local: evaluated inline as well, so the enclosing group keeps the read
+    // (it re-renders on it, as for every other binding of the body).
+    lines.push(`let ${curVar} = (${exprJS}) ? ${elVar} : ${phVar};`);
+  } else {
+    lines.push(`let ${curVar} = ${elVar};`);
+  }
+  for (const l of _liftSnapshotWrap([`_scrml_effect(function() { ${swap} }, true);`], snap)) lines.push(l);
   return curVar;
 }
 
@@ -806,15 +914,17 @@ function liftConditionValue(val, attrName, tag, attr, node) {
 // (a live-keyed per-item one in a reconciled row), chosen as emitLiftIfGate chooses.
 function emitLiftShowBinding(lines, elVar, exprJS) {
   const stmt = `${elVar}.style.display = (${exprJS}) ? "" : "none";`;
+  const snap = _liftGateSnapshotNames(exprJS);
   if (currentLiftReconcileCtx()) {
-    for (const l of maybeWrapLiftPerItemEffect([stmt])) lines.push(l);
+    for (const l of _liftSnapshotWrap(maybeWrapLiftPerItemEffect([stmt]), snap)) lines.push(l);
     return;
   }
   if (_liftLiveActive() && _jsReadsAnyName(exprJS, _liftLiveArmNames())) {
     lines.push(stmt);
     return;
   }
-  lines.push(`_scrml_effect(function() { ${stmt} });`);
+  if (snap.length > 0) lines.push(stmt); // a body local: the group keeps the read too
+  for (const l of _liftSnapshotWrap([`_scrml_effect(function() { ${stmt} });`], snap)) lines.push(l);
 }
 
 // ---------------------------------------------------------------------------

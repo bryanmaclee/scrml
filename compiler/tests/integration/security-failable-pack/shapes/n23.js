@@ -115,4 +115,43 @@ for (const keyed of [true, false]) {
     }
   }
 }
+// S469 round 3 — a guard that reads a LOCAL of the lift body (a counter, an accumulator, a flag set after
+// the lift). Only the FIRST element carries the text; the guard is open for every later value of the
+// local. A gate whose effect re-reads the local's FINAL value opens the first element on the wrong password.
+// (show= is a visibility toggle, not a gate — its content stays in `#out`'s text — so it is not probed here.)
+const LOCALS = [
+  ["while counter, i > 0", `let i = 0
+ while (i < 2) { lift <b if=(i > 0 || @pw == "secret")>\${i == 0 ? "LOGGED IN" : ""}</b>
+ i = i + 1 }`],
+  ["while counter, i != 0", `let i = 0
+ while (i < 2) { lift <b if=(i != 0 || @pw == "secret")>\${i == 0 ? "LOGGED IN" : ""}</b>
+ i = i + 1 }`],
+  ["counter over @items", `let c = 0
+ for (r of @items) { c = c + 1
+ lift <b if=(c > 1 || @pw == "secret")>\${c == 1 ? "LOGGED IN" : ""}</b> }`],
+  ["accumulator over a literal", `let acc = 0
+ for (x of [1, 2]) { acc = acc + x
+ lift <b if=(acc > 1 || @pw == "secret")>\${acc == 1 ? "LOGGED IN" : ""}</b> }`],
+  ["flag set after the lift", `let ok = false
+ lift <b if=(ok || @pw == "secret")>LOGGED IN</b>
+ ok = true`],
+];
+const LOCAL_CTX = [
+  ["plain group", (b) => `\${ ${b} }`],
+  ["if-lift arm", (b) => `\${ if (true) { ${b} } }`],
+  ["row", (b) => `\${ for (row of @rows) { ${b} } }`],
+];
+for (const [cn, ctx] of LOCAL_CTX) {
+  for (const [ln, body] of LOCALS) {
+    // A `while` inside a reconciled row lifts outside the row (g-while-lift-in-reconciled-row-escapes-the-row-s469).
+    if (cn === "row" && ln.startsWith("while")) continue;
+    shapes.push([`body local (${cn}): ${ln}`, `<pw> = "secret"
+<rows> = [{ id: 1 }]
+<items> = [{ id: 1 }, { id: 2 }]
+<button id="wrong" onclick=\${ @pw = "wrong" }>go</button>
+<button id="right" onclick=\${ @pw = "secret" }>go</button>
+<div id="out">${ctx(body)}</div>
+`]);
+  }
+}
 export default shapes;

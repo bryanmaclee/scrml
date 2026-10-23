@@ -176,3 +176,25 @@ describe("S469 round 2 — show=, the top-level bare `if`, and a component's `@`
     expect(r.js).toMatch(/setAttribute\("title", _scrml_cs_reactive_get\("ok"\)\)/);
   });
 });
+
+describe("S469 round 3 — a gate reading a body local snapshots it at render", () => {
+  test("plain group: the local is a parameter of the gate's effect scope, and the group keeps the read", () => {
+    const r = compile(`<n> = 1\n<div>\${ let i = 0\n while (i < 3) { lift <span><b if=(i == @n)>x</b></span>\n i = i + 1 } }</div>\n`);
+    expect(r.errors).toEqual([]);
+    expect(r.js).toMatch(/let (_scrml_cur_\w+) = \(_scrml_structural_eq\(i, _scrml_cs_reactive_get\("n"\)\)\) \? _scrml_lift_el_\w+ : _scrml_ph_\w+;\n\s*\(\(i\) => \{\n\s*_scrml_effect\(function\(\) \{ \1 = _scrml_ifrow_apply\(/);
+    expect(r.js).toMatch(/\}\)\(i\);/);
+  });
+
+  test("a called function is not snapshot; a gate with no local keeps the plain effect", () => {
+    const r = compile(`<role> = "admin"\n\${ function isAdmin() { return @role == "admin" } }\n<div>\${ lift <span><b if=(isAdmin() && true)>x</b></span> }</div>\n`);
+    expect(r.errors).toEqual([]);
+    expect(r.js).not.toMatch(/\(\(isAdmin\) =>/);
+    expect(r.js).toMatch(/let _scrml_cur_\w+ = _scrml_lift_el_\w+;\n\s*_scrml_effect\(function\(\) \{/);
+  });
+
+  test("an arrow parameter inside the condition is not a free name", () => {
+    const r = compile(`<xs> = [1]\n<div>\${ lift <span><b if=(@xs.some(v => v > 0))>x</b></span> }</div>\n`);
+    expect(r.errors).toEqual([]);
+    expect(r.js).not.toMatch(/\}\)\(v\);/);
+  });
+});

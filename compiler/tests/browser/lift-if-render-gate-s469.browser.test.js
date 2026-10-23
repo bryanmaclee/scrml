@@ -534,3 +534,85 @@ describe("S469 round 2 — a gate flip does not re-render a plain lift group", (
     }
   });
 });
+
+describe("S469 round 3 — a gate reading a LOCAL of the lift body uses its value at render time, not its final value", () => {
+  // Each shape: [name, body (inside the context), [@n, expected count of open gates]...]. `sel` is
+  // `b.g` for if=, `b.s:visible` handled by `visible()` for show=.
+  const SHAPES = [
+    ["while counter, if=(i == @n)", `let i = 0
+ while (i < 3) { lift <span><b class="g" if=(i == @n)>\${i}</b></span>
+ i = i + 1 }`, [[3, 0], [1, 1], [0, 1], [3, 0]]],
+    ["while counter, if=(i != @n)", `let i = 0
+ while (i < 3) { lift <span><b class="g" if=(i != @n)>\${i}</b></span>
+ i = i + 1 }`, [[3, 3], [1, 2], [7, 3]]],
+    ["non-keyed counter over @items", `let c = 0
+ for (r of @items) { c = c + 1
+ lift <b class="g" if=(c == @n)>\${c}</b> }`, [[3, 1], [4, 0], [1, 1]]],
+    ["accumulator over a literal", `let acc = 0
+ for (x of [1, 2, 3]) { acc = acc + x
+ lift <b class="g" if=(acc == @n)>\${acc}</b> }`, [[6, 1], [3, 1], [2, 0], [1, 1]]],
+    ["a flag set after the lift", `let ok = false
+ lift <b class="g" if=(ok || @n > 5)>x</b>
+ ok = true`, [[1, 0], [9, 1], [2, 0]]],
+  ];
+  const CONTEXTS = [
+    ["a plain group", (body) => `\${ ${body} }`],
+    ["an \`if … lift\` arm", (body) => `\${ if (@on) { ${body} } }`],
+    ["a reconciled row", (body) => `\${ for (row of @rows) { ${body} } }`],
+  ];
+  for (const [cname, ctx] of CONTEXTS) {
+    for (const [sname, body, steps] of SHAPES) {
+      // A `while` loop inside a reconciled `for … lift` row lifts to the ambient target, not the
+      // row (pre-existing on main — g-while-lift-in-reconciled-row-escapes-the-row-s469), so the
+      // row context runs the `for`-based shapes; the `while` ones run in the group and the arm.
+      if (cname === "a reconciled row" && body.startsWith("let i = 0\n while")) continue;
+      test(`${cname}: ${sname}`, async () => {
+        const app = compileAndMount(`<n> = 1
+<on> = true
+<rows> = [{ id: 1 }]
+<items> = [{ id: 1 }, { id: 2 }, { id: 3 }]
+<div id="out">${ctx(body)}</div>
+`);
+        expect(app.errors).toEqual([]);
+        await flush();
+        for (const [n, want] of steps) {
+          await set("n", n);
+          expect([n, count("#out b.g")]).toEqual([n, want]);
+        }
+      });
+    }
+    test(`${cname}: show=(i == @n) over a counter`, async () => {
+      const app = compileAndMount(`<n> = 1
+<on> = true
+<rows> = [{ id: 1 }]
+<div id="out">${ctx(`let i = 0
+ for (x of [0, 1, 2]) { lift <span><b class="s" show=(i == @n)>\${x}</b></span>
+ i = i + 1 }`)}</div>
+`);
+      expect(app.errors).toEqual([]);
+      const shown = () => [...document.querySelectorAll("#out b.s")].filter((e) => e.style.display !== "none").map((e) => e.textContent);
+      await flush();
+      expect(shown()).toEqual(["1"]);
+      await set("n", 3);
+      expect(shown()).toEqual([]);
+      await set("n", 2);
+      expect(shown()).toEqual(["2"]);
+    });
+  }
+
+  test("a reconciled row's own local written after the lift: the snapshot holds the render-time value", async () => {
+    const app = compileAndMount(`<n> = 1
+<rows> = [{ id: 1 }, { id: 2 }]
+<div id="out">\${ for (row of @rows) { let t = 1
+ lift <b class="g" if=(t == @n)>\${row.id}</b>
+ t = 99 } }</div>
+`);
+    expect(app.errors).toEqual([]);
+    await flush();
+    expect(count("#out b.g")).toBe(2);
+    await set("n", 99);
+    expect(count("#out b.g")).toBe(0);
+    await set("n", 1);
+    expect(count("#out b.g")).toBe(2);
+  });
+});
