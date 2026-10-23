@@ -32,7 +32,7 @@
                 <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
                     Added v0.3 Option-d
                 </span>
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§51"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§51"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §51.0.F.1 (normative)
                 </a>
@@ -233,7 +233,7 @@ function refresh() &#123;
             error this lint replaces),
             <strong>§28</strong> (lint suppression configs),
             <strong>§34</strong> catalog row. Spec lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>.

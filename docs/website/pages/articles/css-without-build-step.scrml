@@ -134,7 +134,7 @@ ${
             <li><a href="https://dev.to/bryan_maclee/the-server-boundary-disappears-hap" class="text-blue-700 hover:text-blue-900 underline">The server boundary disappears</a>. The same compiler-owns-it pattern, applied to the wire.</li>
             <li><a href="https://dev.to/bryan_maclee/scrmls-living-compiler-23f9" class="text-blue-700 hover:text-blue-900 underline">scrml's Living Compiler</a>. The transformation-registry framing for why scrml puts work in the compiler.</li>
             <li><a href="https://dev.to/bryan_maclee/what-scrmls-lsp-can-do-that-no-other-lsp-can-and-why-giti-follows-from-the-same-principle-4899" class="text-blue-700 hover:text-blue-900 underline">What scrml's LSP can do that no other LSP can, and why giti follows from the same principle</a>. What vertical integration unlocks for tooling and version control.</li>
-            <li><strong>scrml on GitHub:</strong> <a href="https://github.com/bryanmaclee/scrmlTS" class="text-blue-700 hover:text-blue-900 underline">github.com&#47;bryanmaclee&#47;scrmlTS</a>. The working compiler, examples, spec, benchmarks.</li>
+            <li><strong>scrml on GitHub:</strong> <a href="https://github.com/scrml-lang/scrml" class="text-blue-700 hover:text-blue-900 underline">github.com&#47;bryanmaclee&#47;scrmlTS</a>. The working compiler, examples, spec, benchmarks.</li>
         </ul>
 
     </article>

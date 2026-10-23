@@ -42,7 +42,7 @@ type Task:struct = {
 
 type TaskError:enum = { Duplicate }
 
-fn isActive(t) -> boolean {
+fn isActive(t: Task) -> boolean {
     return t.completed_at is not
 }
 
@@ -57,7 +57,7 @@ function insertTask(text: string)! -> TaskError {
               RETURNING id, text, completed_at`}.get()
 }
 
-function flipTask(id) {
+function flipTask(id: number) {
     return ?{`UPDATE tasks SET completed_at =
                 CASE WHEN completed_at IS NULL THEN ${Date.now()} ELSE NULL END
               WHERE id = ${id}
@@ -78,8 +78,8 @@ There is no `null` in scrml. `not` is the one absence value, and you test for it
 <channel name="tasks">
     <tasks>: Task[] = []
 
-    function addRow(row) { @tasks = [...@tasks, row] }
-    function replaceRow(row) { @tasks = @tasks.map(t => t.id == row.id ? row : t) }
+    function addRow(row: Task) { @tasks = [...@tasks, row] }
+    function replaceRow(row: Task) { @tasks = @tasks.map(t => t.id == row.id ? row : t) }
 </>
 
 type Filter:enum = { All, Active, Done }
@@ -124,7 +124,7 @@ function submit() {
     @phase = .Saved
 }
 
-function toggle(id) {
+function toggle(id: number) {
     replaceRow(flipTask(id))
 }
 ```
@@ -231,6 +231,7 @@ const <doubled> = @count * 2
 Specified:
 
 ```scrml
+// gate: skip — specified (SPEC §66); compiles on the bootstrap (`bun run boot:compile`), not on the shipping compiler
 let <count:int=0/>                          // writable: `let`, before the `<`, is the replace grant on a scalar (§66.9, §66.2.5)
 <step=1/>                                   // locked constant; the integer literal infers `int` (§66.3)
 <doubled:int=(@count * 2)/>                 // derived: locked + a reactive initializer (§66.9)
@@ -259,6 +260,7 @@ type Phase:enum = { Idle, Loading, Done, Failed }
 Specified:
 
 ```scrml
+// gate: skip — specified (SPEC §66.13); not yet in the shipping compiler
 <phase:Phase=.Idle single>                      // one vehicle; the name IS the variable (§66.13.3)
     <Idle    rule=.Loading : "Ready">              // ⚑ O52: state-child marker + `:`-shorthand body
     <Loading rule=(.Done | .Failed) : "Loading…">
@@ -288,6 +290,7 @@ const Swatch = <span class="chip" props={ label: string, hex: string }>
 Specified:
 
 ```scrml
+// gate: skip — specified (SPEC §66.15); not yet in the shipping compiler
 export <swatch:struct>                                         // writable fields are CHILD declarations (§66.4 rule 6, S447)
     let <label:string="Brand"/>
     let <hex:string=@brand/>                                   // `let` + reactive initializer = SEEDED (§66.9)
@@ -320,6 +323,7 @@ function wipe() { @audit = [] }
 Specified:
 
 ```scrml
+// gate: skip — specified (SPEC §66.12); not yet in the shipping compiler
 <audit:Entry[free, append]=[]/>                  // free length, grows at the end only, no replace
 
 function record(action: string) {
@@ -381,7 +385,7 @@ scrml is not on npm. You run it from a clone.
 curl -fsSL https://bun.sh/install | bash
 
 # Get the compiler and its dependencies
-git clone https://github.com/bryanmaclee/scrml.git
+git clone https://github.com/scrml-lang/scrml.git
 cd scrml
 bun install
 

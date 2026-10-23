@@ -212,7 +212,7 @@ giti history  : show what happened</code></pre>
             <li><a href="https://dev.to/bryan_maclee/introducing-scrml-a-single-file-full-stack-reactive-web-language-9dp" class="text-blue-700 hover:text-blue-900 underline">Introducing scrml: a single-file, full-stack reactive web language</a>. The one-pager intro.</li>
             <li><a href="https://dev.to/bryan_maclee/null-was-a-billion-dollar-mistake-falsy-was-the-second-3o61" class="text-blue-700 hover:text-blue-900 underline">Null was a billion-dollar mistake. Falsy was the second.</a>. On <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">n&#111;t</code> and the absence model.</li>
             <li><a href="https://dev.to/bryan_maclee/scrmls-living-compiler-23f9" class="text-blue-700 hover:text-blue-900 underline">scrml's Living Compiler</a>. The compile-time evaluation story and why it changes what tooling can do.</li>
-            <li><strong>scrml on GitHub:</strong> <a href="https://github.com/bryanmaclee/scrmlTS" class="text-blue-700 hover:text-blue-900 underline">github.com&#47;bryanmaclee&#47;scrmlTS</a>. The working compiler, examples, spec, benchmarks.</li>
+            <li><strong>scrml on GitHub:</strong> <a href="https://github.com/scrml-lang/scrml" class="text-blue-700 hover:text-blue-900 underline">github.com&#47;bryanmaclee&#47;scrmlTS</a>. The working compiler, examples, spec, benchmarks.</li>
         </ul>
 
     </article>

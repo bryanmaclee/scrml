@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 264 | 4 |
-| MED | 668 | 7 |
-| LOW | 457 | 0 |
+| HIGH | 265 | 4 |
+| MED | 669 | 7 |
+| LOW | 463 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -89,6 +89,82 @@ Found in the #1468 r2 review. `let` on a sequence is E-GRANT-LET-ON-SEQUENCE: a 
 <!-- @gap id=g-bootstrap-whole-struct-write-bypasses-tape-field-grants-s469 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(wholeFieldWrite: the owner's `let` grants `replace` of the whole value; a struct-typed value's tape fields are not judged — fieldAtWrite judges only `@b.xs = …`) prov=review:#1468-r2(s469-bootstrap-parse-arms-union);ruling:user-voice-scrml.md(S469 "NO unconstrained sequence behaviour anywhere in the language", point (4), PA reading);empirical:S469(re-executed on 8ca23db90 — `whole()` clean, `part()` E-WRITE-NOT-GRANTED) -->
 
 SPEC §66.12.6 rule 4 (S469, point (4)): *"Spread-rebuild and other whole-value writes are classified as edits or a `replace` (§66.11.2, O37 = certify). They never get around the grants."* A whole-struct write that changes a tape field IS a `replace` of that field, so it must be judged against the field's own grants. Today the owner's `let` alone admits it, and the field-level refusal is bypassed by writing the whole struct. The PA reads the S469 ruling this way and has told bryan. Owed: in `wholeFieldWrite` (and the spread-override path), for a struct-typed target, classify each tape-typed field of the new value. An unchanged field (`xs: @b.xs`) or a spread that keeps it is no write; any other value is a `replace` of the field, refused unless the field's type grants `replace`.
+
+### g-nested-each-if-guard-dropped-s469 — (security) a NESTED `<each if=>` guard is silently dropped: `<each in=@xs as y><each in=@xs as x if=(@pw == "secret")>LOGGED IN</each></each>` renders the inner rows whatever the condition — `NEW S469 (final review of c2f7f9944; pre-existing); HIGH; open`
+
+<!-- @gap id=g-nested-each-if-guard-dropped-s469 sev=HIGH status=open locus=compiler/src/codegen/emit-each.ts(~1930-1990, the nested-each branch never reads innerNode.ifCond) prov=review:S469-c2f7f9944-final -->
+
+The top-level `<each>` lowers its `if=` (and the type system now walks it for failable calls). The nested branch of the each-render emitter builds the inner each without reading `innerNode.ifCond`, so the guard is lost. Any condition is silently true: an access check written as an `if=` renders protected rows. A separate fix is being dispatched.
+
+### g-derived-inline-match-arms-unscoped-s469 — the arm bodies of an inline `derived=match @x { … }` are not scope-checked: an undeclared name compiles, throws a ReferenceError when the arm runs, and leaves the engine state stale — `NEW S469 (final review of c2f7f9944); MED; open`
+
+<!-- @gap id=g-derived-inline-match-arms-unscoped-s469 sev=MED status=open locus=compiler/src/type-system.ts(engine-decl case: derivedExprNode is checked, inlineMatchBody arms are not) prov=review:S469-c2f7f9944-final -->
+
+The S469 round-3 scope check covers the `derived=<expr>` form only (`derivedExprNode`, including `derived=${ … }`). The inline-match form is checked for exhaustiveness (`checkDerivedEngineMatchExhaustiveness`) and for failable calls (the text-slot rule), but its arm bodies never reach `checkLogicExprIdents`.
+
+### g-engine-raw-body-names-unscoped-s469 — names in an engine raw body (a state-child / opener `effect=`, an `<onTransition>` body, a message arm) are not scope-checked: an undeclared `zzz()` in `effect=` compiles and throws at run time — `NEW S469 (final review of c2f7f9944); LOW; open`
+
+<!-- @gap id=g-engine-raw-body-names-unscoped-s469 sev=LOW status=open locus=compiler/src/type-system.ts(checkEngineRawBodies walk keeps only the §19.4.3 codes and E-SCOPE-001 for a late failable alias) prov=review:S469-c2f7f9944-final -->
+
+`checkEngineRawBodies` walks each body with the handler-context walk and keeps only E-ERROR-002 / E-IMPL1-FAILABLE-FN-VALUE (plus its own E-SCOPE-001 for a failable alias declared later). It discards the walk's scope diagnostics, because a body sees bindings the walk does not model: payload bindings, the engine variable, and names declared after the engine that run fine at transition time. Owed: model the body scope (payload bindings, engine vars, hoisted top-level declarations), then keep E-SCOPE-001.
+
+### g-engine-match-raw-body-failable-unwalked-s469 — (security) an engine or `<match>` body the compiler kept as RAW TEXT was never walked for failable calls: `<A rule=.B effect=${ @msg = check("wrong") ? "LOGGED IN" : "rejected" }>` compiled and a WRONG PASSWORD LOGGED IN — also the opener `effect=`, `<onTransition>` bodies and `if=` guards, `(state × message)` arms, `<onTimeout after=${…}>`, `:`-shorthand state / arm bodies, and a `match` on a failable call in a `<match>` arm (render or handler) — `NEW S469 (review); HIGH; RESOLVED S469`
+
+<!-- @gap id=g-engine-match-raw-body-failable-unwalked-s469 sev=HIGH status=resolved locus=compiler/src/engine-statechild-parser.ts(effect= brace counter)+compiler/src/type-system.ts(engine-decl / match-block cases)+compiler/src/codegen/emit-engine.ts(emitHookArm rewriteExpr of bodyRaw)+compiler/src/codegen/emit-match.ts(buildMatchArms re-parse) prov=spec:§19.4.3("Failing to handle the result of a `!` function call in any of these ways SHALL be a compile error: E-ERROR-002");review:S469-engine-effect;dispatch:s469-engine-effect-failable -->
+
+The engine body is kept as raw text (`rulesRaw`) and re-scanned by `engine-statechild-parser.ts`; the opener is scanned in ast-builder.js. Each `${` was bounded by a brace counter blind to strings, comments, templates and regular expressions. The type system never parsed any of these bodies. Codegen emitted them through the single-expression `rewriteExpr`, which also dropped every statement after the first, silently. `<match>` arms were lowered from codegen's own re-parse of the arm text, not from the `armBodyChildren` copy the walk stamped, so a `match` on a failable call in an arm compared the error object as a plain value. Measured on base `b75ad70f7` with the security-failable-pack family `n18` (45 shapes; filed as `n14` before the #1476 merge): 19 logged in on a wrong password. **RESOLVED S469** (branch `s469-engine-effect-failable`):
+- **One extent reader.** `interpolation-extent.ts` (after the #1476 merge, the ONE reader shared with `sliceTemplateText`) bounds a raw-text `${…}` block with acorn, under both the script goal and the module goal. Strings, comments, templates and regular expressions are read as JavaScript reads them. A block whose two readings disagree, or that holds an HTML-like comment, is unreadable. A block holding a markup value falls back to the block splitter's rule. The reader is used for every `${` in an engine opener: state-child `effect=`, `if=`, payload-binding values, opener end, inside-opener `:`, the closer-finders' skips, message-arm block bodies, and the engine opener `effect=`.
+- **One parse, walked and emitted.** `engine-body-reader.ts` parses each engine statement body once and caches it on its owner: state-child and opener `effect=`, `<onTransition>` body and guard, message arm, computed delay. A body the block splitter does not read as exactly one logic block is unreadable. `arm-body-reader.ts` does the same for `<match>` arm bodies (bare and `:`-shorthand) and engine `:`-shorthand state bodies. The type system walks these exact nodes: `checkEngineRawBodies` in the handler context, and `walkCodegenCopy` in render context. Codegen lowers the same nodes, so the walk's stamps reach the emitted code. Hook bodies now lower as statements (`emitLogicBody`).
+- **Fail closed.** An unreadable body is E-ERROR-002 in the type system, and codegen's floor refuses it as well; there is no raw-text fallback. A failable `match` in an expression slot lowered by `rewriteExpr` (a guard, a delay) is refused.
+- **Handled forms.** `check(p) !{…}`, and a `match` on the call, in an effect, an `<onTransition>` or an arm, were refused or silently wrong before. They now compile and discriminate the error.
+- **Text-lowered slots (review of 6e0770356, H1–H5).** These slots are lowered from their source text: the `<onTransition if=>` guard, the computed `<onTimeout>` / `<onIdle>` delay, a `derived=` expression or inline `match`, the structural `if=` on `<engine>` / `<match>`, and the `<match on=>` subject. A text lowering cannot honour a handler. The guard dropped `!{…}`, so `if=${ check(p) !{ _ :> false } }` emitted `if (check(p))` and a wrong password logged in. In such a slot a failable call (or `?{}`) is refused, handled or not (`failableNamedInText`, read lexically by acorn). A quoted guard (`if="false"`, which lowered to an always-true `if ("false")`) is E-COND-NOT-BOOLEAN.
+- **Walked floor.** The type system marks every body parse it walks. During a compile's codegen, a parse it never walked is refused rather than lowered (`bodyWasWalked`, set around the CG stage in api.js): a hook / effect / arm body, a guard, a delay, a `<match>` arm or a `:`-shorthand body.
+- **Live readers.** `native-walker/engine-statechild-walker.ts` is live for engine-decls that the native parser synthesizes. The text rescanner reads every engine of the per-file `buildAST` parse. Either way the body text goes through the one body parse.
+- **Round 3 (review of 5a88c3030).**
+  - **H1 — `<each>`.** The `<each>` opener `if=` is walked like any attribute value (E-ERROR-002). Its `!{}` form lowers correctly; a failable `match` there is refused, because the `if=` is lowered from text. `in=` / `of=` / `key=` are text slots.
+  - **H2 — late aliases.** Alias facts are hoisted file-wide: `hoistedFailableNames` judges every binding in the file with `failableFnValueOf`, to a fixpoint. A slot naming an alias declared after it is refused. An engine body that uses one is E-SCOPE-001 (a use before declaration), because the walk resolves names in document order.
+  - **M1 — unlexable text.** A text slot acorn cannot lex is refused outright.
+  - **L1 — one diagnostic.** A body the type system refused gets no second diagnostic from codegen (`markOwnerReported`).
+  - **L2.** The `derived=<expr>` expression is scope-checked, including `derived=${ … }`: the check reads the expression inside the wrapper and no longer reports "Undeclared identifier '$'". That form still does not lower (E-CODEGEN-INVALID-LOGIC on main and here). The inline `derived=match` arm bodies are NOT scope-checked (`g-derived-inline-match-arms-unscoped-s469`), and neither are names in engine raw bodies (`g-engine-raw-body-names-unscoped-s469`). The timer fix is under `g-ontimeout-after-brace-loses-timer-s469`.
+  - **Over-approximation wording.** A name bound to a failable function anywhere in the file counts in every slot, whatever scope it is bound in. The E-SCOPE-001 / E-ERROR-002 messages now say so ("this file binds a 'g' to a failable function … here or in another scope"). They no longer say "declare it above the engine" when it already is.
+
+Pack: n18 goes from base 3 PASS / 14 PASS-REFUSED / 9 PASS-DENY / **19 FAIL** to 11 / 31 / 3 / **0**. Corpus (`scripts/corpus-emit-differential.ts` over samples / examples / compiler/tests/fixtures / stdlib, base = archive of `b75ad70f7`): 1047 sources on both sides, 0 compile-outcome or diagnostic changes, and no artifact differs except for the embedded project-root path. Browser suite: per-test JUnit identical to main. Pins: `compiler/tests/unit/s469-engine-raw-body-failable.test.js` and the pack.
+
+### g-engine-in-match-arm-emits-nothing-s469 — an `<engine>` written inside a `<match>` arm body compiles clean and emits nothing: no transition table, no variant cell, no rendered arm — `NEW S469 (review of 6e0770356); LOW; open`
+
+<!-- @gap id=g-engine-in-match-arm-emits-nothing-s469 sev=LOW status=open locus=compiler/src/arm-body-reader.ts(native re-parse of the arm)+compiler/src/symbol-table.ts(PASS 10.A never registers an engine-decl from the arm re-parse) prov=review:S469-6e0770356 -->
+
+The arm body is re-parsed by the native parser (arm-body-reader `readBareArmBody`), which synthesizes an engine-decl (`synthEngineDecl`). That engine-decl never reaches SYM's engine registration, so it has no `engineMeta` and no codegen. Its bodies are not run, so this is no failable hole. It is a silent drop: refuse the form or support it.
+
+### g-state-child-duplicate-attr-dropped-s469 — a second `effect=` (or a `class=${…}`) on an engine state-child opener is dropped silently: only the first `effect=` is captured — `NEW S469 (review of 6e0770356); LOW; open`
+
+<!-- @gap id=g-state-child-duplicate-attr-dropped-s469 sev=LOW status=open locus=compiler/src/engine-statechild-parser.ts(effect= capture reads the first match) prov=review:S469-6e0770356 -->
+
+The dropped text is never emitted, so it is not walked-vs-emitted divergence. It should be a refusal (a duplicate reserved attribute) instead of a silent drop.
+
+### g-shorthand-match-in-component-body-dropped-s469 — a `<match>` whose arms use the `:`-shorthand, written inside a component body, renders nothing — `NEW S469 (review of 6e0770356); LOW; open`
+
+<!-- @gap id=g-shorthand-match-in-component-body-dropped-s469 sev=LOW status=open locus=compiler/src/component-expander.ts(+ codegen/emit-match.ts buildMatchArms) prov=review:S469-6e0770356 -->
+
+Silent drop (no output, no diagnostic). It is not a failable hole: the dropped arm body is never emitted.
+
+### g-ontimeout-after-brace-loses-timer-s469 — a `}` or `!{` inside an `<onTimeout after=${…}>` (or `<onIdle>`) delay drops the timer silently: the `after=` value is captured by a regex that stops early, `parseAfterDuration` returns `invalid`, and codegen skips the entry — `NEW S469 (review of 6e0770356); LOW; RESOLVED S469`
+
+<!-- @gap id=g-ontimeout-after-brace-loses-timer-s469 sev=LOW status=resolved locus=compiler/src/engine-statechild-parser.ts(scanForOnTimeoutEntries / scanForOnIdleEntries after= regex) prov=review:S469-6e0770356;pack:n18 "delay handled" (PASS-DENY) -->
+
+The timer never armed, so for failable calls it failed closed. **RESOLVED S469** (review of 5a88c3030, L2). `timerOpeners` (engine-statechild-parser.ts) ends the opener with `findOpenerEnd`, whose `${…}` is bounded by acorn; the old `[^>]*?\/>` regex lost a timer on `=>` / `:>`. `after=` is read by `parseOpenerAttributes`. `parseAfterDuration` bounds the computed form with `logicBlockClose`. An `after=` that is still not a duration is **E-ENGINE-021** (§51.0.M) in the type system; before, codegen skipped it with no diagnostic.
+
+### g-effect-body-brace-in-markup-text-warning-s469 — a `{` inside an engine `effect=${…}` body is reported by the markup-text lint as a stray brace in text (a false warning): the block splitter's markup scan reads the opener's attribute region as text — `NEW S469 (review of 6e0770356); LOW; open`
+
+<!-- @gap id=g-effect-body-brace-in-markup-text-warning-s469 sev=LOW status=open locus=compiler/src/block-splitter.js(engine body attribute region) prov=review:S469-6e0770356 -->
+
+Warning only; no behaviour change.
+
+### g-engine-direct-ontransition-one-sided-dropped-s469 — an engine-direct `<onTransition to=.B>` (no `from=`) is silently dropped by codegen: no hook fires and no diagnostic is reported (`collectEngineHooks` "defensive skip") — `NEW S469 (s469-engine-effect-failable probe); LOW; open`
+
+<!-- @gap id=g-engine-direct-ontransition-one-sided-dropped-s469 sev=LOW status=open locus=compiler/src/codegen/emit-engine.ts(collectEngineHooks — engine-direct entries need both endpoints) prov=empirical:security-failable-pack n14 "onTransition direct to ternary" (PASS-DENY "init" on main) -->
+
+Found while probing `<onTransition>` bodies. Inside a state-child, the enclosing state supplies the missing endpoint. Directly in the engine body nothing does, so the entry is skipped with no E-ONTRANSITION-NO-TARGET-style refusal. The body is still walked for failable calls (it fails closed), but a body without one never runs. The fix is to refuse the one-sided engine-direct form (or define its meaning in §51.0.H).
 
 ### g-bootstrap-int-to-string-conversion-unruled-s469 — the BOOTSTRAP has no way to turn an int (or a number / bool) into a string: `"typed " + @n` is E-OPERATOR-OPERAND-TYPE (correctly, S440 Gotcha Q1), and no conversion spelling is ruled, so bryan's `"typed " + <conversion>(@inputVal.length) + " chars"` cannot be written — `NEW S469; MED; ruling-gated (owner fork)`
 
@@ -5293,6 +5369,8 @@ gate earning its cost on its first real run.
 <!-- @gap id=g-gap-markers-duplicate-id-conflicting-status-double-counted sev=MED status=resolved locus=scripts/state.ts prov=rationale:the-counter-has-a-fail-loud-guard-for-an-unknown-status-but-none-for-a-duplicated-id-so-the-same-entry-can-be-both-open-and-resolved -->
 **⚑ RESOLVED — fixed + unit-tested at S334; gap was STALE-open.** `gapCountsFromTokens` (state.ts) dedups markers by id before counting and throws loud on a same-id pair with conflicting sev/status; `state-gap-integrity.test.js §1` pins both the collapse and the conflict-throw. Verified S354-peter, flipped as bookkeeping.
 
+**S469 hygiene — the agreeing case now throws too.** The silent collapse of an AGREEING same-id pair let five duplicated ids build up unseen: `g-bootstrap-opener-scalar-init-for-sequence-type-unchecked`, `g-spec-66-on-field-name-contradicts-illegal-names` and `g-spec-66-export-alone-on-attribute-unnamed` (the whole `§S449-opener-keywords-land` section merged in twice by #1256; the second, shorter copy is deleted), and `g-gap-counts-silently-drops-unrecognised-status` and `g-db-migrate-check-constraint-oneof-pattern` (each one entry with a leading and a trailing marker; the trailing one is removed). `gapCountsFromTokens` now throws on any duplicated id. Separately, the attribute bag now keeps the FIRST `key=`: a later `id=` inside prov prose (`<pre id="c">a` in `g-component-raw-body-angle-spacing-dropped-s462`) had replaced that entry's id.
+
 **Measured, not inferred.** 585 `@gap` markers resolve to **583 unique ids**. The two duplicates each
 carry *conflicting* status, both `sev=MED`:
 
@@ -6543,7 +6621,7 @@ The S288 regression lock (`schema-only-tenant-principal.test.js`) asserts EMISSI
 
 Residual: the bare-identifier item form is an OPEN RULING — see `g-schema-oneof-bare-identifier-item` below. — *Original report:* <!-- @gap id=g-db-migrate-check-constraint-oneof-pattern sev=MED status=resolved -->
 
-Adopter-A (S3, 2026-07-26, bisected to `79cd79ce` pre-P2; NON-gating — workaround in place) found `scrml db-migrate` (M2, §14.8.11.1) breaks on CHECK-carrying tables (the security DDL itself is correct). Three sub-bugs, all in `schema-differ.js`: (1) **`oneOf(["income","expense"])` emits an UNQUOTED bareword CHECK** — `CHECK ("kind" IN (income, expense))` (identifiers) instead of `IN ('income','expense')` (string literals) → Postgres `column "income" does not exist`. Fix: quote each `oneOf` value as a SQL string literal in the CHECK emitter (`lowerSharedCoreToChecks`). (2) **A column carrying `oneOf([...])` or `pattern(/.../)` trips the newline diff-parser** (`parseColumns`/the shared-core-predicate extraction chokes on the `[...]`/`/.../` payloads) → the table then false-fails the P2 pre-flight with **`E-DBAUTH-NO-TENANT-COLUMN`** on a table that DOES declare `tenant_id` (the main compiler parses these fine — only the differ's diff-parser trips). (3) **(minor)** a `pattern(/…{n}…/)` quantifier brace fools the marker/brace matcher → spurious `W-DBAUTH-MARKER-NEARMISS` (this touches the brace-matcher P2 just rewrote — REPRODUCE all three on the post-P2 baseline `1c8aef79` before fixing; P2 may have shifted #3). Impact: turnkey-from-source works for simple schemas but not CHECK-carrying ones (most real schemas). The natural next db-migrate fix. **[status reconciled S325-peter: the header twin is RESOLVED S288 (3 sub-bugs dispositioned; residual split to g-schema-oneof-bare-identifier-item); this stale original-report `open` marker inflated the open count — flipped.]** <!-- @gap id=g-db-migrate-check-constraint-oneof-pattern sev=MED status=resolved -->
+Adopter-A (S3, 2026-07-26, bisected to `79cd79ce` pre-P2; NON-gating — workaround in place) found `scrml db-migrate` (M2, §14.8.11.1) breaks on CHECK-carrying tables (the security DDL itself is correct). Three sub-bugs, all in `schema-differ.js`: (1) **`oneOf(["income","expense"])` emits an UNQUOTED bareword CHECK** — `CHECK ("kind" IN (income, expense))` (identifiers) instead of `IN ('income','expense')` (string literals) → Postgres `column "income" does not exist`. Fix: quote each `oneOf` value as a SQL string literal in the CHECK emitter (`lowerSharedCoreToChecks`). (2) **A column carrying `oneOf([...])` or `pattern(/.../)` trips the newline diff-parser** (`parseColumns`/the shared-core-predicate extraction chokes on the `[...]`/`/.../` payloads) → the table then false-fails the P2 pre-flight with **`E-DBAUTH-NO-TENANT-COLUMN`** on a table that DOES declare `tenant_id` (the main compiler parses these fine — only the differ's diff-parser trips). (3) **(minor)** a `pattern(/…{n}…/)` quantifier brace fools the marker/brace matcher → spurious `W-DBAUTH-MARKER-NEARMISS` (this touches the brace-matcher P2 just rewrote — REPRODUCE all three on the post-P2 baseline `1c8aef79` before fixing; P2 may have shifted #3). Impact: turnkey-from-source works for simple schemas but not CHECK-carrying ones (most real schemas). The natural next db-migrate fix. **[status reconciled S325-peter: the header twin is RESOLVED S288 (3 sub-bugs dispositioned; residual split to g-schema-oneof-bare-identifier-item); this stale original-report `open` marker inflated the open count — flipped. S469: the flipped marker duplicated the entry's own resolved marker above and was removed; one entry, one marker.]**
 
 ### G-DB-MIGRATE-DEFAULT-EMISSION — `default(now())` truncated the DDL and `default("US")` emitted an identifier — `NEW S288; HIGH; RESOLVED S288 (adopter-reported, Adopter-A S4)`
 Two defects in the `default(...)` path, found when Adopter-A retried turnkey `db-migrate` against the #191 CHECK fix. Both fixed in the same landing as the `E-SCHEMA-010` ruling.
@@ -11516,7 +11594,7 @@ Authority: lifecycle DD at `scrml-support/docs/deep-dives/lifecycle-annotation-e
 
 ## §9 Where to discuss / report
 
-- **New gaps in adopter code:** file a GitHub Issue at https://github.com/bryanmaclee/scrmlTS
+- **New gaps in adopter code:** file a GitHub Issue at https://github.com/scrml-lang/scrml/issues
 - **Cross-reference with phase status:** [`master-list.md`](../master-list.md) §0 LIVE DASHBOARD
 - **Per-gap implementation arcs:** [`docs/changes/`](./changes/) — each gap with an active impl arc has a SCOPING.md + progress.md there
 - **Per-session landings:** [`docs/changelog.md`](./changelog.md)
@@ -13016,7 +13094,7 @@ so **every parameter name is currently treated as a captured free variable.** Cl
 
 **Count correction on landing: HIGH 14 → 16, MED 77 → 80.** The two HIGHs that had been invisible are `g-async-stdlib-in-sync-callback-over-fires` (`in-progress`) and `g-main-red-against-its-own-pre-commit-gate` (`narrowed`).
 
-**The gate was PROVEN to bite before landing** (`pa-base` §8 unproven-gate rule — a gate that has never failed is indistinguishable from one that cannot fail): injected `status=totally-made-up` into a real marker, confirmed `state.ts` threw and named the id, restored, confirmed green. <!-- @gap id=g-gap-counts-silently-drops-unrecognised-status sev=MED status=resolved -->
+**The gate was PROVEN to bite before landing** (`pa-base` §8 unproven-gate rule — a gate that has never failed is indistinguishable from one that cannot fail): injected `status=totally-made-up` into a real marker, confirmed `state.ts` threw and named the id, restored, confirmed green.
 
 ### g-imported-server-fn-names-alias-blind — `buildImportedServerFnNames` keys on the IMPORTED name, so an `as`-aliased server-fn import is invisible to async classification — `NEW S299 (found while wiring Trigger 3); MED; open`
 <!-- @gap id=g-imported-server-fn-names-alias-blind sev=MED status=open -->
@@ -24962,22 +25040,6 @@ Conformance FAILs (3), all fail-closed but with a code that does not name the ro
 ### g-bootstrap-diag-has-no-severity — bootstrap: `Diag` carries no §34 severity, so a conformance `severity` assertion is unobservable
 `ast.scrml:220` `type Diag:struct = { code, message, file, span }`. 397 of 1278 conformance cases assert `severity`. None is graded today (all are LEGACY or UNSUPPORTED, or the code never fires). The counter reports each one that reaches grading as FAIL "severity unobservable", so this family will grow as soon as the bootstrap parses more of the corpus. It also means the bootstrap has no fatal/non-fatal partition: W-/I- codes sit in the same list as errors (a "clean program" test in the slices is `diags == []`). Recommended: add `severity` to `Diag` from the §34 table.
 <!-- @gap id=g-bootstrap-diag-has-no-severity sev=MED status=open locus=compiler/self-host-v2/ast.scrml:220 prov=empirical:S449-bootstrap-conformance-counter -->
-
-## §S449-opener-keywords-land — the S447 opener-keyword SPEC (PR #1214) landed with the bootstrap parser migration (2026-10-03; ruling:user-voice-scrml.md S447 "your recs" item 2; SPEC §66.2.5 / §66.4 rule 6 / §66.5.1 / §66.20; change `docs/changes/s449-opener-keywords-land/`; probes run on the change branch with the slice-m4 harness `frontEnd`, not committed)
-
-### g-bootstrap-opener-scalar-init-for-sequence-type-unchecked — bootstrap: `<n:int[append]=0/>` (a scalar own value for a sequence type) passes the front end with zero diagnostics
-<!-- @gap id=g-bootstrap-opener-scalar-init-for-sequence-type-unchecked sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(the opener initializer check that gives `<n:int="hello"/>` E-TYPE-031 does not cover a TSeq own type) prov=dd:opener-keyword-vs-attribute-2026-10-01-SF3 -->
-**Agent-executed on the change branch (S449).** `<program> <n:int[append]=0/> <main>${@n}</main> </program>` → no diagnostics; `<n:int="hello"/>` → `E-TYPE-031`. Expected: the own value is checked against the declared type, so `0` for `int[append]` is `E-TYPE-031`. Split out of `g-bootstrap-parser-opener-let-and-unchecked-opener-shapes` item 3 (a typer check, not a parser one). Left in analyze.scrml for its owner — a sibling dispatch held analyze.scrml during this change.
-
-### g-spec-66-on-field-name-contradicts-illegal-names — SPEC: the S447 examples declare a field named `on` (`export let <on:bool=false/>`, §66.2.5 and the §66.4 rule 6 `toggle`), which §66.2.3 makes an illegal field name — **RESOLVED S449 (ruled (a); s449-opener-keywords-land)**
-<!-- @gap id=g-spec-66-on-field-name-contradicts-illegal-names sev=LOW status=resolved resolved-by=s449-opener-keywords-land locus=compiler/SPEC.md(§66.2.5 zone 1 example; §66.4 rule 6 lib/toggle.scrml example; §66.0 S447 table) prov=empirical:S449-opener-keywords-land -->
-**Agent-executed on the change branch (S449).** The §66.4 rule 6 `toggle` example, compiled by the bootstrap, gives `E-DECL-ILLEGAL-FIELD-NAME` on `export let <on:bool=false/>`: §66.2.3 lists `on` among the five illegal attribute and field names (it keeps `on…` handler attributes unambiguous). The same spelling is in bryan's S447 ruling text as quoted (*"`export let <on:bool=false/>`"*), so the example cannot just be edited without a call. Options: (a) re-spell the worked examples (`checked`, `enabled`) and keep the ruling quote as-is, noting it illustrates position only; (b) narrow §66.2.3 for `on` when no `:` follows. PA recommendation owed; the bootstrap enforces §66.2.3 today.
-
-**Resolved S449 — ruled (a).** ruling:user-voice-scrml.md S449 "RULED — \"your recs.\" — the `on` field contradiction, the opener-keyword prose cost, the corpus-dialect lean" item 1: *"re-spell the S447 worked examples (`checked` / `open`); the S447 ruling is read as being about keyword POSITION, not that name; §66.2.3's illegal-name list (incl. `on`) stands."* §66.2.5's zone-1 example and the §66.4 rule 6 `toggle` now use `checked` (no §66.19 block used `on`); a note after §66.2.5's S449 amendment records the re-spelling against the S447 quote. PRIMER line re-spelled too.
-
-### g-spec-66-export-alone-on-attribute-unnamed — SPEC: `export` written alone on an attribute (`<box export k:int=0/>`) is illegal under §66.4 rule 6 but no §66.20 code names it
-<!-- @gap id=g-spec-66-export-alone-on-attribute-unnamed sev=LOW status=open locus=compiler/SPEC.md(§66.20 E-DECL-LET-IN-OPENER row — "`let` (or `export let`)"; §66.4 rule 6 — "neither `let` nor `export` may be written on it") prov=empirical:S449-opener-keywords-land -->
-**Agent-executed on the change branch (S449).** §66.4 rule 6 refuses both `let` and `export` on an attribute; `E-DECL-LET-IN-OPENER`'s row covers `let` and `export let` only. The bootstrap reports `export` alone as `E-PARSE-ATTR` with the same fix (a child declaration, `export <k:T=v/>`). Either widen `E-DECL-LET-IN-OPENER`'s row to "`let` or `export`" or name a code; until then the parse code is a placeholder.
 
 ## §S449-scrml-fix-s66-twins — FAIL families the §66 twins expose, and gaps found building `scrml fix` (2026-10-03; ruling:user-voice-scrml.md S449 "RULED — \"your recs.\" — corpus-dialect rulings 1–6"; counter `bun scripts/bootstrap-conformance.ts` on the change branch (main `cb26eeec6` + `wip/s449-opener-keywords-land` merged) → PASS 76 (57 non-vacuous) · FAIL 53 · NOT-TWINNED 501 · UNSUPPORTED 648 · graded 129, was PASS 34 (19) · FAIL 18 · LEGACY 951 · graded 52; agent-executed, each family re-probed with a one-file source through the bootstrap; change `docs/changes/s449-scrml-fix-s66-twins/`)
 

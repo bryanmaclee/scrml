@@ -192,19 +192,20 @@ scrml has **two access forms** for reactive state:
 Bare names (`count` without `<>` or `@`) are **LOCAL identifiers only**. They do NOT resolve to reactive state. If a file declares `<count> = 0` and you later write `let count = 5`, the compiler emits **`E-NAME-COLLIDES-STATE`** — local names cannot shadow registered state names.
 
 ```scrml
+// gate: skip — error demo: `describe` is the E-NAME-COLLIDES-STATE example
 ${
   <count> = 0                     // declaration (structural form)
 
   function inc() {
-    @count = @count + 1           // read + write (canonical form)
+    @count = @count + 1;          // read + write (canonical form)
   }
 
-  function reset() {
-    @count = 0                    // write
+  function clearCount() {         // not `reset`: that name is reserved for `reset(@cell)` (§6.8)
+    @count = 0;                   // write
   }
 
   function describe() {
-    let count = "five"            // ❌ E-NAME-COLLIDES-STATE — local shadows state
+    let count = "five";           // ❌ E-NAME-COLLIDES-STATE — local shadows state
   }
 }
 
@@ -231,17 +232,17 @@ ${
   </>
 
   // Field access is canonical with dot navigation:
-  function setError(msg) {
-    @formRes.error = msg
+  function setError(msg: string) {
+    @formRes.error = msg;
   }
 
-  // Compound state typed by a predefined shape — positional sugar legal:
+  // Compound state typed by a predefined shape — the value is written by field name:
   type UserInfo:struct = { name: string, age: number, active: boolean }
-  <userInfo>: UserInfo = ("alice", 30, true)
+  <userInfo>: UserInfo = { name: "alice", age: 30, active: true }
 }
 ```
 
-Tuple-positional binding (`<userInfo> = ("alice", 30, true)`) is legal **only when** the structure of `userInfo` is fixed by a predefined type (enum/struct/engine). Ad-hoc inline-declared compound state uses the structural-children form (no positional sugar).
+The older tuple-positional value (`<userInfo>: UserInfo = ("alice", 30, true)`) is retired (SPEC §66.21, `W-POSITIONAL-STRUCT-DEPRECATED`), and the v0.8.0 compiler refuses it: scrml has no comma operator. Write a struct value by field name. Ad-hoc inline-declared compound state uses the structural-children form.
 
 ### 3.1 The three RHS shapes for state declarations
 
@@ -282,13 +283,14 @@ For a **truly non-reactive frozen constant**, drop the `<>` entirely:
 ```scrml
 ${
   const items = [{name: "apple"}, {name: "banana"}]    // plain JS const — non-reactive, bare-name access
-  const <filteredItems> = items.filter(...)            // reactive derived cell — @filteredItems access
+  const <filteredItems> = items.filter(i => i.name != "apple")   // reactive derived cell — @filteredItems access
 }
 ```
 
 **Optional `default=` attribute** — any state cell may declare an explicit default that's used by `reset(@cell)` instead of re-evaluating the init expression:
 
 ```scrml
+// gate: skip — fragment: `nextRetryCount()` is illustrative
 <startTime default=not> = Date.now()        // init = current timestamp; reset → not
 <retries   default=0>    = nextRetryCount() // init has side effect; reset uses 0, no re-fire
 ```
@@ -300,6 +302,7 @@ Without `default=`, `reset()` re-evaluates the init expression at reset time.
 A lifecycle annotation on a type position says: "this location starts as type `A` and transitions to type `B`. The compiler will refuse reads until the transition has happened." This is how scrml encodes "value must be set before use" — at the type system layer, with zero runtime cost.
 
 ```scrml
+// gate: skip — error demo: the `leaked` line is the E-TYPE-001 example; `hashPassword` is illustrative
 type User:struct = {
     id: number,
     email: string,
@@ -309,9 +312,9 @@ type User:struct = {
 <u>: User = { id: 1, email: "a@b.com", passwordHash: not }
 
 function hashUserPassword(raw: string) {
-    const leaked    = @u.passwordHash      // E-TYPE-001 — pre-transition read
-    @u.passwordHash = hashPassword(raw)    // transition: a string value is assigned
-    const ok        = @u.passwordHash      // OK — post-transition read
+    const leaked    = @u.passwordHash;     // E-TYPE-001 — pre-transition read
+    @u.passwordHash = hashPassword(raw);   // transition: a string value is assigned
+    const ok        = @u.passwordHash;     // OK — post-transition read
 }
 ```
 
@@ -332,6 +335,7 @@ The canonical glyph is `to` — a contextual keyword inside the parens (parallel
 The engine-cell carve-out matters: engines (§4) own variant-graph progression via `rule=` / `initial=` / `<onTransition>`. Putting a lifecycle annotation on an engine's auto-declared cell would create a redundant second progression mechanism on the same surface — rejected.
 
 ```scrml
+// gate: skip — error demo: the last line is the E-TYPE-LIFECYCLE-ON-ENGINE-CELL example; the engine body is elided
 type Phase:enum = { Idle, Loading, Done }
 
 <engine for=Phase initial=.Idle> ... </>
@@ -342,27 +346,29 @@ type Phase:enum = { Idle, Loading, Done }
 For value-shape progression on a cell that is NOT an engine cell, declare as Shape 1:
 
 ```scrml
+// gate: skip — fragment: `Idle` / `Active` are variants of an enum declared elsewhere
 <status>: (Idle to Active) = .Idle       // legal — no engine claims `status`
-@status = .Active                        // transitions; subsequent reads pass
+@status = .Active;                       // transitions; subsequent reads pass
 ```
 
 **Function-return lifecycle — two flavors:**
 
 ```scrml
+// gate: skip — fragment: bodies elided (`{ ... }`); the call sites sit inside a function in real code
 // Presence-progression (not to T) — discrimination IS transition
 server fn loadUser(id: number) -> (not to User) { ... }
 
-const u = loadUser(42)
-if (u is not) return                      // the presence test discriminates AND transitions
-const name = u.name                       // OK — u is narrowed to User here
+const u = loadUser(42);
+if (u is not) return;                     // the presence test discriminates AND transitions
+const name = u.name;                      // OK — u is narrowed to User here
 
 // Variant-progression (.A to .B) — explicit transition()
 server fn publish(id: number) -> (.Draft to .Published) { ... }
 
-const a = publish(42)
+const a = publish(42);
 if (a is .Draft) {
-    transition(a)                         // explicit per-access transition signal
-    const publishedAt = a.publishedAt     // OK
+    transition(a);                        // explicit per-access transition signal
+    const publishedAt = a.publishedAt;    // OK
 }
 ```
 
@@ -458,17 +464,18 @@ For **cross-file** engines, you import and use the engine via `<EngineName/>` us
 ### 4.3 Transitions — three forms, ordered by loudness
 
 ```scrml
+// gate: skip — fragment: `@marioState` and `PowerUp` come from the engine in §4.1
 ${
   function grow() {
-    @marioState = .Big                       // direct write — silent-validated
+    @marioState = .Big;                      // direct write — silent-validated
   }
 
   function eatPowerUp(p: PowerUp) {
-    @marioState.advance(p.target())          // explicit-throws — asserts MUST work
+    @marioState.advance(p.target());         // explicit-throws — asserts MUST work
   }
 
   function tryGrowIfSmall() {
-    if (@marioState == .Small) @marioState = .Big   // conditional intent — explicit gate
+    if (@marioState == .Small) @marioState = .Big;  // conditional intent — explicit gate
   }
 }
 ```
@@ -482,24 +489,25 @@ ${
 When you need to run code on transition (sound, log, animation), you have two forms:
 
 ```scrml
+// gate: skip — fragment: `MarioState` and the sound/log helpers are declared elsewhere
 <engine for=MarioState initial=.Small>
 
   <!-- Simple, single-target effect on the FROM-side: -->
-  <Small rule=.Big effect=${ playSound("grow") } : "🧍">
+  <Small rule=.Big effect=${ playSound("grow"); } : "🧍">
 
   <!-- Multi-target or attribute-bearing — use <onTransition>.
        Note: when </> closer is present, :-shorthand is unavailable.
        Use bare-body form (text or markup directly between opener and </>). -->
   <Big rule=(.Fire | .Cape | .Small)>
-    <onTransition to=.Fire>${ playSound("fire"); animateFlame() }</>
-    <onTransition to=.Cape once>${ playSound("cape") }</>
-    <onTransition to=.Small if=(@gameOver == false)>${ log("regression") }</>
+    <onTransition to=.Fire>${ playSound("fire"); animateFlame(); }</>
+    <onTransition to=.Cape once>${ playSound("cape"); }</>
+    <onTransition to=.Small if=(@gameOver == false)>${ log("regression"); }</>
     "🧍 🧍"
   </>
 
   <!-- Hooks on the TO-side (fire when entering): use from= -->
   <Fire rule=.Small>
-    <onTransition from=.Big>${ playSound("powered-up") }</>
+    <onTransition from=.Big>${ playSound("powered-up"); }</>
     "🔥"
   </>
 </>
@@ -515,9 +523,10 @@ When you need to run code on transition (sound, log, animation), you have two fo
 State-children come in two shapes:
 
 ```scrml
+// gate: skip — fragment: `Phase`, `Spinner` and `reload()` are declared elsewhere
 <engine for=Phase initial=.Loading>
   <Loading rule=.Loaded : <Spinner/>>         <!-- body: renders this when in .Loading -->
-  <Loaded rule=.Error|.Loading>                <!-- body: full markup conditional render -->
+  <Loaded rule=(.Error | .Loading)>            <!-- body: full markup conditional render -->
     <h1>Done</h1>
     <button onclick=reload()>Reload</button>
   </>
@@ -535,8 +544,9 @@ Mixed engines (some bodied, some bare) are legal and useful.
 When state-children share markup shape, use snippets. Do NOT invent `<chrome>` template constructs or `<*>` any-state matchers. Snippets exist; they solve repetition; they are general (work outside engines too).
 
 ```scrml
+// gate: skip — fragment: `MarioState` is declared elsewhere
 ${
-  snippet character(emoji, label) {
+  snippet character(emoji: string, label: string) {
     <div class="char">
       <span class="emoji">${emoji}</span>
       <span class="label">${label}</span>
@@ -559,7 +569,7 @@ If you want to **forbid forward references** to a particular declaration (becaus
 
 ```scrml
 ${
-  <userId> pinned = ""           // pinned — must appear before first use
+  <userId pinned> = ""           // pinned — must appear before first use
   <session> = login(@userId)     // OK: userId is declared above
 }
 ```
@@ -573,13 +583,14 @@ The general lint policy: **lint rules teach people the scrml way; turning them o
 When the LHS, parameter, or other position has a statically known enum type, you may omit the qualifier:
 
 ```scrml
+// gate: skip — fragment: `@marioState`, `PowerUp` and `eatPowerUp` come from §4
 ${
   function grow() {
-    @marioState = .Big                       // .Big inferred as MarioState.Big
+    @marioState = .Big;                      // .Big inferred as MarioState.Big
   }
 
   function powerUp(p: PowerUp) {
-    eatPowerUp(.Mushroom(1))                 // .Mushroom inferred as PowerUp.Mushroom
+    eatPowerUp(.Mushroom(1));                // .Mushroom inferred as PowerUp.Mushroom
   }
 }
 ```
@@ -651,7 +662,7 @@ type Playback:enum = { Paused, Running, Buffering }
       <Paused rule=.Running>
         <button onclick=${@playback = .Running}>Play</>
       </>
-      <Running rule=.Paused|.Buffering>
+      <Running rule=(.Paused | .Buffering)>
         <button onclick=${@playback = .Paused}>Pause</>
         <onTimeout after=200ms to=.Buffering/>
       </>
@@ -704,6 +715,7 @@ DURATION accepts `Nms` / `Ns` / `Nm` / `Nh`. Reset-on-reentry per §51.12.4 — 
 **`<onIdle after=DURATION to=.Variant/>`** — engine-wide idle watchdog. Self-closing. Engine-root scope only (`E-IDLE-MISPLACED` inside a state-child body). One per engine maximum (`E-IDLE-DUPLICATE`). Armed at module-init; **RESET on every successful transition** (any direct write OR advance). Fires after N ms of silence. The watchdog write goes through the standard write path — subject to the current state's `rule=` validation (the engine still respects its own transition contract).
 
 ```scrml
+// gate: skip — fragment: `SessionState`, `@user` and `@session` are declared elsewhere
 <engine for=SessionState initial=.Active>
   <onIdle after=15m to=.LoggedOut/>            <!-- 15 min of silence → log out -->
 
@@ -715,6 +727,7 @@ DURATION accepts `Nms` / `Ns` / `Nm` / `Nh`. Reset-on-reentry per §51.12.4 — 
 **Computed-delay form (§51.12.3.1) — `after=${expr}<unit>`** — accepts any non-negative-number expression. Negative/NaN clamps to 0; the runtime applies `Math.round`. Works on both `<onTimeout>` (engine) and `<onIdle>`:
 
 ```scrml
+// gate: skip — fragment: each element sits inside an engine (state-child / engine root)
 <onTimeout after=${@retryDelayMs}ms to=.Retrying/>
 <onIdle after=${@sessionTimeoutMin}m to=.LoggedOut/>
 ```
@@ -724,6 +737,7 @@ Static literals retain their constant-fold path (zero runtime overhead). Compute
 **Named timers + `cancelTimer("name")` (§51.0.M.1)** — optional `name=IDENT` attribute on `<onTimeout>` makes the timer addressable. The `cancelTimer("name")` builtin cancels a specific named timer; useful for "user took action, cancel the auto-redirect" patterns.
 
 ```scrml
+// gate: skip — fragment: a state-child of an engine declared elsewhere
 <Saving rule=(.Saved | .Error)>
   <onTimeout name="autoRedirect" after=3s to=.Saved/>
   <button onclick=cancelTimer("autoRedirect")>Wait — stay on this screen</>
@@ -806,7 +820,7 @@ The fourth member, **`parseVariant(raw, EnumType)`**, boundary-parses an untrust
 **`pick=` / `omit=` / `partial=true` field-set transforms (§41.14.5 / §41.15.4 / §41.16.5).** Every family member supports the same field-set vocabulary for selecting which struct fields participate in the synthesized output. The canonical form is **a string-literal array** (`pick=["email", "password"]`) — NOT bare identifiers. Bare identifiers fall through to scope resolution and fire `E-SCOPE-001` because the field names aren't declared identifiers in the surrounding scope:
 
 ```scrml
-// fragment — assumes the imports and a `submitFn` / `@users` from the block above
+// gate: skip — fragment: assumes the imports and a `submitFn` / `@users` from the block above
 type Signup:struct = { email: string, password: string, age: int(>=18), referredBy: string | not }
 
 // formFor — pick a subset of fields, omit the rest
@@ -837,8 +851,8 @@ scrml's type system accepts **predicates IN the type position** (not just struct
 
 ```scrml
 let percent: number(>=0 && <=100) = 50      // refinement-typed local
-let email:   string(pattern(EMAIL_RE)) = "" // pattern-constrained string
-<age req>: int(>=18) = 0                    // refinement-typed reactive cell
+let email:   string(email) = "a@b.co"      // named-shape-constrained string (§53.2.1)
+<age req>: int(>=18) = 18                   // refinement-typed reactive cell
 ```
 
 **Three loci** of "exists/required/constrained" — schema column (SQL DDL: `not null` / `check`), state validator (`req` / `length(>=2)`), refinement type (predicate form). Each fires in its layer's enforcement context — **NOT redundancy** — the same `length(>=2)` predicate in a `<schema>` column generates a `CHECK (length(name) >= 2)` SQL constraint; in a state cell, validates the user input reactively; in a refinement type, gates assignment statically. ONE vocabulary, three loci, three enforcement layers.
@@ -846,10 +860,11 @@ let email:   string(pattern(EMAIL_RE)) = "" // pattern-constrained string
 **SPARK three-zone semantics** (§53.6.1 / §53.6.2 — boundary + trusted + static zones). Briefly: predicates ONLY runtime-check at the **boundary zone** (where untrusted input enters: form submit, server-fn arg, JSON.parse result). Inside the **trusted zone** (after a predicate passed at the boundary), the type is statically narrowed; no re-check. The **static zone** is compile-time literal evaluation (`let x: number(>0) = 5` constant-folds the predicate check away). Adopters get runtime safety without the runtime cost of pervasive re-validation.
 
 ```scrml
-function createUser(email: string(pattern(EMAIL_RE))) {
+// gate: skip — fragment: needs a `<program db=…>` with a `users` table
+function createUser(email: string(email)) {
     // email is in the BOUNDARY zone here — runtime check happens at entry.
     // Inside this body, email is in the TRUSTED zone — no re-checks.
-    ?{`INSERT INTO users (email) VALUES (${email})`}.run()
+    ?{`INSERT INTO users (email) VALUES (${email})`}.run();
 }
 ```
 
@@ -862,14 +877,15 @@ See SPEC §22 for `^{}` meta context; §41.13-§41.16 for the type-as-argument f
 If you have any JS/TS background, your fingers will type `await` in front of every server-function call. **Don't.** scrml's compiler auto-inserts `await` at every server-function call site (§13.1 + §13.2) and **explicitly forbids developers from writing `async`, `await`, `Promise`, or `Promise.all` in source.**
 
 ```scrml
+// gate: skip — fragment: needs a `<program db=…>` and the `<selectedId>` / `<user>` cells
 // CORRECT — no async, no await, no Promise:
-function loadUser(id) {
-  return ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+function loadUser(id: int) {
+  return ?{`SELECT * FROM users WHERE id = ${id}`}.get();
 }
 
 function showUser() {
-  const user = loadUser(@selectedId)   // compiler injects await
-  @user = user
+  const loaded = loadUser(@selectedId);   // compiler injects await
+  @user = loaded;                         // a local may not reuse a cell's name (E-NAME-COLLIDES-STATE)
 }
 ```
 
@@ -931,6 +947,7 @@ This surface is synthesized for compounds only — Tier 1 single-value cells wit
 Errors render via the first-class `<errors of=expr/>` markup element. Composable per-field or compound:
 
 ```scrml
+// gate: skip — fragment: `<signup>` and `submit()` are declared in the block above
 <form onsubmit=submit()>
   <div class="field">
     <label>Name</label>
@@ -1022,13 +1039,13 @@ Per-field reset: `reset(@signup.name)` resets just that field by the same rule.
 An event-handler attribute takes a bare call, a bare assignment, a single expression, or an **inline block** `{ ... }` holding several statements:
 
 ```scrml
-// fragment — assumes submit(), @signup, @signupPhase, @count
+// gate: skip — fragment: assumes submit(), @signup, @signupPhase, @count
 <button onclick=submit()>Save</button>
 <button onclick=@signupPhase = .Editing>Try again</button>
 <button onclick=@count++>+</button>
 
 // Multi-statement handler, inline — legal and canonical:
-<button onclick={ reset(@signup); @signupPhase = .Editing }>Sign up another</button>
+<button onclick={ reset(@signup); @signupPhase = .Editing; }>Sign up another</button>
 ```
 
 Reach for a named function when the handler is reused, long, or worth a name — not because it has two statements. A bare semicolon list without braces (`onclick=reset(@signup); @signupPhase = .Editing`) is still an error (`E-MULTI-STATEMENT-HANDLER`); wrap it in `{ }`.
@@ -1040,21 +1057,22 @@ The validator surface above (§6.1-§6.7) covers FORM-DATA errors (the user's in
 **(1) `fail` / `!{}` at the call site (§19.3-§19.5).** A failable function declares its error type and surfaces failures with `fail`. The call site MUST exhaustively handle them via `!{}`.
 
 ```scrml
+// gate: skip — fragment: needs a `<program db=…>`, `@currentUser` and the `<phase>` cell
 type LoadError:enum = { Network(msg: string), Empty, Unauthorized }
 
 function loadDashboard()! -> LoadError {
-    const rows = ?{`SELECT * FROM dashboard WHERE user_id = ${@currentUser.id}`}.all()
-    if (rows.length == 0) fail LoadError::Empty
-    return rows
+    const rows = ?{`SELECT * FROM dashboard WHERE user_id = ${@currentUser.id}`}.all();
+    if (rows.length == 0) fail .Empty;
+    return rows;
 }
 
-${
+function showDashboard() {
   const rows = loadDashboard() !{
-    | ::Network msg     :> { @phase = .Error(msg); return }
-    | ::Empty           :> { @phase = .Empty;       return }
-    | ::Unauthorized    :> { navigate("/login", .Hard); return }
-  }
-  @phase = .Loaded(rows)
+    .Network(msg) :> { @phase = .Error(msg); return; }
+    .Empty        :> { @phase = .Empty; return; }
+    .Unauthorized :> { navigate("/login", .Hard); return; }
+  };
+  @phase = .Loaded(rows);
 }
 ```
 
@@ -1063,6 +1081,7 @@ Variants are exhaustive — missing one fires `E-FAIL-NOT-EXHAUSTIVE`. Variants 
 **(2) `<errorBoundary>` for render-context error catch (§19.6).** When a `!`-function call sits in markup context — e.g., a `${loadDashboard()}` interpolation, or a derived expression that fails on bad upstream data — `<errorBoundary>` catches the error variant and displays a fallback. It is the markup-context counterpart to `!{}`:
 
 ```scrml
+// gate: skip — fragment: `loadDashboard()` / `loadActivity()` are the failable functions above
 type DashError:enum = {
     Empty
         renders <div class="empty">Nothing to show yet.</>
@@ -1158,6 +1177,7 @@ A small set of operator-position forms accept BOTH the JS-style symbol form AND 
 | `and` | `&&` | Logical AND (short-circuit) | §45.9 |
 
 ```scrml
+// gate: skip — fragment: `@x` / `@y` / `@z` are illustrative cells
 // All four are bit-identical at codegen:
 const <a> = @x is .Active or @y == 1
 const <b> = @x is .Active || @y == 1
@@ -1524,6 +1544,7 @@ Notes:
 Every data-fetch screen, form submission, and API call resolves to the same five-variant shape. Name it **per-screen with domain-relevant variant data** (don't import a generic `AsyncPhase<T>` — scrml does not need generics here, and naming the variants in app context produces better match blocks, error messages, and engine transition rules):
 
 ```scrml
+// gate: skip — fragment: `ContactsError` and `Contact` are the app's own types
 type ContactsPhase:enum = {
     Idle                            // not asked yet
     Loading                         // request in flight
@@ -1586,6 +1607,7 @@ Notes:
 Route params arrive via the compiler-provided `route` object: `route.params.id`, `route.query.tab`, `route.path`. All values are typed `string` — parse manually for numeric IDs.
 
 ```scrml
+// gate: skip — fragment: `route` is provided inside a routed `<page>`
 ${
   let userId = route.params.id
   let activeTab = route.query.tab || "profile"
@@ -1605,16 +1627,18 @@ For multi-file apps, `import`/`export` works for **types, helper functions, AND 
 // Form 1 — structural component definition (the component-as-state-tree form)
 export <UserCard props={ user: User }>
   <div class="card">
-    <h2>${@user.name}</h2>
-    <p>${@user.email}</p>
+    <h2>${user.name}</h2>
+    <p>${user.email}</p>
   </>
 </>
 
-// Form 2 — expression-position component (the const-binding form)
-export const <userCard> = <article props={ user: User }>
-  <h2>${@user.name}</h2>
-  <p>${@user.email}</p>
-</article>
+// Form 2 — expression-position component (the const-binding form), inside `${ }`
+${
+  export const UserBadge = <article props={ user: User }>
+    <h2>${user.name}</h2>
+    <p>${user.email}</p>
+  </article>
+}
 ```
 
 Both forms compile to the same module export. **Form 1** reads as "this file IS this component" and is the canonical shape for top-level component-per-file organization. **Form 2** is for component-as-value (passed to other components, stored in a registry, dispatched by computation). The import side is the same: `import { UserCard } from './user-card.scrml'`.
@@ -1655,6 +1679,7 @@ function handle(request, resolve) {
 When a value must be consumed exactly once on every execution path (auth tokens, transaction handles, payment intents, idempotency keys), declare it `lin`. The compiler refuses to let it be silently dropped or used twice. Compile-time guarantee, no runtime check.
 
 ```scrml
+// gate: skip — fragment: `mintTicket()` and the `@username` / `@password` / `@result` cells are illustrative
 server fn redeem(lin ticket: string, username: string) {
   const consumed = ticket           // single read counts as consumption
   return `Redeemed ${consumed} for ${username}`
@@ -1843,17 +1868,18 @@ ${
 
 `break` / `continue` accept optional labels (`outer:` / `inner:`). The `E-LOOP-*` family of error codes (§49.x) guards illegal label targets, bare `break` outside loops, etc.
 
-**Assignment-as-expression (§50).** `(x = expr)` is a value-producing expression. Required for the canonical `while ((m = re.exec(str)) is given)` pattern — the assignment must produce the new value for the loop guard to check. Use **double parens** to disambiguate from declaration syntax (`while ((x = expr))` works; `while (x = expr)` may fire `W-ASSIGN-001` advisory).
+**Assignment-as-expression (§50).** `(x = expr)` is a value-producing expression. Required for the canonical `for ((m = re.exec(str)) is given)` pattern — the assignment must produce the new value for the loop guard to check. Use **double parens** to disambiguate from declaration syntax (`for ((x = expr))` works; `for (x = expr)` may fire `W-ASSIGN-001` advisory). *Specified — not shipped:* `for (cond)` is the ruled one-loop form (S469) that replaces `while`, and a local tape is written only through its type's grants (`.append`, not `.push`). The v0.8.0 compiler still spells this loop `while` and the write `push`.
 
 ```scrml
+// gate: skip — specified: one-loop `for (cond)` and a granted local tape (S469); `readLine` / `parseRow` / `Row` are illustrative
 function readRows() {
-  const rows = []
-  let line = ""
-  while ((line = readLine()) is given) {           // double-paren assignment-as-expr
-    if (line.startsWith("#")) continue
-    rows.push(parseRow(line))
+  let rows: Row[free, append] = [];
+  let line = "";
+  for ((line = readLine()) is given) {             // double-paren assignment-as-expr
+    if (line.startsWith("#")) continue;
+    rows.append(parseRow(line));
   }
-  return rows
+  return rows;
 }
 ```
 

@@ -11,7 +11,7 @@
 #   Until S468 `gate` was ONE serial job (~19.7 min: unit+conformance 7m43, host-global scan 5m09, browser
 #   1m54, …). It is now a set of parallel jobs and a final AGGREGATOR job that is literally named `gate`:
 #
-#   • checks        — types gate, root-level parser/native tests, snippet gate, compile floor, facts, md shim,
+#   • checks        — types gate, root-level parser/native tests, snippet gate, compile floor, facts (WARN since S469), md shim,
 #                     bootstrap-report currency (PR, path-scoped), conflict markers, SPEC-INDEX, delta-log,
 #                     §34.0 row provenance. Every step runs even when an earlier one failed (each reports).
 #   • unit          — `compiler/tests/unit` + `compiler/tests/conformance`, sharded (bun --shard=i/N).
@@ -192,9 +192,24 @@ jobs:
       - name: Compile-floor gate (every showcase program still builds on HEAD)
         if: ${{ !cancelled() }}
         run: bun scripts/corpus-compile-floor.ts --check
-      - name: Facts gate (published figures still match the repo)
+      # S469 — WARN, not block (owner ruling, user-voice S469: "Regenerate on main after merge").
+      # FACTS holds repo-wide totals (compiler/src lines, test files, SPEC lines …) that ~60% of
+      # landings move (measured: 48 of the 78 landings 2026-10-10..22), so every landing staled every
+      # other queued PR's FACTS.md and the queue kicked it. main is now regenerated after each merge by
+      # `.github/workflows/facts-regen.yml`. Exit 1 (stale) → a ::warning:: annotation, still in this
+      # log; exit 2 (degenerate zero measurement) and exit 3 (missing @generated anchor) still FAIL —
+      # those are a broken instrument / broken file, which the post-merge regen cannot repair.
+      - name: Facts currency (WARN only — main regenerates it post-merge)
         if: ${{ !cancelled() }}
-        run: bun scripts/facts.ts --check
+        run: |
+          set +e
+          bun scripts/facts.ts --check
+          rc=$?
+          if [ "$rc" = "1" ]; then
+            echo "::warning title=docs/FACTS.md stale (non-blocking)::Figures differ from this tree. facts-regen.yml regenerates FACTS.md on main after merge; do not commit a regen in this PR."
+            exit 0
+          fi
+          exit $rc
       # S462 md phase 1 — the scrml:md runtime shim is impl#1's compile of the scrml reader
       # (SPEC §67.8, one md reader); it must be byte-current with the source AND the compiler.
       - name: scrml:md shim gate (compiler/runtime/stdlib/md.js generated from stdlib/md/index.scrml)

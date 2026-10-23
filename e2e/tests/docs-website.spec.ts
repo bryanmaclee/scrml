@@ -204,6 +204,6 @@ test.describe("docs/website shell-composition canary", () => {
     await expect(page.locator("article h1").first()).toBeVisible();
 
     // Footer should contain at least the GitHub link.
-    await expect(page.locator('a[href*="github.com/bryanmaclee/scrmlTS"]').first()).toBeVisible();
+    await expect(page.locator('a[href*="github.com/scrml-lang/scrml"]').first()).toBeVisible();
   });
 });

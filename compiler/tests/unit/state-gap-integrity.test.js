@@ -21,20 +21,36 @@ import {
   headingMarkerDrift,
   classifyGapStatus,
   GAP_STATUS_CARRIED,
+  strayAnchors,
 } from "../../../scripts/state.ts";
 import { readFileSync } from "fs";
 import { join } from "path";
 
 describe("state.ts §1 — duplicate-id gap markers do not double-count", () => {
-  test("a same-id pair with AGREEING status is counted ONCE (per entry, not per marker)", () => {
+  // S469 hygiene: an agreeing pair used to collapse silently (never double-counted, never surfaced);
+  // it now throws, so a duplicated id cannot sit in the ledger unnoticed. Still never double-counted.
+  test("a same-id pair with AGREEING status throws too, naming the id (one entry, one marker)", () => {
     const toks = [
       { id: "g-a", sev: "MED", status: "open" },
       { id: "g-a", sev: "MED", status: "open" }, // duplicate marker, same entry
       { id: "g-b", sev: "MED", status: "open" },
     ];
-    const g = gapCountsFromTokens(toks);
-    expect(g.med).toBe(2); // g-a counted once + g-b — NOT 3
-    expect(g.tokens.length).toBe(2);
+    expect(() => gapCountsFromTokens(toks)).toThrow(/DUPLICATE @gap markers[\s\S]*g-a: sev=MED status=open/);
+  });
+
+  test("the live ledger has no duplicated gap id (the counter runs over it without throwing)", () => {
+    const ledger = readFileSync(join(import.meta.dir, "../../../docs/known-gaps.md"), "utf8");
+    const toks = parseGapMarkers(ledger);
+    expect(new Set(toks.map((t) => t.id)).size).toBe(toks.length);
+    expect(() => gapCountsFromTokens(toks)).not.toThrow();
+  });
+
+  test("a `key=` token inside a marker's prov/locus prose does not override the real attribute", () => {
+    // g-component-raw-body-angle-spacing-dropped-s462's prov quotes `<pre id="c">a`; last-wins read
+    // the entry's id as `"c">a`, which hid it from every per-id check.
+    const text =
+      '<!-- @gap id=g-real sev=LOW status=open locus=x prov=empirical:y(head html `<pre id="c">a &lt;b</pre>` status=resolved) -->';
+    expect(parseGapMarkers(text)).toEqual([{ id: "g-real", sev: "LOW", status: "open" }]);
   });
 
   test("a same-id pair with CONFLICTING status throws (the count cannot resolve the entry state)", () => {
@@ -180,5 +196,30 @@ describe("state.ts §5 — status=carried is a recognised, separately-counted pa
     // `\r?\n`: a Windows checkout (core.autocrlf) reads this ledger with CRLF line ends (CI `windows`, #1050).
     expect(ledger).toMatch(/\| Severity \| Open[^|\r\n]*\| Carried[^|\r\n]*\|\r?\n\|---\|---\|---\|/);
     expect(ledger).toMatch(/\| HIGH \| \d+ \| \d+ \|/);
+  });
+});
+
+describe("state.ts — a second @generated START/END marker is refused (S469 hygiene)", () => {
+  const S = "<!-- @generated:gap-counts START (do not edit) -->";
+  const E = "<!-- @generated:gap-counts END -->";
+
+  test("one START and one END: no violation", () => {
+    expect(strayAnchors(["head", S, "| HIGH | 1 | 0 |", E, "tail"].join("\n"), "gap-counts")).toEqual([]);
+  });
+
+  test("a stray half table closed by its own END (the pre-22090f367 known-gaps shape) is named", () => {
+    const text = ["head", S, "| HIGH | 1 | 0 |", E, "prose", "| MED | 598 | 6 |", E].join("\n");
+    expect(strayAnchors(text, "gap-counts")).toEqual(["2 END markers (lines 4, 7)"]);
+  });
+
+  test("a duplicated START is named too; other sections' markers are not counted", () => {
+    const other = "<!-- @generated:recent-sessions END -->";
+    const text = [S, S, "x", E, other].join("\n");
+    expect(strayAnchors(text, "gap-counts")).toEqual(["2 START markers (lines 1, 2)"]);
+  });
+
+  test("the live ledger carries exactly one gap-counts START and END", () => {
+    const ledger = readFileSync(join(import.meta.dir, "../../../docs/known-gaps.md"), "utf8");
+    expect(strayAnchors(ledger, "gap-counts")).toEqual([]);
   });
 });
