@@ -32,7 +32,7 @@ ${
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldMode, FieldRole,
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
-             LoopHead, EachHead, RangeHead,
+             LoopHead, EachHead, RangeHead, HostCall,
              block, litStr, mkSym, typeDefSym } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
@@ -427,7 +427,7 @@ ${
             .Str(v: s) :> valueExpr(c, valueFact(c.t.values, e.nid), [])
             .Bool(v: b) :> valueExpr(c, valueFact(c.t.values, e.nid), [])
             .NotLit :> valueExpr(c, valueFact(c.t.values, e.nid), [])
-            .Recovered :> Expr.Lit(Literal.Absent)
+            .Recovered :> Expr.Host(HostCall.Unreadable)   // s469 r3 F1: never a silent `not` — checkCore C-R1 refuses it
             .Variant(name: n) :> valueExpr(c, valueFact(c.t.values, e.nid), [])
             .Member(obj: o, name: n) :> memberOrVariant(c, e, o)
 

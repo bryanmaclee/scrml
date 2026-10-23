@@ -4783,10 +4783,11 @@ ${
     // parser's Error stops the build (lower.scrml hasError). A Recovered node
     // in a file with NO Error-severity parse diagnostic would reach the printer
     // as a silent `null` — an internal compiler error, reported (fail closed).
+    // The Error-severity parse spans of the file being resolved.
+    fn envParseErrs(env: Env) -> ASpan[] { return fileErrs(env.g.files, env.file) }
+
     fn recoveredBackstop(env: Env, e: AExpr, st: AS) -> AS {
-        for (const f of env.g.files) {
-            if (f.path == env.file && f.errs.length > 0) return st
-        }
+        if (envParseErrs(env).length > 0) return st
         return addDiag(st, env.file, e.span, "E-INTERNAL-RECOVERED-UNREPORTED", "internal compiler error: the parser left a placeholder here (it could not read this expression) but reported no error for this file — the program would compile with this expression silently replaced by `not`. This is a compiler bug; the build is stopped")
     }
 
@@ -5254,7 +5255,11 @@ ${
         // an instance — was accepted silently and lowered to `not` (`total()` on a
         // `number` parameter printed `null`). Refused by name, fail closed. An
         // undeclared callee already carries its own report (E-SCOPE-001).
-        if (nameFactIn(st, callee.nid) is given) {
+        // r3 F2: never piled onto a parse error. The refusal exists to stop a SILENT
+        // miscompile; a file with a parse error does not compile at all, and a recovered
+        // parse can produce such a call next to (not inside) the error — so it is judged
+        // only in a file the parser read cleanly (the parse-reject stays the report)
+        if (nameFactIn(st, callee.nid) is given && envParseErrs(env).length == 0) {
             return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only a declared scrml function is callable in the bootstrap — `" + exprName(callee) + "` names a value (a local, a parameter, a field), and calling a function VALUE is not in the bootstrap"))
         }
         return plain(not, st)
@@ -6647,7 +6652,7 @@ ${
             .Str(v: s) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Bool(v: b) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .NotLit :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
-            .Recovered :> noPlace(st)
+            .Recovered :> noPlace(recoveredBackstop(env, t, st))   // s469 r3 F1: the backstop on the place path too
             .Variant(name: n) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Call(callee: c) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Unary(op: o) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
@@ -14726,11 +14731,43 @@ ${
         if (x0 is not || y0 is not) return ts
         const x: Type = unMaybe(x0)
         const y: Type = unMaybe(y0)
-        const kx: int = kindOf(x)
-        const ky: int = kindOf(y)
-        if (isNumericKind(x) && isNumericKind(y)) return ts
-        if (kx == ky) return ts                        // two named / two tape types: their own rules (§45.6)
+        if (eqSameType(env, x, y)) return ts
         return report(ts, env, e.span, "E-EQ-001", "`==` compares values of one type, and this is `" + typeName(x) + "` with `" + typeName(y) + "` — convert one first (`T.parse(s)`, or a template for text) (§45, §14.13.1)")
+    }
+
+    // RULED (user-voice S469, bryan: "Ratify: same type only (Rec)"): `==` / `!=`
+    // compares two values of the SAME type only — an enum against a string
+    // included; `int` and `number` count as one kind. Two named types are the
+    // same when they name the same declaration; two tapes when their elements
+    // are (a `T | not` element read as its `T`, as an operand is). A DECLARATION's
+    // type (an instance / cell of a user declaration, §66.8) is not judged here:
+    // its reads have their own §45.6 rules, and a shared cell's read can stand for
+    // its value (`@mode == .Dark`, §66.19.4) — provable-or-silent.
+    fn eqSameType(env: TEnv, x: Type, y: Type) -> boolean {
+        if (isNumericKind(x) && isNumericKind(y)) return true
+        const kx: int = kindOf(x)
+        if (kx != kindOf(y)) return false
+        if (kx == 4) {
+            const sx: Sym | not = namedOf(x)
+            const sy: Sym | not = namedOf(y)
+            if (sx is not || sy is not) return true            // not provable: silent
+            if (isDeclSym(env, sx) || isDeclSym(env, sy)) return true
+            return sx.id == sy.id
+        }
+        if (kx == 5) {
+            const ex: Type | not = seqElem(x)
+            const ey: Type | not = seqElem(y)
+            if (ex is not || ey is not) return true
+            return eqSameType(env, unMaybe(ex), unMaybe(ey))
+        }
+        return true
+    }
+
+    fn isDeclSym(env: TEnv, s: Sym) -> boolean {
+        for (const d of env.t.decls) {
+            if (d.sym.id == s.id) return true
+        }
+        return false
     }
 
     fn checkPlus(env: TEnv, e: AExpr, l: AExpr, r: AExpr, a: VType, b: VType, ts0: TypeState) -> TypeState {

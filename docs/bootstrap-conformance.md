@@ -26,7 +26,7 @@ Scope: **1807 of 1807 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 36 of 68; the other 32 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 505 · parse-reject 307.
+UNSUPPORTED by reason: bootstrap-unsupported 503 · parse-reject 309.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
@@ -918,8 +918,8 @@ none
 - `fn/nondeterministic-call-reject` — twin · bootstrap-unsupported: `build()` reads the clock (`Date.now()`, directly or through a function it calls) — here (an initializer, markup, or an attribute value) that is not in the bootstrap; its host-call surface is a `funct
 - `fn/reactive-read-clean` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `fn/reactive-write-reject` — twin · bootstrap-unsupported: `@counter = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@counter.f = …`)
-- `fn/scope-redeclare-fn-over-param-ok` — twin · bootstrap-unsupported: only a declared scrml function is callable in the bootstrap — `x` names a value (a local, a parameter, a field), and calling a function VALUE is not in the bootstrap
-- `fn/scope-redeclare-neg` — twin · bootstrap-unsupported: only a declared scrml function is callable in the bootstrap — `z` names a value (a local, a parameter, a field), and calling a function VALUE is not in the bootstrap
+- `fn/scope-redeclare-fn-over-param-ok` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `7`
+- `fn/scope-redeclare-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `2`
 - `fn/sql-access-handled-reject` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `fn/sql-access-in-function-clean` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `fn/sql-access-reject` — twin · bootstrap-unsupported: member access `.name` on a value that is not a struct or an instance is not in bootstrap slice M2

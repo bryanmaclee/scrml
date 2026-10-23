@@ -926,3 +926,13 @@ BINDING §13 amendment (S467) — "the server half awaits by construction".
   scrml form, or a reserved word read as a name — refused downstream, E-SCOPE-001).
 - **Gates** — `slice-m4/templates-s469.test.js` (61), `acceptance/templates/*` (20: 7 run with exact text, 13 exact
   codes) in `acceptance.test.js`; slice-m2 typer Rule C pin moved (a template parses now). Conformance PASS 246 → 252.
+- **Review rounds 2–3** — a warning in a slot no longer refuses the template (H1). A parse placeholder (Recovered) is
+  refused on every path: analyze reports E-INTERNAL-RECOVERED-UNREPORTED in a file whose parser reported no error
+  (expression and place paths), and lower makes it Core `Host(Unreadable)`, which checkCore refuses (C-R1) — it never
+  prints as `null`. `\` + U+2028 / U+2029 continues a line; a template on the line after an expression (a tagged
+  template to JavaScript) is E-PARSE-TEMPLATE; the printer never merges `-` with an operand's sign (`-(-x)`). Found
+  by the end-to-end fuzz oracle (clean-compiling templates RUN against JavaScript's own evaluation): a call through a
+  local / parameter lowered to `not` (now refused, in a file the parser read cleanly); `==` across types ran strict —
+  E-EQ-001, RULED (user-voice S469 "Ratify: same type only (Rec)"): same type only, enum vs string, different named
+  types and tapes of different elements included; `int` / `number` one kind; a declaration's type not judged. Gap
+  filed: `g-bootstrap-int-overflow-and-mod-zero-untrapped-s469`.

@@ -387,6 +387,9 @@ ${
     fn hostJs(c: HostCall) -> JsExpr {
         return match c {
             .DateNow :> jcall(jmember(jid("Date"), "now"), [])
+            // unreachable (checkCore C-R1 refuses it before printing); if ever printed
+            // it fails loudly (a ReferenceError), never as a silent value
+            .Unreadable :> jcall(jid("scrml$unreadableExpression"), [])
         }
     }
 

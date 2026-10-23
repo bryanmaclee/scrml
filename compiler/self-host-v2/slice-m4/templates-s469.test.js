@@ -307,6 +307,40 @@ describe("BACKSTOP — a Recovered node never reaches the printer when the file 
     expect(tp.diags.map((d) => d.code)).toContain("E-INTERNAL-RECOVERED-UNREPORTED");
     expect(mods.lower.lower(tp).core ?? null).toBe(null);
   });
+  // r3 F1: every position — a write target, a field write, `reset(…)`, a handler —
+  // forged by swapping the name ZZZ for a placeholder in a file that reported nothing
+  const forgeAt = (src) => {
+    const linked = mods.link.parseProgram([{ path: "t.scrml", src }], "t.scrml");
+    expect(linked.diags.filter((d) => d.code.startsWith("E-"))).toEqual([]);
+    const json = JSON.stringify(linked.files);
+    const name = "{\"variant\":\"Name\",\"data\":{\"name\":\"ZZZ\"}}";
+    expect(json).toContain(name);
+    return JSON.parse(json.split(name).join("\"Recovered\""));
+  };
+  const D = "    type P:struct = { let x: int }\n    let <n:int=0/>\n    let <p:P=({ x: 1 })/>\n";
+  for (const [where, body] of [
+    ["a handler's write target", "    <main>\n        <button onclick={ ZZZ = 1 }>b</button>\n    </main>"],
+    ["a function's write target", "    function f() {\n        ZZZ = 1\n    }\n    <main>\n        <p>x</p>\n    </main>"],
+    ["a field write's object", "    function f() {\n        ZZZ.x = 1\n    }\n    <main>\n        <p>x</p>\n    </main>"],
+    ["reset's argument", "    function f() {\n        reset(ZZZ)\n    }\n    <main>\n        <p>x</p>\n    </main>"],
+  ]) {
+    test(`F1 — a placeholder as ${where} is E-INTERNAL-RECOVERED-UNREPORTED; nothing lowers`, () => {
+      const forged = forgeAt("<program>\n" + D + body + "\n</program>\n");
+      const tp = mods.analyze.analyze(forged, "t.scrml");
+      expect(tp.diags.map((d) => d.code)).toContain("E-INTERNAL-RECOVERED-UNREPORTED");
+      expect(mods.lower.lower(tp).core ?? null).toBe(null);
+    });
+  }
+  test("F1 — the LOWER-side guard: a placeholder that reaches Core is checkCore C-R1, never a silent `not`", () => {
+    const forged = forgeAt(fnProg("", "n: int", "`v=${ZZZ}`"));
+    const tp = mods.analyze.analyze(forged, "t.scrml");
+    // simulate a front end that missed it: drop the analyze report, lower anyway
+    const missed = { ...tp, diags: tp.diags.filter((d) => d.code !== "E-INTERNAL-RECOVERED-UNREPORTED") };
+    const core = mods.lower.lower(missed).core;
+    expect(core).toBeTruthy();
+    expect(mods.check.checkCore(core).some((f) => f.startsWith("C-R1:"))).toBe(true);
+    expect(JSON.stringify(core)).toContain("Unreadable");
+  });
   test("twin: the same kind of node beside a parse error is the parse error's (no internal report)", () => {
     expect(codes(fnProg("", "n: int", "`v=${}`"))).toEqual(["E-PARSE-TEMPLATE"]);
   });
@@ -318,6 +352,13 @@ describe("found by the end-to-end fuzz — a call of a value is never silently `
     const d = diag(src, "E-BOOTSTRAP-UNSUPPORTED");
     expect(d.message).toContain("only a declared scrml function is callable");
     expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("r3 F2: not piled onto a parse error in the file (the parse error is the report)", () => {
+    const src = "<program>\n    fn f(total: number) -> bool {\n        return total() == 1\n    }\n    fn g() -> string {\n        return `a${}`\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
+    expect(codes(src)).toEqual(["E-PARSE-TEMPLATE"]);
+  });
+  test("r3 F2: E-EQ-001 is not piled onto a parse error inside the comparison", () => {
+    expect(codes(fnProg("", "n: int, s: string", "`${(n == s) + ${}`"))).not.toContain("E-EQ-001");
   });
 });
 
@@ -332,6 +373,23 @@ describe("found by the end-to-end fuzz — `==` across types is E-EQ-001 (§45),
     expect(codes(fnProg("", "xs: int[], s: string", "`${xs == s}`"))).toEqual(["E-EQ-001"]);
     expect(codes(fnProg("    type C:enum = { Red, Green }", "c: C", "`${c == \"Red\"}`"))).toEqual(["E-EQ-001"]);
     expect(codes(fnProg("    type C:enum = { Red, Green }", "c: C", "`${c == .Red}`"))).toEqual([]);
+  });
+  // RULED (user-voice S469, "Ratify: same type only (Rec)")
+  const T3 = "    type Pt:struct = { x: int }\n    type Color:enum = { Red, Green }\n    type Shape:enum = { Sq, Ci }";
+  test("different named types are E-EQ-001: a struct against an enum, two different enums", () => {
+    expect(codes(fnProg(T3, "p: Pt, c: Color", "`${p == c}`"))).toEqual(["E-EQ-001"]);
+    expect(codes(fnProg(T3, "c: Color, s: Shape", "`${c != s}`"))).toEqual(["E-EQ-001"]);
+  });
+  test("tapes of different element types are E-EQ-001; int[] against number[] is not", () => {
+    expect(codes(fnProg(T3, "a: int[], b: string[]", "`${a == b}`"))).toEqual(["E-EQ-001"]);
+    expect(codes(fnProg(T3, "a: int[], b: number[]", "`${a == b}`"))).toEqual([]);
+  });
+  test("no false refusal: the same struct, the same enum, int against number, `T | not` against `not` (E-EQ-002 only)", () => {
+    expect(codes(fnProg(T3, "p: Pt, q: Pt", "`${p == q}`"))).toEqual([]);
+    expect(codes(fnProg(T3, "c: Color, d: Color", "`${c == d}`"))).toEqual([]);
+    expect(codes(fnProg(T3, "n: int, x: number", "`${n != x}`"))).toEqual([]);
+    expect(codes(fnProg(T3, "m: int | not, n: int", "`${m == n}`"))).toEqual([]);
+    expect(codes(fnProg(T3, "m: int | not", "`${m == not}`"))).toEqual(["E-EQ-002"]);
   });
 });
 

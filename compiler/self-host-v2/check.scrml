@@ -89,7 +89,7 @@ ${
     import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, PrimOp, Attr, Block, LoopHead,
              EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, CoreProgram, CapOwner, TransitionGraph,
              DeclKind, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db,
-             Pattern, Failable, OkArm, ErrArm,
+             Pattern, Failable, OkArm, ErrArm, HostCall,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, isEventHandlerName } from "./url.scrml"
@@ -3057,6 +3057,16 @@ ${
     }
 
     // C5 for `InitOf`: the instance is one of `decl`, and `idx` is its field.
+    // C-R1 (s469 r3) — a parse placeholder that reached Core: the front end
+    // lowered an expression it could not read with no error reported (analyze's
+    // E-INTERNAL-RECOVERED-UNREPORTED is the first line of defence; this is the last).
+    fn unreadableHost(c: HostCall) -> string[] {
+        return match c {
+            .DateNow :> []
+            .Unreadable :> ["C-R1: a parse placeholder (an expression the parser could not read) reached Core — a compiler defect; nothing is printed"]
+        }
+    }
+
     fn checkExpr(p: CoreProgram, encl: Decl[], e: Expr) -> string[] {
         return match e {
             .InitOf(decl: d, inst: i, idx: x) :> checkCellRead(p, encl, d, i, [{ owner: d, idx: x }])
@@ -3069,7 +3079,7 @@ ${
             .ArrayOf(elems: es) :> []
             .StructOf(ty: t) :> []
             .Handle(inst: i) :> []
-            .Host(call: c) :> []
+            .Host(call: c) :> unreadableHost(c)
             .Lambda(params: ps) :> []
             .SeqCall(op: o) :> []
             .Validity(of: v, prop: pr) :> checkSurfaceRead(p, encl, v, pr)
