@@ -1177,14 +1177,21 @@ function _scrml_reactive_derived(name, fn) {
 // §20.8.2 step 0 — build identity (g-soft-nav-cross-build-handler-id-collision-s469).
 // Every compile stamps its pages <html data-scrml-build="ID"> and opens each client
 // chunk with _scrml_build_admit("ID"). Handler / placeholder ids restart per compile,
-// so code from two builds must never share a document: the FIRST chunk fixes the
-// document's build, a chunk of any other build is refused before it runs (fail
-// closed), and the soft-nav engine swaps in only a page stamped with the same id.
+// so code from two builds must never share a document: the document's build is its
+// <html> stamp (the FIRST chunk's id only on an unstamped host page — so a stale
+// cached chunk running first cannot claim the page), a chunk of any other build is
+// refused before it runs (fail closed), and the soft-nav engine swaps in only a page
+// stamped with the same id. _scrml_build_admits counts admissions: a chunk the soft
+// nav loads must advance it, or it carried no gate and is unverified.
 var _scrml_build_id = null;
 var _scrml_build_rejected = null;
+var _scrml_build_admits = 0;
 function _scrml_build_admit(id) {
-  if (_scrml_build_id === null) _scrml_build_id = id;
-  if (id === _scrml_build_id) return true;
+  if (_scrml_build_id === null) {
+    var h = typeof document !== "undefined" && document.documentElement;
+    _scrml_build_id = (h && h.getAttribute && h.getAttribute("data-scrml-build")) || id;
+  }
+  if (id === _scrml_build_id) { _scrml_build_admits++; return true; }
   _scrml_build_rejected = id;
   console.error("[scrml] E-CHUNK-BUILD-MISMATCH", id, _scrml_build_id);
   return false;
@@ -3524,6 +3531,8 @@ function _scrml_nav_load_chunks(urls, token, onDone, path) {
       // The chunk refused to run (_scrml_build_admit): its URL now serves another
       // build (replaced between the page fetch and this load) → hard nav, no swap.
       if (_scrml_build_rejected !== null) { _scrml_nav_chunk_failed(path, token, url, "build mismatch"); return; }
+      // ...or it never admitted at all (no gate: a pre-identity build's chunk) → unverified.
+      if (_scrml_build_admits === admitsBefore) { _scrml_nav_chunk_failed(path, token, url, "build unverified"); return; }
       loadNext();
     };
     s.onerror = function () {
@@ -3534,6 +3543,7 @@ function _scrml_nav_load_chunks(urls, token, onDone, path) {
     // Mark the injection window so the chunk's module-init boots eagerly (its IIFE
     // runs between this appendChild and the onload below), then clear it on settle.
     _scrml_chunk_loading++;
+    var admitsBefore = _scrml_build_admits;
     // A synchronous append failure (CSP block / a host that rejects dynamic
     // script insertion) is a load failure too → hard-nav fallback.
     try {

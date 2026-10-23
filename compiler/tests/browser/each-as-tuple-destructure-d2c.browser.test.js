@@ -75,6 +75,10 @@ function compileToOutputs(source, baseName, parser) {
 function mountAndRead(source, baseName, parser) {
   const { errors, html, clientJs, runtimeJs } = compileToOutputs(source, baseName, parser);
   expect(errors).toEqual([]);
+  // Two programs mount into one document here. The `<html data-scrml-build>` stamp
+  // (§20.8.2 step 0) reaches the root through innerHTML only when the root has none
+  // (body-mode `<html>` merges MISSING attributes), so reset it the way a fresh page load would.
+  document.documentElement.removeAttribute("data-scrml-build");
   document.documentElement.innerHTML = html;
   const exec = new Function("window", "document", `${runtimeJs}\n${clientJs}\n`);
   exec(window, document);

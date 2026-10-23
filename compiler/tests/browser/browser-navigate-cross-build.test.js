@@ -363,6 +363,58 @@ describe("cross-build soft navigation — defence in depth (each layer holds on 
     expect(hardNavs).toEqual(["/reports"]);
     expect(document.querySelector("[data-scrml-outlet] h2")).toBeNull();
   });
+
+  // Review F1 (S469 round 2). A chunk WITHOUT a gate — what a pre-identity build's
+  // chunk looks like: no `_scrml_build_admit`, no `_scrml_build_owns` — never refuses,
+  // so `_scrml_build_rejected` stays null. Before the fix, onload accepted it and the
+  // nav swapped: B's walker then resolved A's shell ids, so a click on A's danger
+  // button ran dangerDelete() AND B's handler. The load must advance the admit count.
+  test("[review F1] an UNGATED chunk loaded mid-navigation is unverified → hard nav, no swap", async () => {
+    mountShell(A);
+    const ungated = B.reportsClientJs
+      .replace(/^if \(typeof _scrml_build_admit === "function" && !_scrml_build_admit\("[^"]*"\)\) return;\n/m, "")
+      .replace(/^\s*if \(!_scrml_build_owns\([^)]*\)\) return;\n/gm, "");
+    expect(ungated).not.toContain("_scrml_build_");
+    installChunkLoader({ "reports.client.js": ungated });
+    mockFetch({ "/reports": A.reportsHtml });
+    globalThis._scrml_navigate_soft("/reports");
+    await flush();
+    expect(globalThis._scrml_build_rejected).toBeNull(); // it never asked — the old check could not see it
+    expect(hardNavs).toEqual(["/reports"]);
+    expect(document.querySelector("[data-scrml-outlet] h2")).toBeNull();
+  });
+});
+
+describe("build identity — the document's stamp is the running build (review F2)", () => {
+  // A fresh page of build B whose FIRST script to run is a stale cached chunk of build
+  // A (an unhashed URL served from an old cache entry). The stamp, not the first chunk,
+  // decides: A's chunk is refused, B's chunks still run.
+  test("a stale cached chunk running first on a fresh page is refused; the page's own chunks run", () => {
+    const htmlOpen = /<html\b([^>]*)>/i.exec(B.reportsHtml);
+    for (const a of htmlOpen[1].matchAll(/([\w:-]+)(?:="([^"]*)")?/g)) document.documentElement.setAttribute(a[1], a[2] ?? "");
+    const bodyMatch = B.reportsHtml.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+    document.body.innerHTML = bodyMatch[1].replace(/<script[\s\S]*?<\/script>/gi, "").trim();
+    const errs = [];
+    const origErr = console.error;
+    console.error = (...a) => { errs.push(a.join(" ")); };
+    try {
+      // Stale A chunk FIRST, then the page's own B chunks.
+      (0, eval)(B.runtimeJs + "\n" + A.shellClientJs + "\n" + B.shellClientJs + "\n" + B.reportsClientJs);
+    } finally {
+      console.error = origErr;
+    }
+    document.dispatchEvent(new Event("DOMContentLoaded"));
+    expect(globalThis._scrml_build_id).toBe(pageBuildId(B.reportsHtml));
+    expect(globalThis._scrml_build_rejected).toBe(pageBuildId(A.indexHtml));
+    expect(errs.join("\n")).toContain("E-CHUNK-BUILD-MISMATCH");
+    // A's chunk never ran: its cell was never initialised.
+    expect(globalThis._scrml_reactive_get(chunkCellKey(A.shellClientJs)("deleted"))).toBeUndefined();
+    // B's route chunk did: its "Add row" works.
+    const rowsKey = chunkCellKey(B.reportsClientJs)("rows");
+    expect(globalThis._scrml_reactive_get(rowsKey).length).toBe(1);
+    click(document.querySelector("#add"));
+    expect(globalThis._scrml_reactive_get(rowsKey).length).toBe(2);
+  });
 });
 
 describe("build identity — deterministic and per-build", () => {
