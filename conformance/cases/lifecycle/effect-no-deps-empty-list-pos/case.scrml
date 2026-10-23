@@ -2,8 +2,8 @@
 <program>
   <n> = 0
   function beacon(v: number) {
-    return v
+    return v;
   }
-  <effect deps=[]>${ beacon(@n) }</>
+  <effect deps=[]>${ beacon(@n); }</>
   <p>${@n}</p>
 </program>

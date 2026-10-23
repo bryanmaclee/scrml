@@ -2,7 +2,7 @@ ${
     type View:enum = { List, Grid }
     <view>: View = .List
     function toGrid() {
-        @view = View.Grid
+        @view = View.Grid;
     }
 }
 <button id="to-grid" onclick=toGrid()>Grid</>

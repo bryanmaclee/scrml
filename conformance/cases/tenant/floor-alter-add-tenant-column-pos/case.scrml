@@ -6,7 +6,7 @@
     // The ALTER gives `notes` its tenant_id column, so `notes` IS tenant-scoped.
     ${
         function mine() {
-            return ?{`SELECT body FROM notes`}.all()
+            return ?{`SELECT body FROM notes`}.all();
         }
     }
     <button onclick=${ mine() }>mine</button>

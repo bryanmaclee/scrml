@@ -2,7 +2,7 @@ ${
     <n>: int = 5
 
     function sugar() {
-        const label = if (@n > 0) { "pos" } else { "neg" }
+        const label = if (@n > 0) { "pos"; } else { "neg"; }
         return label
     }
 
@@ -12,12 +12,12 @@ ${
     }
 
     function cascade() {
-        const label = if (@n > 8) { "hi" } else if (@n > 3) { "mid" } else { "lo" }
+        const label = if (@n > 8) { "hi"; } else if (@n > 3) { "mid"; } else { "lo"; }
         return label
     }
 
     function letSite() {
-        let label = if (@n > 0) { "pos" } else { "neg" }
+        let label = if (@n > 0) { "pos"; } else { "neg"; }
         return label
     }
 }

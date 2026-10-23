@@ -27,7 +27,7 @@ export function auditFixture() {
   if (n !== 2) throw new Error(`expected 2 Date.now() calls, found ${n}`);
   s = s.replaceAll("Date.now()", "0");
   s = replaceLine(s, "<input bind:value=@actor/>", `<button onclick=(@actor = "alice")>As alice</button>`);
-  s = replaceLine(s, "let snapshot = @audit", "function probe() -> int {\n        let snapshot = @audit\n        record(\"probe\")\n        return snapshot.length\n    }");
+  s = replaceLine(s, "let snapshot = @audit", "function probe() -> int {\n        let snapshot = @audit;\n        record(\"probe\");\n        return snapshot.length;\n    }");
   return s;
 }
 
@@ -36,10 +36,10 @@ export function auditShapesFixture() {
   let s = editOnce(auditFixture(), "<audit:Entry[free, append]=[]/>", "<audit:Entry[free, append, prepend]=[]/>");
   s = replaceLine(s, "function recordBySpread(action: string) {", [
     "function recordTwo(a: string, b: string) {",
-    "        @audit = [...@audit, { at: 1, actor: @actor, action: a }, { at: 2, actor: @actor, action: b }]",
+    "        @audit = [...@audit, { at: 1, actor: @actor, action: a }, { at: 2, actor: @actor, action: b }];",
     "    }",
     "    function recordFirst(a: string, b: string) {",
-    "        @audit = [{ at: 3, actor: @actor, action: a }, { at: 4, actor: @actor, action: b }, ...@audit]",
+    "        @audit = [{ at: 3, actor: @actor, action: a }, { at: 4, actor: @actor, action: b }, ...@audit];",
     "    }",
     "    function recordBySpread(action: string) {",
   ].join("\n"));

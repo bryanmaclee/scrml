@@ -1,8 +1,8 @@
 ${
     <ls>: number(>0)[] = [1, 2]
     <opt>: (number(>0) | not)[] = [1]
-    function grow() { @ls.length = 4 }
-    function growOpt() { @opt.length = 3 }
+    function grow() { @ls.length = 4; }
+    function growOpt() { @opt.length = 3; }
 }
 <program>
 <button id="g" onclick=grow()>g</button>

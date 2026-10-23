@@ -4,27 +4,27 @@
     let <out:string=""/>
     let <n:int=0/>
     function load(id: string)! LoadError {
-        if (id == "x") fail LoadError.NotFound(id)
-        if (id == "y") fail LoadError.Timeout
-        return id
+        if (id == "x") fail LoadError.NotFound(id);
+        if (id == "y") fail LoadError.Timeout;
+        return id;
     }
     function v() {
         @out = load("x") !{
             .NotFound(m) :> {
-                @n = @n + 1
-                lift "nf:" + m
+                @n = @n + 1;
+                lift "nf:" + m;
             },
             .Timeout :> "to",
-        }
+        };
     }
     function w() {
         @out = load("y") !{
-            .NotFound(m) :> { lift m },
+            .NotFound(m) :> { lift m; },
             .Timeout :> {
-                @n = @n + 10
+                @n = @n + 10;
                 lift "to";
             },
-        }
+        };
     }
     <main>
         <button id="v" onclick=v()>v</button>

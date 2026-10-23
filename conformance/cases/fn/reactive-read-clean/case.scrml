@@ -2,7 +2,7 @@
 ${ @value = 42 }
 ${
     fn pureRead(a: int) {
-        return a + @value
+        return a + @value;
     }
 }
 <p>${pureRead(1)}</>

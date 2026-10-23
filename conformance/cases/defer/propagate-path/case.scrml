@@ -7,22 +7,22 @@ ${
     <result> = "init"
 
     function load(key: string)! -> LoadError {
-        if (key == "k1") { fail LoadError.Missing(key) }
-        return key
+        if (key == "k1") { fail LoadError.Missing(key); }
+        return key;
     }
 
     function outer()! -> LoadError {
-        @trace = @trace + "open;"
-        defer @trace = @trace + "close;"
-        let v = load("k1")?
-        @trace = @trace + "after;"
-        return v
+        @trace = @trace + "open;";
+        defer @trace = @trace + "close;";
+        let v = load("k1")?;
+        @trace = @trace + "after;";
+        return v;
     }
 
     function go() {
         @result = outer() !{
             ::Missing(key) :> "missing " + key
-        }
+        };
     }
 }
 <program>

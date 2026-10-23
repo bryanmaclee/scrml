@@ -2,6 +2,6 @@
 <program>
   <n> = 0
   <hits> = 0
-  when @n changes { @hits = @hits + 1 }
+  when @n changes { @hits = @hits + 1; }
   <p>${@hits}</p>
 </program>

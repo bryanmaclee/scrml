@@ -39,17 +39,17 @@ function program() {
   return [
     {
       path: "app.scrml",
-      src: app.replace(appImport, 'import { dropdown } from "./lib/dropdown.scrml"\n    import { Openness } from "./lib/openness.scrml"\n    import { Tone } from "./lib/accent.scrml"'),
+      src: app.replace(appImport, 'import { dropdown } from "./lib/dropdown.scrml";\n    import { Openness } from "./lib/openness.scrml";\n    import { Tone } from "./lib/accent.scrml";'),
     },
     { path: "lib/accent.scrml", src: "// lib/accent.scrml\n${ export type Tone:enum = { Warm, Cool } }\n" },
-    { path: "lib/dropdown.scrml", src: lib.replace(TYPE_LINE, '${ import { Openness } from "./openness.scrml" }') },
+    { path: "lib/dropdown.scrml", src: lib.replace(TYPE_LINE, '${ import { Openness } from "./openness.scrml"; }') },
     { path: "lib/openness.scrml", src: "// lib/openness.scrml\n${ " + TYPE_LINE + " }\n" },
   ];
 }
 
 /** The same program with an unresolved name in every file — a diagnostic per file. */
 function programWithDiags() {
-  return program().map((f, i) => ({ path: f.path, src: `${f.src}\n\${ fn broken${i}() -> int { return missing${i} } }\n` }));
+  return program().map((f, i) => ({ path: f.path, src: `${f.src}\n\${ fn broken${i}() -> int { return missing${i}; } }\n` }));
 }
 
 const ENTRY = "app.scrml";
@@ -171,10 +171,10 @@ describe("determinism (r2) — the entry omitted, and the driver's input contrac
   /** A diamond: app → { left, right } → base. */
   function diamond() {
     return [
-      { path: "app.scrml", src: '${ import { L } from "./lib/left.scrml"\n import { R } from "./lib/right.scrml" }\n<program>\n    <p>diamond</p>\n</program>\n' },
+      { path: "app.scrml", src: '${ import { L } from "./lib/left.scrml";\n import { R } from "./lib/right.scrml"; }\n<program>\n    <p>diamond</p>\n</program>\n' },
       { path: "lib/base.scrml", src: "${ export type Base:enum = { One, Two } }\n" },
-      { path: "lib/left.scrml", src: '${ import { Base } from "./base.scrml"\n export type L:enum = { Left } }\n' },
-      { path: "lib/right.scrml", src: '${ import { Base } from "./base.scrml"\n export type R:enum = { Right } }\n' },
+      { path: "lib/left.scrml", src: '${ import { Base } from "./base.scrml";\n export type L:enum = { Left } }\n' },
+      { path: "lib/right.scrml", src: '${ import { Base } from "./base.scrml";\n export type R:enum = { Right } }\n' },
     ];
   }
   const rotations = (xs) => xs.map((_, i) => [...xs.slice(i), ...xs.slice(0, i)]);
@@ -256,8 +256,8 @@ describe("link.scrml — the canonical order's parts", () => {
 
   test("an import cycle is broken at the first file in path order — the same for every listing", () => {
     const cyc = [
-      { path: "a.scrml", src: '${ import { B } from "./b.scrml"\n export type A:enum = { X } }\n' },
-      { path: "b.scrml", src: '${ import { A } from "./a.scrml"\n export type B:enum = { Y } }\n' },
+      { path: "a.scrml", src: '${ import { B } from "./b.scrml";\n export type A:enum = { X } }\n' },
+      { path: "b.scrml", src: '${ import { A } from "./a.scrml";\n export type B:enum = { Y } }\n' },
       { path: "main.scrml", src: "<program>\n</program>\n" },
     ];
     const orders = permutations(cyc).map((p) => mods.link.parseProgram(p, "main.scrml").files.map((f) => f.path));

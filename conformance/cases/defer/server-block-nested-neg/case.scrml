@@ -5,25 +5,25 @@
 ${
     <busy> = false
     function save(id: number) {
-        @busy = true
+        @busy = true;
         if (id > 0) {
-            defer @busy = false
-            ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run()
+            defer @busy = false;
+            ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run();
         }
     }
     function pureHelper(x: number) {
-        return x + 1
+        return x + 1;
     }
     function other(id: number) {
-        @busy = true
-        defer @busy = false
+        @busy = true;
+        defer @busy = false;
         if (id > 0) {
-            @busy = true
+            @busy = true;
         }
-        ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run()
+        ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run();
     }
 }
-<button id="go" onclick={ save(1) !{ .Transport(_) :> return } }>go</button>
-<button id="go2" onclick={ other(1) !{ .Transport(_) :> return } }>go2</button>
+<button id="go" onclick={ save(1) !{ .Transport(_) :> return }; }>go</button>
+<button id="go2" onclick={ other(1) !{ .Transport(_) :> return }; }>go2</button>
 <p id="out">${@busy}</p>
 </program>

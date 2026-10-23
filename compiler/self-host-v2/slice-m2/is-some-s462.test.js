@@ -20,25 +20,25 @@ const O = "    type O:struct = { let v: string | not, let n: int | not }\n    le
 
 describe("S462 — `x is some` reads as `x is given` and surfaces W-IS-SOME-DEPRECATED", () => {
   test("one Info lint per `is some`; `is given` draws none", () => {
-    const some = run(prog(O + "    function f() { if (@o.n is some && @o.v is some) { @m = @o.n + 1 } }"));
+    const some = run(prog(O + "    function f() { if (@o.n is some && @o.v is some) { @m = @o.n + 1; } }"));
     const lints = some.diags.filter((d) => d.code === "W-IS-SOME-DEPRECATED");
     expect(lints.length).toBe(2);
     for (const d of lints) expect(d.severity).toBe("Info");
     expect(some.diags.filter((d) => d.code !== "W-IS-SOME-DEPRECATED")).toEqual([]);
-    const given = run(prog(O + "    function f() { if (@o.n is given && @o.v is given) { @m = @o.n + 1 } }"));
+    const given = run(prog(O + "    function f() { if (@o.n is given && @o.v is given) { @m = @o.n + 1; } }"));
     expect(given.diags).toEqual([]);
   });
 
   test("the same presence test: the narrowing and the recorded tests match `is given`", () => {
-    const some = run(prog(O + "    function f() { if (@o.n is some) { @m = @o.n + 1 } }"));
-    const given = run(prog(O + "    function f() { if (@o.n is given) { @m = @o.n + 1 } }"));
+    const some = run(prog(O + "    function f() { if (@o.n is some) { @m = @o.n + 1; } }"));
+    const given = run(prog(O + "    function f() { if (@o.n is given) { @m = @o.n + 1; } }"));
     expect(some.diags.map((d) => d.code)).toEqual(["W-IS-SOME-DEPRECATED"]);
     expect(given.diags).toEqual([]);
     expect(some.typed.tables.typing.presence.length).toBe(given.typed.tables.typing.presence.length);
   });
 
   test("the message names `is given`, `scrml fix` and §42.2.2a; the span covers `is some`", () => {
-    const src = prog(O + "    function f() { @b = @o.v is some }");
+    const src = prog(O + "    function f() { @b = @o.v is some; }");
     const r = run(src);
     const [d] = r.diags.filter((x) => x.code === "W-IS-SOME-DEPRECATED");
     expect(d.message).toContain("`x is given`");

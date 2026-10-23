@@ -8,7 +8,7 @@
     // Postgres ends the comment there, so the database runs AS PERMISSIVE.
     ${
         function mine() {
-            return ?{`SELECT id, name FROM assets`}.all()
+            return ?{`SELECT id, name FROM assets`}.all();
         }
     }
     <button onclick=${ mine() }>mine</button>

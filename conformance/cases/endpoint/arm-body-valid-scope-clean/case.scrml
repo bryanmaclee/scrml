@@ -5,7 +5,7 @@ type M:enum = {
   Dispatch(prompt: string, project: string)
 }
 
-fn handleDispatch(p: string, q: string) -> string { p }
+fn handleDispatch(p: string, q: string) -> string { p; }
 
 <endpoint path="/x" method="POST" accepts=M>
   <Ping : { ok: true }>

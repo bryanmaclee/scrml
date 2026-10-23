@@ -1,14 +1,14 @@
 // app.scrml
-${ import { dropdown, Openness } from "./lib/dropdown.scrml" }
+${ import { dropdown, Openness } from "./lib/dropdown.scrml"; }
 
 <program>
     type Line:struct = { id: int, name: string }
     <lines:Line[]=([{ id: 1, name: "Tea" }, { id: 2, name: "Milk" }])/>   // locked: no grants (§66.12.1)
     let <showColor:bool=false/>
 
-    function closeCountry() { @country.open = .Closed }       // cross-file write to an EXPORTED field, along its graph; from .Closed it is a self-write no-op (§51.0.F.1)
+    function closeCountry() { @country.open = .Closed; }       // cross-file write to an EXPORTED field, along its graph; from .Closed it is a self-write no-op (§51.0.F.1)
     function clearColor() {
-        given c = @color :> { c.value = "" }                  // @color is `dropdown | not`: narrowed first; the write goes through `c` (§66.7.5)
+        given c = @color :> { c.value = ""; }                  // @color is `dropdown | not`: narrowed first; the write goes through `c` (§66.7.5)
     }
 
     <main class="filters">

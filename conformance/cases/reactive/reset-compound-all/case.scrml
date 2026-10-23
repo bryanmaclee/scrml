@@ -4,14 +4,14 @@ ${
         <email default="def-email"> = "init-email"
     </>
     function fill() {
-        @form.name  = "typed-name"
-        @form.email = "typed-email"
+        @form.name  = "typed-name";
+        @form.email = "typed-email";
     }
     function resetName() {
-        reset(@form.name)
+        reset(@form.name);
     }
     function resetAll() {
-        reset(@form)
+        reset(@form);
     }
 }
 <button id="fill" onclick=fill()>fill</>

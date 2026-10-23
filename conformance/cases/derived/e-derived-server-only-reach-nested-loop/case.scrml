@@ -1,6 +1,6 @@
 <program>
 
-${ import { hashPassword } from 'scrml:auth' }
+${ import { hashPassword } from 'scrml:auth'; }
 
 <pw> = "secret"
 <items> = [1, 2]

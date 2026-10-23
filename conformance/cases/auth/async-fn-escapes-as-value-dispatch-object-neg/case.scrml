@@ -1,14 +1,14 @@
 <program>
 ${
-  import { verifyPassword } from 'scrml:auth'
+  import { verifyPassword } from 'scrml:auth';
 }
 <verdict> = "unset"
 server function check(pw: string, hash: string) {
-  const checks = { password: verifyPassword }
-  return checks.password(pw, hash) ? "accepted" : "rejected"
+  const checks = { password: verifyPassword };
+  return checks.password(pw, hash) ? "accepted" : "rejected";
 }
 function go() {
-  @verdict = check("wrong", "not-a-hash") !{ .Transport(_) :> return }
+  @verdict = check("wrong", "not-a-hash") !{ .Transport(_) :> return };
 }
 <p id="out">${@verdict}</p>
 <button id="go" onclick=go()>go</button>

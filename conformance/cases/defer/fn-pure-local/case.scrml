@@ -2,13 +2,13 @@ ${
     <got> = 0
 
     fn settle(x: number) -> number {
-        let acc = x * 2
-        defer acc = 0
-        return acc + 1
+        let acc = x * 2;
+        defer acc = 0;
+        return acc + 1;
     }
 
     function go() {
-        @got = settle(20)
+        @got = settle(20);
     }
 }
 <program>

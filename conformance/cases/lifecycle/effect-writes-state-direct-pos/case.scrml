@@ -2,6 +2,6 @@
 <program>
   <query> = ""
   <page> = 1
-  <effect deps=[@query]>${ @page = 1 }</>
+  <effect deps=[@query]>${ @page = 1; }</>
   <p>${@query} ${@page}</p>
 </program>

@@ -33,7 +33,7 @@
         for (const it of items) {
             let row = not
             if (it.on) {
-                row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get()
+                row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get();
             }
             out.push(row is not ? "none" : row.body)
         }
@@ -41,7 +41,7 @@
     }
     function outer(items) {
         let out = []
-        let row = not
+        let row = not;
         for (const it of items) {
             row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get()
             out.push(row is not ? "none" : row.body)
@@ -52,7 +52,7 @@
         let out = []
         for (const it of items) {
             let row = not
-            row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get() !{ _ :> not }
+            row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get() !{ _ :> not };
             out.push(row is not ? "none" : row.body)
         }
         return out.join(",")
@@ -62,7 +62,7 @@
         for (const it of items) {
             let row = not
             if (it.on) {
-                row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get() !{ _ :> not }
+                row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get() !{ _ :> not };
             }
             out.push(row is not ? "none" : row.body)
         }
@@ -73,20 +73,20 @@
         for (const it of items) {
             let row = not
             if (it.on) {
-                row = ?{`SELECT id, body FROM gone WHERE id = ${it.id}`}.get() !{ _ :> not }
+                row = ?{`SELECT id, body FROM gone WHERE id = ${it.id}`}.get() !{ _ :> not };
             }
             out.push(row is not ? "none" : row.body)
         }
         return out.join(",")
     }
     function go() {
-        const items = [{ id: 7, on: true }, { id: 8, on: true }]
-        @direct = direct(items) !{ _ :> "err" }
-        @inIf = inIf(items) !{ _ :> "err" }
-        @outer = outer(items) !{ _ :> "err" }
-        @handledDirect = handledDirect(items) !{ _ :> "err" }
-        @handledInIf = handledInIf(items) !{ _ :> "err" }
-        @handledFailed = handledGone(items) !{ _ :> "err" }
+        const items = [{ id: 7, on: true }, { id: 8, on: true }];
+        @direct = direct(items) !{ _ :> "err" };
+        @inIf = inIf(items) !{ _ :> "err" };
+        @outer = outer(items) !{ _ :> "err" };
+        @handledDirect = handledDirect(items) !{ _ :> "err" };
+        @handledInIf = handledInIf(items) !{ _ :> "err" };
+        @handledFailed = handledGone(items) !{ _ :> "err" };
     }
     <button id="go" onclick=go()>go</button>
     <p id="direct">${@direct}</p>

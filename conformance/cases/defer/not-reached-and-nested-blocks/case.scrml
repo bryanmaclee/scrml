@@ -2,23 +2,23 @@ ${
     <trace> = ""
 
     function step(x: number) {
-        defer @trace = @trace + "outer;"
+        defer @trace = @trace + "outer;";
         if (x > 0) {
-            defer @trace = @trace + "inner;"
-            @trace = @trace + "body;"
+            defer @trace = @trace + "inner;";
+            @trace = @trace + "body;";
         }
-        @trace = @trace + "mid;"
+        @trace = @trace + "mid;";
         if (x > 5) {
-            return
+            return;
         }
-        defer @trace = @trace + "late;"
-        @trace = @trace + "end;"
+        defer @trace = @trace + "late;";
+        @trace = @trace + "end;";
     }
 
     function go() {
-        step(1)
-        @trace = @trace + "|"
-        step(9)
+        step(1);
+        @trace = @trace + "|";
+        step(9);
     }
 }
 <program>

@@ -29,3 +29,26 @@ export const SRC = join(import.meta.dir, "src");
 export function source(rel) {
   return readFileSync(join(SRC, rel), "utf8");
 }
+
+/**
+ * s469 — `src` with the dpa-073 terminators written in: a `;` at every
+ * E-STMT-MISSING-SEMICOLON and a `,` at every E-MATCH-ARM-SEPARATOR the
+ * bootstrap parser reports (each report's span is the empty span where the
+ * terminator goes), to a fixed point. The SPEC §66.19 worked programs are still
+ * written newline-terminated (the SPEC's own migration is owed — dpa-073 F5
+ * step 3); the slice sources are those programs WITH their terminators, so the
+ * drift guards compare `terminated(block)` with the source. Only those two
+ * codes are acted on; any other diagnostic is left for the guard to see.
+ */
+export function terminated(mods, src) {
+  let s = src;
+  for (let pass = 0; pass < 50; pass++) {
+    const ins = mods.parse.parseFile("guard.scrml", s, 0).diags
+      .filter((d) => (d.code === "E-STMT-MISSING-SEMICOLON" || d.code === "E-MATCH-ARM-SEPARATOR") && d.span.start === d.span.end)
+      .map((d) => [d.span.start, d.code === "E-STMT-MISSING-SEMICOLON" ? ";" : ","])
+      .sort((a, b) => b[0] - a[0]);
+    if (ins.length === 0) return s;
+    for (const [at, ch] of ins) s = s.slice(0, at) + ch + s.slice(at);
+  }
+  return s;
+}

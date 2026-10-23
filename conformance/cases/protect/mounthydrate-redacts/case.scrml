@@ -5,8 +5,8 @@
 </schema>
 <db src="app.db" protect="passwordHash" tables="users,notes"></db>
 ${
-  server function loadUsers() { return ?{`SELECT * FROM users`}.all() }
-  server function loadNotes() { return ?{`SELECT * FROM notes`}.all() }
+  server function loadUsers() { return ?{`SELECT * FROM users`}.all(); }
+  server function loadNotes() { return ?{`SELECT * FROM notes`}.all(); }
   <userCell server> = loadUsers()
   <noteCell server> = loadNotes()
 }

@@ -2,9 +2,9 @@
 <program>
 
     function f() -> int {
-        let s = 0
-        for (i of 0..1.5) { s = s + 1 }
-        return s
+        let s = 0;
+        for (i of 0..1.5) { s = s + 1; }
+        return s;
     }
     <main>
         <p id="o">${f()}</p>

@@ -6,8 +6,8 @@
 <db src="app.db" tables="nums,names"></db>
 ${
   type R:struct = { id: number, n: number(>0) }
-  server function loadNums() { return ?{`SELECT * FROM nums`}.all() !{ _ :> [] } }
-  server function loadNames() { return ?{`SELECT * FROM names`}.all() !{ _ :> [] } }
+  server function loadNums() { return ?{`SELECT * FROM nums`}.all() !{ _ :> [] }; }
+  server function loadNames() { return ?{`SELECT * FROM names`}.all() !{ _ :> [] }; }
   <nums server>: R[] = loadNums()
   <names server> = loadNames()
   <clicks>: number = 0

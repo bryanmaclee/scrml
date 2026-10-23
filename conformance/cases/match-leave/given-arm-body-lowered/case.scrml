@@ -18,18 +18,18 @@ ${
     }
     function stmt(v: number | not) -> number {
         match v {
-            not :> { return 1 }
-            given v :> { return 2 }
+            not :> { return 1; }
+            given v :> { return 2; }
         }
         return 3
     }
     function go() {
-        @a = decl("al")
-        @b = ret("bo")
-        const present = stmt(5)
-        const absent = stmt(not)
-        @c = `${present}${absent}`
-        @d = decl(not)
+        @a = decl("al");
+        @b = ret("bo");
+        const present = stmt(5);
+        const absent = stmt(not);
+        @c = `${present}${absent}`;
+        @d = decl(not);
     }
 }
 <button id="go" onclick=go()>go</>

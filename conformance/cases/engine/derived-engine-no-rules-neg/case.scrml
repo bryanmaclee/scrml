@@ -1,7 +1,7 @@
 ${ type Mario:enum = { Small, Big } }
 ${ type Health:enum = { Healthy, AtRisk } }
 ${ <sounds> = [] }
-${ function playSound(name) { @sounds = [...@sounds, name] } }
+${ function playSound(name) { @sounds = [...@sounds, name]; } }
 <marioState>: Mario = .Small
 <engine for=Health derived=match @marioState {
   .Small :> .Healthy

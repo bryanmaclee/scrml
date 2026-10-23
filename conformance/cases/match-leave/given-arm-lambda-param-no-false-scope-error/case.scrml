@@ -3,7 +3,7 @@ ${
     <k> : K = .A
     <v> : string = ""
     function go() {
-        const xs = ["p", "q"]
+        const xs = ["p", "q"];
         @v = xs.map((q) => match @k { given q :> "has:" + q  else :> "none" }).join(",")
     }
 }

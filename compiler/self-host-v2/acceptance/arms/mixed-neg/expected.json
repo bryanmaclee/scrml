@@ -1,12 +1,18 @@
 {
   "id": "acceptance-arms-mixed-neg",
-  "description": "dpa-073 F2: an arm list that mixes `,` and newline separators is E-MATCH-ARM-SEPARATOR, once.",
+  "description": "dpa-073 F2: an arm list with a `,` missing between two arms is E-MATCH-ARM-SEPARATOR — once per missing `,` (here one: the list is otherwise a comma list).",
   "language-version": "1.0",
   "spec": "dpa-073 F2 (S469)",
-  "rationale": "user-voice-scrml.md S469 dpa-073 F2 (iii): \"one spelling\" — rejected (ii) \"newline-or-comma (two spellings, contradicts S452)\"; F2 supersedes E-MATCH-ARM-SEPARATOR's meaning. The newline-only list is still read during the migration (F5), so the refusal is of the MIX.",
+  "rationale": "user-voice-scrml.md S469 dpa-073 F2 (iii): \"one spelling\" — rejected (ii) \"newline-or-comma (two spellings, contradicts S452)\"; F2 (i): \"a `,` between every pair of arms\"; F2 supersedes E-MATCH-ARM-SEPARATOR's meaning. The bootstrap enforces the comma list (F5 (4)), so every missing `,` is reported.",
   "expect": {
-    "codes": ["E-MATCH-ARM-SEPARATOR"],
-    "codeCounts": { "E-MATCH-ARM-SEPARATOR": 1 },
-    "severity": { "E-MATCH-ARM-SEPARATOR": "error" }
+    "codes": [
+      "E-MATCH-ARM-SEPARATOR"
+    ],
+    "codeCounts": {
+      "E-MATCH-ARM-SEPARATOR": 1
+    },
+    "severity": {
+      "E-MATCH-ARM-SEPARATOR": "error"
+    }
   }
 }

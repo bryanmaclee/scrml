@@ -3,8 +3,8 @@
     // admitted DML; the chain is the hazard: one string runs every statement on the database.
     ${
         function record() {
-            ?{`INSERT INTO log (msg) VALUES ('a'); INSERT INTO log (msg) VALUES ('b')`}.run()
-            return 1
+            ?{`INSERT INTO log (msg) VALUES ('a'); INSERT INTO log (msg) VALUES ('b')`}.run();
+            return 1;
         }
     }
     <button onclick=${ record() }>record</button>

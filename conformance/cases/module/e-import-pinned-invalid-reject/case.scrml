@@ -1,4 +1,4 @@
 ${
-    import { present pinned } from './m.scrml'
+    import { present pinned } from './m.scrml';
 }
 <p>${present()}</>

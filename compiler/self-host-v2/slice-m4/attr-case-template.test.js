@@ -30,7 +30,7 @@ const prog = (body, extra = "") => `<program>
     let <step:number=1/>
     let <ok:boolean=true/>
     let <label:string="a"/>
-    function go(n: number) { @step = n }
+    function go(n: number) { @step = n; }
 ${extra}
     <main>
 ${body}

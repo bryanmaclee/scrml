@@ -2,17 +2,17 @@
 <program>
     let <hits:int=0/>
     function bump() -> int {
-        @hits = @hits + 1
-        return 1
+        @hits = @hits + 1;
+        return 1;
     }
     function label() -> string {
-        @hits = @hits + 1
-        return "x"
+        @hits = @hits + 1;
+        return "x";
     }
     let <q:string=""/>
     <main>
         <button onclick=bump()>a</button>
-        <button onclick={ @hits = @hits + 1 }>b</button>
+        <button onclick={ @hits = @hits + 1; }>b</button>
         <input bind:value=@q/>
         <p>${@hits}</p>
     </main>

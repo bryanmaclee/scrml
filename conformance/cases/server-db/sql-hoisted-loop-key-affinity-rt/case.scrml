@@ -27,8 +27,8 @@
     function numKey() {
         let out = []
         for (const it of [{ n: 7 }, { n: "7" }]) {
-            const rows = ?{`SELECT id FROM tags WHERE name = ${it.n}`}.all()
-            out.push(rows.length)
+            const rows = ?{`SELECT id FROM tags WHERE name = ${it.n}`}.all();
+            out.push(rows.length);
         }
         return out.join(",")
     }
@@ -37,16 +37,16 @@
     function keyChanged() {
         let out = []
         for (const it of [{ id: 6 }, { id: 8 }]) {
-            it.id = it.id + 1
+            it.id = it.id + 1;
             const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
             out.push(row is not ? "none" : row.body)
         }
         return out.join(",")
     }
     function go() {
-        @textKey = textKey() !{ _ :> "err" }
-        @numKey = numKey() !{ _ :> "err" }
-        @keyChanged = keyChanged() !{ _ :> "err" }
+        @textKey = textKey() !{ _ :> "err" };
+        @numKey = numKey() !{ _ :> "err" };
+        @keyChanged = keyChanged() !{ _ :> "err" };
     }
     <button id="go" onclick=go()>go</button>
     <p id="textKey">${@textKey}</p>

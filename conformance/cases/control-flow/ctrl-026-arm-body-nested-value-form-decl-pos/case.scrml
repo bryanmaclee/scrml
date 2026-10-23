@@ -22,7 +22,7 @@ ${
     }
 
     function nestedForDecl() {
-        const names = ["ann", "bo"]
+        const names = ["ann", "bo"];
         const label = if (@n > 0) {
             const picked = for (nm of names) { lift nm }
             lift picked[0]

@@ -2,7 +2,7 @@ ${
     <trace> = ""
 
     function D(s: string) {
-        @trace = @trace + s
+        @trace = @trace + s;
     }
 
     function f(x: int) {
@@ -13,7 +13,7 @@ ${
     }
 
     function g(x: int) {
-        defer D("d;")
+        defer D("d;");
         function x() {
             return 8
         }
@@ -21,9 +21,9 @@ ${
     }
 
     function go() {
-        let a = f(1)
-        let b = g(1)
-        @trace = @trace + a + ";" + b + ";"
+        let a = f(1);
+        let b = g(1);
+        @trace = @trace + a + ";" + b + ";";
     }
 }
 <program>

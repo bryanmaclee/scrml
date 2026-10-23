@@ -1,5 +1,5 @@
 // app.scrml
-${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } from "./lib/brand-theme.scrml" }
+${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } from "./lib/brand-theme.scrml"; }
 
 <program>
     <main>

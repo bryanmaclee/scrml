@@ -2,10 +2,10 @@
 <program>
 
     function f() -> int {
-        let s = 0
-        for (i of 0..3) { s = s * 10 + i }
-        for (j of 1..=2) { s = s * 10 + j }
-        return s
+        let s = 0;
+        for (i of 0..3) { s = s * 10 + i; }
+        for (j of 1..=2) { s = s * 10 + j; }
+        return s;
     }
     <main>
         <p id="o">${f()}</p>

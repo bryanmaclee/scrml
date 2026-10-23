@@ -1,7 +1,7 @@
 ${
     <x> = "hello"
     function change() {
-        @x = "world"
+        @x = "world";
     }
 }
 <button id="go" onclick=change()>go</>

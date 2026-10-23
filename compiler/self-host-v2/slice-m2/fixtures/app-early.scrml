@@ -1,7 +1,7 @@
 // FIXTURE (not the oracle): §66.19.3 app.scrml plus user code that reads the unconditional handle
 // `@country` BEFORE the first render (L12 (b)) — M1 dropdownEarlyReadCore.
 // app.scrml
-${ import { dropdown, Openness } from "./lib/dropdown.scrml" }
+${ import { dropdown, Openness } from "./lib/dropdown.scrml"; }
 
 <program>
     type Line:struct = { id: int, name: string }
@@ -9,11 +9,11 @@ ${ import { dropdown, Openness } from "./lib/dropdown.scrml" }
     let <showColor:bool=false/>
     let <firstCountry:string=(countryValue())/>                  // seeded at construction (L12 (b))
 
-    function closeCountry() { @country.open = .Closed }       // cross-file write to an EXPORTED field, along its graph; from .Closed it is a self-write no-op (§51.0.F.1)
+    function closeCountry() { @country.open = .Closed; }       // cross-file write to an EXPORTED field, along its graph; from .Closed it is a self-write no-op (§51.0.F.1)
     function clearColor() {
-        given c = @color :> { c.value = "" }                  // @color is `dropdown | not`: narrowed first; the write goes through `c` (§66.7.5)
+        given c = @color :> { c.value = ""; }                  // @color is `dropdown | not`: narrowed first; the write goes through `c` (§66.7.5)
     }
-    function countryValue() { return @country.value }
+    function countryValue() { return @country.value; }
 
     <main class="filters">
         <p class="early">Early ${countryValue()} / ${@firstCountry}</p>

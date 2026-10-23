@@ -1,7 +1,7 @@
 ${
     <items> = [{ id: 1, label: "A" }, { id: 2, label: "B" }, { id: 3, label: "C" }]
     function remove(id: number) {
-        @items = @items.filter(it => it.id != id)
+        @items = @items.filter(it => it.id != id);
     }
 }
 <div id="list">

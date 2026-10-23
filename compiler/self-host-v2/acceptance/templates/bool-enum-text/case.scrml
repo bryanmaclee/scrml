@@ -4,11 +4,11 @@
     let <c:Color=.Red/>
     let <flag:bool=false/>
     fn describe(k: Color, b: bool) -> string {
-        return `${k} is ${b}`
+        return `${k} is ${b}`;
     }
     <main>
-        <button id="go" onclick={ @c = .Blue
-            @flag = true }>go</button>
+        <button id="go" onclick={ @c = .Blue;
+            @flag = true; }>go</button>
         <p id="out">${describe(@c, @flag)}</p>
     </main>
 </program>

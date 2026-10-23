@@ -1,5 +1,5 @@
 ${
-  import { schemaFor } from 'scrml:data'
+  import { schemaFor } from 'scrml:data';
 
   type User:struct = {
     email: string req length(<=120)

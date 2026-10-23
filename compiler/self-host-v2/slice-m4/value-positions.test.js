@@ -51,10 +51,10 @@ const $ = (sel) => document.querySelector(sel);
 // `g` writes `@a`; `h` is its write-free twin. `gs` / `hs` return strings.
 const W = [
   `    let <a:int=0/>`,
-  `    function g(x: int) -> int {\n        @a = @a + 1\n        return x\n    }`,
-  `    fn h(x: int) -> int { return x }`,
-  `    function gs() -> string {\n        @a = @a + 1\n        return "w"\n    }`,
-  `    fn hs() -> string { return "w" }`,
+  `    function g(x: int) -> int {\n        @a = @a + 1;\n        return x;\n    }`,
+  `    fn h(x: int) -> int { return x; }`,
+  `    function gs() -> string {\n        @a = @a + 1;\n        return "w";\n    }`,
+  `    fn hs() -> string { return "w"; }`,
 ].join("\n");
 const with_ = (decls) => `${W}\n${decls}`;
 
@@ -105,7 +105,7 @@ describe("S449 item 3 — every position class: a writer is an error at the SOUR
 
 describe("S449 item 3 — the write summary, as the effect rule uses it", () => {
   test("a write two calls down names the whole chain", () => {
-    const ds = diagsOf(P(with_(`    function mid(x: int) -> int { return g(x) }`), `        <p>\${mid(@a)}</p>`));
+    const ds = diagsOf(P(with_(`    function mid(x: int) -> int { return g(x); }`), `        <p>\${mid(@a)}</p>`));
     expect(ds.map((d) => d.code)).toEqual([CODE]);
     expect(ds[0].message).toContain("`mid() → g() → @a`");
   });
@@ -117,12 +117,12 @@ describe("S449 item 3 — the write summary, as the effect rule uses it", () => 
   });
 
   test("recursion that writes is found (the fixed point)", () => {
-    const rec = `    function r1(k: int) -> int {\n        if (k > 0) { return r2(k - 1) }\n        return 0\n    }\n    function r2(k: int) -> int {\n        @a = k\n        return r1(k)\n    }`;
+    const rec = `    function r1(k: int) -> int {\n        if (k > 0) { return r2(k - 1); }\n        return 0;\n    }\n    function r2(k: int) -> int {\n        @a = k;\n        return r1(k);\n    }`;
     expect(codes(P(with_(rec), `        <p>\${r1(3)}</p>`))).toEqual([CODE]);
   });
 
   test("an unresolvable call reached from a render position fails closed — " + UNPROVEN, () => {
-    const via = `    function viaLocal() -> int {\n        const k = h\n        return k(1)\n    }`;
+    const via = `    function viaLocal() -> int {\n        const k = h;\n        return k(1);\n    }`;
     const ds = fnValueRefused(diagsOf(P(with_(via), `        <p>\${viaLocal()}</p>`)));
     expect(ds.map((d) => d.code)).toEqual([UNPROVEN]);
     expect(ds[0].message).toContain("through `viaLocal()`");
@@ -138,7 +138,7 @@ describe("S449 item 3 — the write summary, as the effect rule uses it", () => 
 describe("S449 item 3 — NOT render positions: an event handler and a two-way bind may write", () => {
   test("`onclick=` calling a writer, a handler block writing, `bind:value` — clean", () => {
     clean(P(with_(`    let <q:string=""/>`),
-      `        <button onclick=g(1)>a</button>\n        <button onclick={ @a = @a + 1 }>b</button>\n        <input bind:value=@q/>\n        <p>\${@a}</p>`));
+      `        <button onclick=g(1)>a</button>\n        <button onclick={ @a = @a + 1; }>b</button>\n        <input bind:value=@q/>\n        <p>\${@a}</p>`));
   });
 });
 
@@ -151,7 +151,7 @@ describe("closes g-bootstrap-render-writer-call-hangs — the render self-write 
   });
 
   test("a render↔render cycle (each hole writes what the other reads) is rejected at both holes", () => {
-    const fns = `    let <b:int=0/>\n    function wa() -> int {\n        @a = @b + 1\n        return @a\n    }\n    function wb() -> int {\n        @b = @a + 1\n        return @b\n    }`;
+    const fns = `    let <b:int=0/>\n    function wa() -> int {\n        @a = @b + 1;\n        return @a;\n    }\n    function wb() -> int {\n        @b = @a + 1;\n        return @b;\n    }`;
     expect(codes(P(`    let <a:int=0/>\n${fns}`, `        <p>\${wa()}</p>\n        <p>\${wb()}</p>`))).toEqual([CODE, CODE]);
   });
 });

@@ -3,10 +3,10 @@
     type Book:struct = { title: string, author: string }
     <list:Book[replace]=([])/>
     function booksByAuthor(name: string) -> Book[] {
-        return ?{`SELECT b.title AS title, a.name AS author FROM books b JOIN authors a ON a.id = b.author_id WHERE a.name = ${name} ORDER BY b.id`}.all() !{ _ :> [] }
+        return ?{`SELECT b.title AS title, a.name AS author FROM books b JOIN authors a ON a.id = b.author_id WHERE a.name = ${name} ORDER BY b.id`}.all() !{ _ :> [] };
     }
     function onLoad() {
-        @list = booksByAuthor("Ada") !{ .Transport(t) :> return }
+        @list = booksByAuthor("Ada") !{ .Transport(t) :> return };
     }
     <main>
         <button id="load" onclick=onLoad()>Load books</button>

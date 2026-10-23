@@ -4,9 +4,9 @@ type LoadError:enum = {
 }
 
 function loadItem(id: string)! LoadError {
-    if (id == "missing") fail LoadError::NotFound(id)
-    if (id == "slow") fail LoadError::Timeout
-    return id
+    if (id == "missing") fail LoadError::NotFound(id);
+    if (id == "slow") fail LoadError::Timeout;
+    return id;
 }
 
 <page>

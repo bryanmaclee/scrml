@@ -1,10 +1,10 @@
 ${
     <groups> = [{ id: 1, name: "one" }, { id: 2, name: "two" }]
     function replaceFirst() {
-        @groups.splice(0, 1, { id: 1, name: "S" })
+        @groups.splice(0, 1, { id: 1, name: "S" });
     }
     function addTag() {
-        @groups.push({ id: 3, name: "tag" })
+        @groups.push({ id: 3, name: "tag" });
     }
 }
 <button id="rep" onclick=replaceFirst()>rep</>

@@ -4,8 +4,8 @@ ${
         <email> = ""
     </>
     function fill() {
-        @formRes.name  = "Alice"
-        @formRes.email = "alice@example.com"
+        @formRes.name  = "Alice";
+        @formRes.email = "alice@example.com";
     }
 }
 <button id="fill" onclick=fill()>fill</>

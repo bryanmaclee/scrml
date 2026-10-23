@@ -130,7 +130,7 @@ describe("§66.19.5 — a snapshot is a value (§66.10), on the verbatim source 
   let program;
   beforeAll(async () => {
     Date.now = () => 7;
-    const src = replaceLine(SRC(), "let snapshot = @audit", "function probe() -> int {\n        let snapshot = @audit\n        record(\"probe\")\n        return snapshot.length\n    }");
+    const src = replaceLine(SRC(), "let snapshot = @audit", "function probe() -> int {\n        let snapshot = @audit;\n        record(\"probe\");\n        return snapshot.length;\n    }");
     const core = compileClean(mods, [{ path: "audit.scrml", src }], "§66.19.5 + probe").core;
     ({ program } = await loadProgram(core, "audit-probe", ["record", "probe"]));
   });
@@ -164,14 +164,14 @@ describe("§66.19.5 — behaviour: the recognized shapes keep element order", ()
 // the VERBATIM program.
 // ---------------------------------------------------------------------------
 const NEGATIVE = [
-  { marker: "@audit = [];", body: "@audit = []" },
-  { marker: "reset(@audit)", body: "reset(@audit)" },
-  { marker: "@audit.shift()", body: "@audit.shift()" },
-  { marker: "@audit = @audit.filter(", body: "@audit = @audit.filter(e => e.actor != \"x\")" },
-  { marker: "@audit[0].action = \"edited\"", body: "@audit[0].action = \"edited\"" },
-  { marker: "@audit.pop()", body: "@audit.pop()" }, // S442: `[free, append]` grants no shrink
+  { marker: "@audit = [];", body: "@audit = [];" },
+  { marker: "reset(@audit);", body: "reset(@audit);" },
+  { marker: "@audit.shift();", body: "@audit.shift();" },
+  { marker: "@audit = @audit.filter(", body: "@audit = @audit.filter(e => e.actor != \"x\");" },
+  { marker: "@audit[0].action = \"edited\";", body: "@audit[0].action = \"edited\";" },
+  { marker: "@audit.pop();", body: "@audit.pop();" }, // S442: `[free, append]` grants no shrink
   // s469-boot-strings-1: `.reverse()` returns a new tape; written back it is a position write (§66.12.6 rule 3)
-  { marker: "@audit = @audit.reverse()", body: "@audit = @audit.reverse()" },
+  { marker: "@audit = @audit.reverse();", body: "@audit = @audit.reverse();" },
 ];
 
 // s469-tape-followups (#1472): the S469 §66.19.5 rewrite added negative lines the bootstrap cannot check yet
@@ -180,11 +180,11 @@ const NEGATIVE = [
 // NEGATIVE with its SPEC code.
 const PENDING = [
   // SPEC: E-WRITE-NOT-GRANTED (shrink anywhere). Today: `.remove` is not in the allowlist.
-  { marker: "@audit.remove(0)", body: "@audit.remove(0)", today: ["E-BOOTSTRAP-UNSUPPORTED"] },
+  { marker: "@audit.remove(0);", body: "@audit.remove(0);", today: ["E-BOOTSTRAP-UNSUPPORTED"] },
 ];
 // s469-boot-strings-1: the allowlist rename landed (`append` / `prepend`); JavaScript's names are refused.
 const TAPE_JS = [
-  { marker: "@audit.push(e);", body: "@audit.push({ at: 1, actor: \"a\", action: \"b\" })" },
+  { marker: "@audit.push(e);", body: "@audit.push({ at: 1, actor: \"a\", action: \"b\" });" },
 ];
 // The second line of the `appended` comment (its `→ E-WRITE-NOT-GRANTED` is about an uncertifiable helper).
 const PROSE = ["an uncertifiable helper's result is a replace"];
@@ -236,9 +236,9 @@ describe("§66.19.5 — negative lines (each → E-WRITE-NOT-GRANTED)", () => {
   });
 
   test("a wrong-typed element in the spread shape is E-TYPE-031 (§66.1 rule 5 — the element is the written value)", () => {
-    const src = replaceLine(SRC(), NEGATIVE[0].marker, "function neg() { @audit = [...@audit, 5] }");
+    const src = replaceLine(SRC(), NEGATIVE[0].marker, "function neg() { @audit = [...@audit, 5]; }");
     expect(codes(src)).toEqual(["E-TYPE-031"]);
-    const src2 = replaceLine(SRC(), NEGATIVE[0].marker, "function neg() { @audit = [...@audit, { at: 1, actor: 2, action: \"a\" }] }");
+    const src2 = replaceLine(SRC(), NEGATIVE[0].marker, "function neg() { @audit = [...@audit, { at: 1, actor: 2, action: \"a\" }]; }");
     expect(codes(src2)).toEqual(["E-TYPE-031"]);
   });
 
@@ -249,7 +249,7 @@ describe("§66.19.5 — negative lines (each → E-WRITE-NOT-GRANTED)", () => {
       expect(r.diags).toEqual([]);
       expect(mods.check.checkCore(r.core)).toEqual([]);
     }
-    const src3 = replaceLine(granted, NEGATIVE[0].marker, `function neg() { @audit = [{ at: 0, actor: "z", action: "first" }, ...@audit] }`);
+    const src3 = replaceLine(granted, NEGATIVE[0].marker, `function neg() { @audit = [{ at: 0, actor: "z", action: "first" }, ...@audit]; }`);
     expect(codes(src3)).toEqual([]);
   });
 

@@ -7,7 +7,7 @@
     // audit_fn is defined outside this program; its body is unknown.
     ${
         function go() {
-            return ?{`SELECT id, name FROM assets`}.all()
+            return ?{`SELECT id, name FROM assets`}.all();
         }
     }
     <button onclick=${ go() }>go</button>

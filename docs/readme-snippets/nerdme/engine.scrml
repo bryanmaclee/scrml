@@ -1,17 +1,23 @@
-// NERDME.md "Engines, matches & iteration" (Tier 2) — gated by scripts/snippet-gate.js.
+// NERDME.md "Engines, matches & iteration" (Tier 2) — ruled; spec-ahead on the bootstrap (<onTimeout>).
 <program>
+
 type Door:enum = { Closed, Opening, Open }
 
-<engine for=Door initial=.Closed>
+<door:Door=.Closed single>
     <Closed rule=.Opening>
-        <button onclick={ @door = .Opening }>Open</button>
+        <button onclick={ @door = .Opening; }>Open</button>
     </>
     <Opening rule=.Open>
-        Opening...
+        "Opening…"
         <onTimeout after=1s to=.Open/>
     </>
     <Open rule=.Closed>
-        <button onclick={ @door = .Closed }>Close</button>
+        <button onclick={ @door = .Closed; }>Close</button>
     </>
 </>
+
+<main>
+    <*door/>
+</main>
+
 </program>
