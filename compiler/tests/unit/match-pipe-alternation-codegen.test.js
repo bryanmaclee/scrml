@@ -165,15 +165,16 @@ describe("emitMatchExpr — pipe-alternation arms in block-form match", () => {
 // ---------------------------------------------------------------------------
 
 describe("rewriteMatchExpr — mixed-payload-binding alternation (deferred)", () => {
-  it("emits a known-limitation comment when an alternation arm carries payload bindings", () => {
+  it("refuses the whole match when an alternation arm carries payload bindings — never drops the arm", () => {
     // .Some(n) | .Other(n) — same-binding rule (SPEC §51.3.2 E-ENGINE-016)
-    // requires AST-level support to verify; codegen falls back to a comment.
+    // requires AST-level support to verify (the parser raises E-MATCH-ALT-BINDING).
+    // S469 r7: the text lowering reads arms with the canonical reader and REFUSES
+    // (E-PARSE-001) any arm it cannot read; it used to drop this one silently and
+    // lower the rest (the test pinned that), which is a wrong dispatch, not a fallback.
     const input = "match @opt {\n.Some(n) | .Other(n) => n\n.Empty => 0\n}";
     const result = rewriteMatchExpr(input);
-    // The .Empty arm should still compile cleanly
-    expect(result).toContain('=== "Empty"');
-    // The alternation-with-binding arm produces a diagnostic comment OR is dropped — both are acceptable for this dispatch. Whatever the chosen fallback, the rest of the output must still be syntactically valid (one if + one else if at most, no orphan tokens).
-    // Validate no orphaned arm-text leaks into the output.
+    expect(result).toContain("null /* E-PARSE-001 */");
+    expect(result).not.toContain('=== "Empty"');
     expect(result).not.toContain("| .Other");
   });
 });

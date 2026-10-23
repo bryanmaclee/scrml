@@ -1,4 +1,8 @@
 import { genVar } from "./var-counter.ts";
+import { splitMultiArmString, parseMatchArm } from "./emit-control-flow.ts";
+import { splitArmSeparatorCommas, armPiecesCover, rawArmHasStrayComma, rawArmHasLeadingPipeArm } from "../arm-list-split.ts";
+import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { currentLoweringSpan } from "./sql-one-statement-guard.ts";
 import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liveSqlInterpolations } from "./sql-lex.ts";
 import { sqlSitesInExpressionText } from "../sql-in-expression-text.ts";
@@ -64,7 +68,7 @@ export { rewriteCodeSegments, regexAllowedAfter };
 // ---------------------------------------------------------------------------
 
 interface InlineMatchArm {
-  kind: "variant" | "string" | "wildcard" | "not";
+  kind: "variant" | "string" | "literal" | "wildcard" | "not";
   /**
    * The arm's primary test value. For single-variant arms this is the variant
    * name (e.g. `"Big"`); for pipe-alternation arms it is the FIRST alternate
@@ -1617,7 +1621,7 @@ function _rewriteNotSegment(segment: string, errors?: any[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// parseInlineMatchArm / splitInlineArms / rewriteMatchExpr
+// readInlineArms / splitInlineArms / rewriteMatchExpr
 // ---------------------------------------------------------------------------
 
 /** Strip trailing comma from arm result (BUG: arm splitter includes separator). */
@@ -1628,8 +1632,8 @@ function stripTrailingComma(s: string): string {
 
 /**
  * §14.4.1 — normalize a QUALIFIED inline-match arm LHS (`Src.A`) to its
- * canonical bare form (`.A`) so the codegen arm splitter (`splitInlineArms` /
- * `_splitMultiArmString`) AND arm parser (`parseInlineMatchArm`) lower it
+ * canonical bare form (`.A`) so the canonical arm reader (`readInlineArms` — codegen
+ * `splitMultiArmString` / `parseMatchArm`) lowers it
  * IDENTICALLY to `.A`.
  *
  * WHY THIS EXISTS (derived-engine qualified-LHS codegen bug): the general
@@ -1699,301 +1703,6 @@ function stripInlineMatchArmLhsQualifiers(arms: string): string {
   return out;
 }
 
-function parseInlineMatchArm(text: string): InlineMatchArm | null {
-  // §18 pipe-alternation arm: `.A | .B | .C => result` (or `:>`).
-  // Tried BEFORE the single-variant regex so the alternation chain wins.
-  // We do NOT support payload bindings on alternation arms (per §51.3.2
-  // same-binding-shape rule; a binding present on any alternate falls through
-  // to the single-variant regex below, which will fail to match alternation
-  // and the arm is dropped — emitter handles the dropped-arm comment).
-  const altMatch = text.match(
-    /^\.\s*([A-Z][A-Za-z0-9_]*)((?:\s*\|\s*\.\s*[A-Z][A-Za-z0-9_]*)+)\s*(?:=>|:>|->)\s*([\s\S]+)$/,
-  );
-  if (altMatch) {
-    const first = altMatch[1];
-    const rest = altMatch[2]
-      .split("|")
-      .map(s => s.trim().replace(/^\./, "").trim())
-      .filter(s => s.length > 0);
-    const tests = [first, ...rest];
-    return {
-      kind: "variant",
-      test: first,
-      tests,
-      result: stripTrailingComma(altMatch[3]),
-    };
-  }
-
-  const newVariantMatch = text.match(/^\.\s*([A-Z][A-Za-z0-9_]*)(?:\s*\(\s*(\w+)\s*\))?\s*(?:=>|:>|->)\s*([\s\S]+)$/);
-  if (newVariantMatch) {
-    return { kind: "variant", test: newVariantMatch[1], result: stripTrailingComma(newVariantMatch[3]) };
-  }
-
-  const newDqMatch = text.match(/^"((?:[^"\\]|\\.)*)"\s*(?:=>|:>|->)\s*([\s\S]+)$/);
-  if (newDqMatch) {
-    return { kind: "string", test: `"${newDqMatch[1]}"`, result: stripTrailingComma(newDqMatch[2]) };
-  }
-
-  const newSqMatch = text.match(/^'((?:[^'\\]|\\.)*)'\s*(?:=>|:>|->)\s*([\s\S]+)$/);
-  if (newSqMatch) {
-    return { kind: "string", test: `'${newSqMatch[1]}'`, result: stripTrailingComma(newSqMatch[2]) };
-  }
-
-  // §42: `not => expr` — absence arm in inline match
-  const notArmMatch = text.match(/^not\s*(?:=>|:>|->)\s*([\s\S]+)$/);
-  if (notArmMatch) {
-    return { kind: "not", test: null, result: stripTrailingComma(notArmMatch[1]) };
-  }
-
-  const newWildcardMatch = text.match(/^else\s*(?:(?:=>|:>|->)\s*)?([\s\S]+)$/);
-  if (newWildcardMatch) {
-    return { kind: "wildcard", test: null, result: stripTrailingComma(newWildcardMatch[1]) };
-  }
-
-  const legacyVariantMatch = text.match(/^::\s*(\w+)(?:\s*\(\s*(\w+)\s*\))?\s*->\s*([\s\S]+)$/);
-  if (legacyVariantMatch) {
-    return { kind: "variant", test: legacyVariantMatch[1], result: stripTrailingComma(legacyVariantMatch[3]) };
-  }
-
-  const legacyDqMatch = text.match(/^"((?:[^"\\]|\\.)*)"\s*->\s*([\s\S]+)$/);
-  if (legacyDqMatch) {
-    return { kind: "string", test: `"${legacyDqMatch[1]}"`, result: stripTrailingComma(legacyDqMatch[2]) };
-  }
-
-  const legacySqMatch = text.match(/^'((?:[^'\\]|\\.)*)'\s*->\s*([\s\S]+)$/);
-  if (legacySqMatch) {
-    return { kind: "string", test: `'${legacySqMatch[1]}'`, result: stripTrailingComma(legacySqMatch[2]) };
-  }
-
-  const legacyWildcardMatch = text.match(/^_\s*->\s*([\s\S]+)$/);
-  if (legacyWildcardMatch) {
-    return { kind: "wildcard", test: null, result: stripTrailingComma(legacyWildcardMatch[1]) };
-  }
-
-  // Bug 1 (S95) — NEW Form: `_ => expr` / `_ :> expr` — JS-style wildcard
-  // alias for `else`. Mirrors parseMatchArm in emit-control-flow.ts. Keeps
-  // the string-pipeline rewriteMatchExpr (used by the server-mode shim in
-  // emit-expr.ts and by Pass 13 of the legacy rewrite pipeline) in parity
-  // with the structured emitter.
-  const newUnderscoreWildcardMatch = text.match(/^_\s*(?:=>|:>|->)\s*([\s\S]+)$/);
-  if (newUnderscoreWildcardMatch) {
-    return { kind: "wildcard", test: null, result: stripTrailingComma(newUnderscoreWildcardMatch[1]) };
-  }
-
-  // §42 presence arm: (identifier) => expr — counterpart to `not => expr`
-  const presenceArmMatch = text.match(/^\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)\s*(?:=>|:>|->)\s*([\s\S]+)$/);
-  if (presenceArmMatch) {
-    return { kind: "wildcard", test: null, result: stripTrailingComma(presenceArmMatch[2]) };
-  }
-
-  return null;
-}
-
-/**
- * Split a multi-arm string on arm boundaries.
- *
- * Private version for use in splitInlineArms when inline match arms are on one
- * line without newline separators (BUG-R13-001). Same logic as splitMultiArmString
- * in emit-control-flow.ts — duplicated here to avoid cross-module coupling.
- *
- * An arm boundary is detected when we find an arm-start token at a non-string
- * position that is not a property access:
- *   - .UpperCase  (new variant arm — only when NOT preceded by identifier char)
- *   - "..." =>    (string literal arm, followed by => or ->)
- *   - '...' =>    (string literal arm, followed by => or ->)
- *   - else        (wildcard arm — when preceded by whitespace or start)
- *   - ::letter    (legacy variant arm)
- *   - _ ->        (legacy wildcard arm)
- *
- * Returns [s] when only zero or one arm boundary is found.
- */
-function _splitMultiArmString(s: string): string[] {
-  const armStartPositions: number[] = [];
-  let inString: string | null = null;
-  let braceDepth = 0; // skip arm detection inside nested { } blocks
-  let i = 0;
-
-  while (i < s.length) {
-    const ch = s[i];
-
-    if (inString !== null) {
-      if (ch === "\\") { i += 2; continue; }
-      if (ch === inString) { inString = null; }
-      i++;
-      continue;
-    }
-
-    // Track brace depth — skip arm detection inside nested { } blocks
-    if (ch === "{") { braceDepth++; i++; continue; }
-    if (ch === "}") { if (braceDepth > 0) braceDepth--; i++; continue; }
-    if (braceDepth > 0) { i++; continue; }
-
-    if (/\s/.test(ch)) { i++; continue; }
-
-    // New variant arm: .UpperCase or . UpperCase (BS adds spaces around .)
-    // Only when NOT preceded by an identifier char.
-    // IMPORTANT: skip whitespace before the dot. The block-splitter emits
-    // "MarioState . Big" with spaces around '.'. Without skipping whitespace,
-    // s[i-1] is ' ' (space), which passes !/[A-Za-z0-9_$]/.test() — incorrectly
-    // treating .Big as a new arm start instead of a property access.
-    if (ch === "." && i + 1 < s.length) {
-      let nextNonSpace = i + 1;
-      while (nextNonSpace < s.length && s[nextNonSpace] === " ") nextNonSpace++;
-      if (nextNonSpace < s.length && /[A-Z]/.test(s[nextNonSpace])) {
-                // An arm boundary is a .UpperCase token followed by => (or ->) at the same depth.
-        // This is the only reliable signal that distinguishes arm starts from property accesses
-        // in the single-line token-joined format that collectExpr produces (e.g.,
-        // "MarioState . Fire . Feather => ..." — .Fire has no arrow, .Feather does).
-        //
-        // Strategy: look AHEAD past the variant name (and optional payload binding) to check
-        // for =>. If present, it's an arm boundary. Otherwise, it's a property access result.
-        // Apply the original prevCh rule ONLY when => is NOT found (property access cases like
-        // "Status.InProgress .Done => ..." still need splitting at .Done).
-        let nameEnd = nextNonSpace;
-        while (nameEnd < s.length && /[A-Za-z0-9_]/.test(s[nameEnd])) nameEnd++;
-        let afterName = nameEnd;
-        while (afterName < s.length && s[afterName] === " ") afterName++;
-        // Skip optional payload binding: (binding)
-        if (afterName < s.length && s[afterName] === "(") {
-          let pd = 1; afterName++;
-          while (afterName < s.length && pd > 0) {
-            if (s[afterName] === "(") pd++;
-            else if (s[afterName] === ")") pd--;
-            afterName++;
-          }
-          while (afterName < s.length && s[afterName] === " ") afterName++;
-        }
-        // §18 pipe-alternation lookahead: consume `\s*|\s*\.\s*UpperIdent` repetitions.
-        // This lets `.A | .B | .C => result` register `.A` as the arm start.
-        while (afterName < s.length && s[afterName] === "|") {
-          let p = afterName + 1;
-          while (p < s.length && /\s/.test(s[p])) p++;
-          if (p >= s.length || s[p] !== ".") break;
-          p++;
-          while (p < s.length && /\s/.test(s[p])) p++;
-          if (p >= s.length || !/[A-Z]/.test(s[p])) break;
-          while (p < s.length && /[A-Za-z0-9_]/.test(s[p])) p++;
-          while (p < s.length && /\s/.test(s[p])) p++;
-          afterName = p;
-        }
-        const arrow2 = s.slice(afterName, afterName + 2);
-        const isFollowedByArrow = arrow2 === "=>" || arrow2 === ":>" || arrow2 === "->";
-        if (isFollowedByArrow) {
-          // §18 pipe-alternation: when we ARE an alternate (preceding non-space
-          // is `|`), do NOT register this `.` as a new arm start — the leading
-          // `.A` of the chain already claimed it.
-          let back = i - 1;
-          while (back >= 0 && /\s/.test(s[back])) back--;
-          const isAlternate = back >= 0 && s[back] === "|";
-          // Definitive arm start — check original prevCh rule to avoid mid-result property accesses
-          const prevCh = i > 0 ? s[i - 1] : null;
-          if (!isAlternate && (prevCh === null || !/[A-Za-z0-9_$]/.test(prevCh))) {
-            armStartPositions.push(i);
-          }
-        }
-      }
-      i++;
-      continue;
-    }
-
-    // String literal arm: "..." => / '...' => or -> only (not bare strings in results)
-    if (ch === '"' || ch === "'") {
-      const q = ch;
-      let j = i + 1;
-      while (j < s.length && s[j] !== q) {
-        if (s[j] === "\\") j++;
-        j++;
-      }
-      if (j < s.length) {
-        let k = j + 1;
-        while (k < s.length && /\s/.test(s[k])) k++;
-        const strArrow2 = s.slice(k, k + 2);
-        if (strArrow2 === "=>" || strArrow2 === ":>" || strArrow2 === "->") {
-          armStartPositions.push(i);
-          inString = q;
-          i++;
-          continue;
-        }
-      }
-      inString = q;
-      i++;
-      continue;
-    }
-
-    // §42 absence arm: not => (or :> or ->) — only when preceded by whitespace or start
-    if (s.slice(i, i + 3) === "not" && (i + 3 >= s.length || /[\s=:\->]/.test(s[i + 3]))) {
-      const prevCh = i > 0 ? s[i - 1] : null;
-      if (prevCh === null || /\s/.test(prevCh)) {
-        let k = i + 3;
-        while (k < s.length && /\s/.test(s[k])) k++;
-        const notArrow2 = s.slice(k, k + 2);
-        if (notArrow2 === "=>" || notArrow2 === ":>" || notArrow2 === "->") {
-          armStartPositions.push(i);
-          i += 3;
-          continue;
-        }
-      }
-    }
-
-    // Wildcard arm: else — only when preceded by whitespace or start-of-string
-    if (s.slice(i, i + 4) === "else" && (i + 4 >= s.length || /[\s=:\->(]/.test(s[i + 4]))) {
-      const prevCh = i > 0 ? s[i - 1] : null;
-      if (prevCh === null || /\s/.test(prevCh)) {
-        armStartPositions.push(i);
-        i += 4;
-        continue;
-      }
-    }
-
-    // Legacy variant arm: ::Letter
-    if (ch === ":" && i + 1 < s.length && s[i + 1] === ":" && i + 2 < s.length && /[A-Za-z_]/.test(s[i + 2])) {
-      armStartPositions.push(i);
-      i += 2;
-      continue;
-    }
-
-    // Legacy wildcard `_ ->` AND JS-style wildcard alias `_ =>` / `_ :>`
-    // (Bug 1 S95 — parity with emit-control-flow.ts:splitMultiArmString).
-    // Requires the `_` to be a standalone token (preceded by start-of-string
-    // or whitespace) to avoid false positives on identifier-suffix `_`.
-    if (ch === "_") {
-      const prevCh = i > 0 ? s[i - 1] : null;
-      const isStandalone = prevCh === null || /\s/.test(prevCh);
-      let k = i + 1;
-      while (k < s.length && /\s/.test(s[k])) k++;
-      const arrow2 = s.slice(k, k + 2);
-      const isArrow = arrow2 === "->" || arrow2 === "=>" || arrow2 === ":>";
-      if (isStandalone && isArrow) {
-        armStartPositions.push(i);
-      }
-    }
-
-    // §42 presence arm: (identifier) => — only when preceded by whitespace or start
-    if (ch === "(") {
-      const prevCh = i > 0 ? s[i - 1] : null;
-      if (prevCh === null || /\s/.test(prevCh)) {
-        const presenceRe = /^\(\s*[A-Za-z_$][A-Za-z0-9_$]*\s*\)\s*=>/;
-        if (presenceRe.test(s.slice(i))) {
-          armStartPositions.push(i);
-        }
-      }
-    }
-
-    i++;
-  }
-
-  if (armStartPositions.length <= 1) return [s];
-
-  const result: string[] = [];
-  for (let idx = 0; idx < armStartPositions.length; idx++) {
-    const start = armStartPositions[idx];
-    const end = idx + 1 < armStartPositions.length ? armStartPositions[idx + 1] : s.length;
-    const arm = s.slice(start, end).trim();
-    if (arm) result.push(arm);
-  }
-  return result.length > 0 ? result : [s];
-}
-
 function splitInlineArms(armsStr: string): string[] {
   // Count net brace depth change in a line, ignoring string literals.
   // Used to group continuation lines from nested match expressions.
@@ -2019,12 +1728,9 @@ function splitInlineArms(armsStr: string): string[] {
     .map((line: string) => line.trim())
     .filter((line: string) => line.length > 0);
 
-  if (lines.length <= 1) {
-    // Single line: try arm-boundary splitting (BUG-R13-001).
-    const src = lines.length === 1 ? lines[0] : armsStr.trim();
-    const byBoundary = _splitMultiArmString(src);
-    return byBoundary.length > 1 ? byBoundary : lines;
-  }
+  // S469 r7 — a single line is one group; its arms are split by the canonical reader
+  // (`readInlineArms`), not by a private copy of the splitter (deleted).
+  if (lines.length <= 1) return lines.length === 1 ? lines : [armsStr.trim()];
 
   // Multi-line: group continuation lines when brace depth > 0 (nested { } blocks).
   // This handles nested match expressions inside arm results.
@@ -2051,6 +1757,51 @@ function splitInlineArms(armsStr: string): string[] {
   if (current !== null) groups.push(current);
 
   return groups.length > 1 ? groups : lines;
+}
+
+/**
+ * S469 r7 — read an inline match's arm text with the canonical reader. Returns the arms, or null
+ * when any part of the text cannot be read as arms (the caller refuses the match).
+ */
+function readInlineArms(armsStr: string): InlineMatchArm[] | null {
+  const out: InlineMatchArm[] = [];
+  for (const commaPiece of splitArmSeparatorCommas(armsStr)) {
+    for (const group of splitInlineArms(commaPiece)) {
+      const g = group.trim();
+      if (!g) continue;
+      if (rawArmHasLeadingPipeArm(g, { startOnly: true })) return null;
+      const pieces = splitMultiArmString(g);
+      if (!armPiecesCover(g, pieces)) return null;
+      for (const raw of pieces) {
+        // The §18.19 whole-product wildcard spelling `| _` / `| else` (impl#1's filed divergence)
+        // is the wildcard arm; any other `|`-led arm is refused below.
+        const piece = raw.replace(/^\|\s*(?=(?:_|else)\b)/, "");
+        if (rawArmHasLeadingPipeArm(piece) || rawArmHasStrayComma(piece)) return null;
+        const a = parseMatchArm(piece);
+        if (!a) return null;
+        out.push({
+          kind: a.kind as InlineMatchArm["kind"],
+          test: a.test,
+          ...(a.tests && a.tests.length > 1 ? { tests: a.tests } : {}),
+          result: stripTrailingComma(a.result),
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/** Record the E-PARSE-001 refusal for an inline match the reader could not read; the placeholder. */
+function refuseInlineMatch(armsStr: string): string {
+  const one = armsStr.replace(/\s+/g, " ").trim();
+  recordRefusedLowering(new CGError(
+    "E-PARSE-001",
+    `E-PARSE-001: the \`match\` arms \`${one.length > 60 ? one.slice(0, 57) + "..." : one}\` cannot be read as an ` +
+      "arm list without losing part of it (an arm no arm form reads, a `|`-led arm, or a stray `,`). " +
+      "Write one arm per `<pattern> :> body`, separated by `,` or a line break (§18.2).",
+    currentLoweringSpan() as object,
+  ), null);
+  return "null /* E-PARSE-001 */";
 }
 
 /**
@@ -2081,30 +1832,18 @@ export function rewriteMatchExpr(expr: string): string {
     m[2].trim().replace(/-\s*>/g, "->"),
   );
 
-  const armLines = splitInlineArms(armsStr);
-  const arms: InlineMatchArm[] = [];
-
-  for (const line of armLines) {
-    const arm = parseInlineMatchArm(line);
-    if (arm) arms.push(arm);
-  }
-
-  if (arms.length === 0) {
-    const newCompactRegex = /\.\s*([A-Z][A-Za-z0-9_]*)\s*(?:\(\s*\w+\s*\))?\s*=>\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^.]+?)(?=\s*\.\s*[A-Z]|\s*$)/g;
-    let compactMatch: RegExpExecArray | null;
-    while ((compactMatch = newCompactRegex.exec(armsStr)) !== null) {
-      arms.push({ kind: "variant", test: compactMatch[1], result: compactMatch[2].trim() });
-    }
-  }
-
-  if (arms.length === 0) {
-    const legacyRegex = /::\s*(\w+)\s*(?:\(\s*(\w+)\s*\))?\s*-\s*>\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^:]+?)(?=\s*::\s*\w|\s*$)/g;
-    let legacyMatch: RegExpExecArray | null;
-    while ((legacyMatch = legacyRegex.exec(armsStr)) !== null) {
-      arms.push({ kind: "variant", test: legacyMatch[1], result: legacyMatch[3].trim() });
-    }
-  }
-
+  // S469 r7 — ONE reader: the arm list is read by the same token-based reader every client
+  // expression-position match uses (arm-list-split.ts `splitArmSeparatorCommas`, codegen
+  // `splitMultiArmString` / `parseMatchArm`), under the same COVERAGE invariant
+  // (`armPiecesCover`). Anything it cannot read in full — a piece no arm form parses, a split
+  // that loses text, a `|`-led arm, a stray `,` — is REFUSED (E-PARSE-001), never skipped: the
+  // private splitter / parser copies this replaced silently dropped literal, boolean and
+  // alternation arms (`"a" | "b" :>` lost `"a"`; `2 :>` / `true :>` arms vanished).
+  // Text with no arm arrow at all is not an arm list (`match x { garbage }`, or `match` used as
+  // an identifier before a brace): left as written, as before — only an ARM list is read.
+  if (!/:>|=>|->/.test(armsStr)) return expr;
+  const arms = readInlineArms(armsStr);
+  if (arms === null) return prefix + refuseInlineMatch(armsStr);
   if (arms.length === 0) return expr;
 
   const tmpVar = genVar("match");
@@ -2132,6 +1871,9 @@ export function rewriteMatchExpr(expr: string): string {
         } else {
           condition = `${tmpVar} === "${arm.test}"`;
         }
+      } else if (arm.tests && arm.tests.length > 1) {
+        // S469 r7 — a literal alternation (`"a" | "b" :>`, `1 | 2 :>`, mixed): every alternate.
+        condition = arm.tests.map(t => `${tmpVar} === ${t}`).join(" || ");
       } else {
         condition = `${tmpVar} === ${arm.test}`;
       }
