@@ -24,10 +24,10 @@ const ROOT = join(import.meta.dir, "../../..");
 const F = "```";
 const fence = (...body) => [`${F}scrml`, ...body, F];
 
-// A program the bootstrap compiles (ruled spelling), one it refuses (`#{}` is not in it),
+// A program the bootstrap compiles (ruled spelling), one it refuses (a `^{}` meta context is not in it; s469-boot-css: was `#{}`, which it now compiles),
 // and one impl#1 compiles but the bootstrap does not parse (legacy `<x> = v` cell).
 const GOOD = ["<program>", "    let <count:int=0/>", "    function inc() {", "        @count = @count + 1;", "    }", "    <main><button onclick=inc()>+</button><p>${@count}</p></main>", "</program>"];
-const AHEAD = ["<program>", "    #{ p { color: red; } }", "    <p>hi</p>", "</program>"];
+const AHEAD = ["<program>", "    <main>", "        <p>hi</p>", "        ^{ 1 }", "    </main>", "</program>"];
 const LEGACY = ["<program>", "    <count> = 0", "    <p>${@count}</p>", "</program>"];
 
 describe("parseDocMarkers — dialect opt-in", () => {
@@ -162,7 +162,7 @@ describe("claim-gate — bootstrap mode", () => {
     const md = write("ruled-ok.md", [
       "# t", "<!-- dialect: ruled -->",
       ...fence(...GOOD),
-      "<!-- gate: spec-ahead — #{} styles are not in the bootstrap -->",
+      "<!-- gate: spec-ahead — ^{} meta is not in the bootstrap -->",
       ...fence(...AHEAD),
       "<!-- gate: skip — a fragment -->",
       ...fence("not code"),
@@ -170,7 +170,7 @@ describe("claim-gate — bootstrap mode", () => {
     const r = claim(md);
     expect(r.stdout).toContain("[ruled]");
     expect(r.stdout).toContain("claim-gate: 1 passed, 1 skipped, 0 snippet-gated, 1 spec-ahead, 0 failed (3 total).");
-    expect(r.stdout).toContain("— #{} styles are not in the bootstrap  [bootstrap: E-BOOTSTRAP-UNSUPPORTED");
+    expect(r.stdout).toContain("— ^{} meta is not in the bootstrap  [bootstrap: E-BOOTSTRAP-UNSUPPORTED");
     expect(r.stdout).toMatch(/bootstrap \(ruled\) — 1 file\(s\), 1 pass, 1 skip, 0 snippet, 1 spec-ahead, 0 stale, 0 fail/);
     expect(r.status).toBe(0);
   }, 120_000);
@@ -216,11 +216,11 @@ describe("snippet-gate — bootstrap mode", () => {
     const md = write("cites.md", [
       "<!-- dialect: ruled -->",
       `<!-- snippet: ${good} -->`, ...fence("x"),
-      `<!-- gate: spec-ahead — no #{} yet -->`, `<!-- snippet: ${ahead} -->`, ...fence("x"),
+      `<!-- gate: spec-ahead — no ^{} yet -->`, `<!-- snippet: ${ahead} -->`, ...fence("x"),
     ]);
     const r = snippet(`--docs=${md}`, good, ahead, legacy);
     expect(r.stdout).toContain(`PASS  ${good}  (bootstrap)`);
-    expect(r.stdout).toContain(`AHEAD ${ahead}  (bootstrap; spec-ahead — no #{} yet)`);
+    expect(r.stdout).toContain(`AHEAD ${ahead}  (bootstrap; spec-ahead — no ^{} yet)`);
     expect(r.stdout).toContain(`PASS  ${legacy}\n`); // uncited → impl#1
     expect(r.stdout).toMatch(/impl1 — 1 file\(s\), 1 pass, 0 fail · bootstrap \(ruled\) — 2 file\(s\), 1 pass, 1 spec-ahead, 0 stale, 0 fail/);
     expect(r.status).toBe(0);

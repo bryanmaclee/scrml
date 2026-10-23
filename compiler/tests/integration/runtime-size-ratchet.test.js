@@ -365,3 +365,63 @@ describe("§3 the 16 KB aspiration, measured on both shapes", () => {
     expect(SHELL_RUNTIME_GZIP_CEILING).toBeLessThan(COUNTER_RUNTIME_GZIP_ASPIRATION);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §4 — the lifted / row if= render gate's runtime cost (S469, s469-lift-if-render-gate)
+// ---------------------------------------------------------------------------
+
+/**
+ * The §17.1 if= swap (`_scrml_ifrow_apply`) is its own `ifrow` chunk, shipped only when the
+ * emitted code calls it (the if-lift arm's owner scope is typeof-guarded client code, emitted
+ * only when the file has owner-tracked content — no runtime bytes). Rounds 1–4 of the lane put the swap in `reconciliation` (a one-gate,
+ * list-free page shipped the reconciler + owner tree: +86%) and then in `lift` (every
+ * lift page paid for it). Measured with this file's pinned compressor, stripped:
+ *
+ *     shape                       main 0a2d747d3          round 5
+ *     lifted if=, no list         17,971 raw / 4,016 B    18,536 raw / 4,186 B  (+170 B: the swap)
+ *     <each> row if=              35,675 raw / 8,255 B    35,675 raw / 8,245 B
+ *     lift, no if=                17,971 raw / 4,016 B    17,971 raw / 4,016 B  (no regression)
+ *
+ * Re-recorded on the #1514 + #1517 merge (4,394 B / 4,228 B): the soft-nav build-guard core
+ * (`_scrml_build_admit` / `_scrml_build_owns`) ships on every page. Ruled S469 (user-voice
+ * 98a5292, "Re-record with guard"; the shell raise is 0908198).
+ *
+ * ⚑ RATCHETS — same rule as §1: lower freely, never raise without a ruling.
+ */
+const IF_GATE_SHAPES = [
+  ["a lifted if= with no list", `<ok> = true
+<button onclick={ @ok = !@ok }>toggle</button>
+<div id="out">\${ lift <span><b if=@ok>secret</b></span> }</div>
+`, 4394, { ifrow: true, reconcile: false, owner: false }],
+  ["an <each> row if=", `<ok> = true
+<xs> = [1, 2]
+<button onclick={ @ok = !@ok }>toggle</button>
+<div id="out"><each in=@xs as y><span><b if=@ok>\${y}</b></span></each></div>
+`, 8245, { ifrow: true, reconcile: true, owner: true }],
+  ["a lift with no if=", `<n> = 0
+<button onclick={ @n = @n + 1 }>inc</button>
+<div id="out">\${ lift <span>\${@n}</span> }</div>
+`, 4228, { ifrow: false, reconcile: false, owner: false }],
+];
+
+describe("§4 the if= render gate ships only what the page calls", () => {
+  for (const [name, source, recorded, has] of IF_GATE_SHAPES) {
+    test(name, () => {
+      const runtimeBytes = compileAndReadRuntime(source);
+      const text = runtimeBytes.toString();
+      expect(text.includes("function _scrml_ifrow_apply")).toBe(has.ifrow);
+      expect(text.includes("function _scrml_reconcile_list")).toBe(has.reconcile);
+      expect(text.includes("function _scrml_owner_destroy")).toBe(has.owner);
+      const gzipped = gzipSize(runtimeBytes);
+      const ceiling = recorded + RUNTIME_GZIP_TOLERANCE_BAND;
+      if (gzipped > ceiling) {
+        throw new Error(
+          `CLIENT-RUNTIME SIZE REGRESSION — ${name}: ${gzipped} B gzip (level ${RUNTIME_GZIP_LEVEL}), ` +
+          `${runtimeBytes.length} B raw; ceiling ${ceiling} B (${recorded} recorded S469 round 5 + ` +
+          `${RUNTIME_GZIP_TOLERANCE_BAND} B band). A RATCHET: lower it freely, never raise it without a ruling.`,
+        );
+      }
+      expect(gzipped).toBeLessThanOrEqual(ceiling);
+    });
+  }
+});

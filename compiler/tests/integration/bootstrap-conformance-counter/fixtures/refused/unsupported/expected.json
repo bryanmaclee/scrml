@@ -1,8 +1,8 @@
 {
   "id": "fixture-unsupported",
-  "description": "KNOWN UNSUPPORTED: a `#{…}` CSS block — the bootstrap front end refuses it with E-BOOTSTRAP-UNSUPPORTED.",
+  "description": "KNOWN UNSUPPORTED: a `^{…}` meta context in markup — the bootstrap front end refuses it with E-BOOTSTRAP-UNSUPPORTED. (s469-boot-css: was a `#{…}` CSS block, which the bootstrap now compiles.)",
   "language-version": "1.0",
-  "spec": "§25",
+  "spec": "§22",
   "rationale": "fixture for scripts/bootstrap-conformance.ts",
   "expect": {
     "codes": []

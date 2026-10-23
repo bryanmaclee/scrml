@@ -142,7 +142,7 @@ describe("fixture corpus — each case lands in its known bucket", () => {
     const cs = loadCases(FIXTURES);
     const u = await classifyCase(boot, cs.find((x) => x.relDir === "refused/unsupported"));
     expect(u.reason).toBe("bootstrap-unsupported");
-    expect(u.failures.join(" ")).toContain("#{");
+    expect(u.failures.join(" ")).toContain("^{");
     const l = await classifyCase(boot, cs.find((x) => x.relDir === "refused/legacy"), { twins: false });
     expect(l.bucket).toBe("LEGACY");
     expect(l.twin).toBe(false);

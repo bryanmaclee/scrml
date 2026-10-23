@@ -25,7 +25,6 @@ export interface LiftReconcileCtx {
   itemDerivedLocals: Array<{ bindNames: string[]; node: object; init: string }>;
   /** The single markup root of the per-item body, when there is exactly one. */
   soleRootMarkupNode: object | null;
-  itemRootMarkupNodes: object[];
 }
 
 export declare function pushLiftReconcileCtx(ctx: LiftReconcileCtx): void;

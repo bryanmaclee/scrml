@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 261 | 5 |
-| MED | 677 | 8 |
-| LOW | 473 | 0 |
+| HIGH | 262 | 5 |
+| MED | 678 | 8 |
+| LOW | 477 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -8785,8 +8785,14 @@ is gated on the item root being the SOLE non-whitespace top-level root of the ea
 deferred path. Nested (non-item-root) `if=` children are likewise unchanged create-time (separate,
 out of scope). — `NEW S297; LOW; deferred (create-time gate + comment signal; single-root shape shipped reactive)`
 
-### g-lift-tier0-if-multiroot-deferred — Tier-0 `${for…lift}` sibling: a per-item `if=` on ONE OF SEVERAL roots of a multi-root lift item keeps the display toggle (a flip hides, does not structurally remove)
-<!-- @gap id=g-lift-tier0-if-multiroot-deferred sev=LOW status=deferred -->
+### g-lift-tier0-if-multiroot-deferred — Tier-0 `${for…lift}` sibling: a per-item `if=` on ONE OF SEVERAL roots of a multi-root lift item keeps the display toggle (a flip hides, does not structurally remove) — `RESOLVED S469`
+<!-- @gap id=g-lift-tier0-if-multiroot-deferred sev=LOW status=resolved -->
+**RESOLVED S469** (branch `s469-lift-if-render-gate`, with [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]]). The multi-root root
+takes the same swap as the sole root: the lift reconciler is the `<each>` one, so the S469 `_scrml_group_of`
+back-pointer #1502 added lets `_scrml_ifrow_apply` replace the node in the group's array — reorder / delete /
+replace act on the node in the DOM. The `// W-LIFT-TIER0-IF-MULTIROOT-DEFERRED` comment is gone. Pinned by the
+browser test's multi-root case (keyed reorder + delete keep `B/I` order) and pack `n23` multi-root head / tail.
+
 **NEW S297 (Tier-0 for-lift sibling of [[g-each-peritem-if-multiroot-deferred]]).** The SINGLE-root
 Tier-0 `${for…lift}` per-item `if=` is now REACTIVE + STRUCTURAL (SPEC §17.1), mirroring the Tier-1
 `<each>` fix: the sole reconciled item root is emitted as a swap-in-place tracked node — EITHER the
@@ -8805,8 +8811,14 @@ body, the swap is not applied — a naive element↔comment swap would mis-track
 — a code comment is the signal, mirroring Tier-1). Nested (non-item-root) `if=` children are likewise
 unchanged. — `NEW S297; LOW; deferred (display toggle + comment signal; single-root shape shipped structural)`
 
-### g-lift-tier0-if-inline-form-non-reconciled-display-toggle — the INLINE `${for…lift}` form's per-item `if=` stays a display toggle (§17.1: element present when false); only the RECONCILED block form was made structural
-<!-- @gap id=g-lift-tier0-if-inline-form-non-reconciled-display-toggle sev=MED status=open -->
+### g-lift-tier0-if-inline-form-non-reconciled-display-toggle — the INLINE `${for…lift}` form's per-item `if=` stays a display toggle (§17.1: element present when false); only the RECONCILED block form was made structural — `RESOLVED S469`
+<!-- @gap id=g-lift-tier0-if-inline-form-non-reconciled-display-toggle sev=MED status=resolved -->
+**RESOLVED S469** (branch `s469-lift-if-render-gate`). Both halves are gone: (1) the unparenthesized inline form `${ for x of @c lift <m if=…> }`
+does not compile today — `E-FOR-UNPARENTHESIZED-HEAD` (measured S469), so its non-reconciled lowering is
+unreachable; (2) the lowering it took (`emitSetAttrs`, the attribute-string path) is now the same render gate as
+every other lifted `if=` ([[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]]); the corpus reaches that path
+once (`samples/compilation-tests/gauntlet-r10-odin-filebrowser.scrml`, a fragmented lift parse), now a swap.
+
 **NEW S297 — caught by the Tier-0 structural-if arc's class-probe (PA review), NOT the reported/fixed shape.**
 The Tier-0 structural-if fix (this arc, `emit-lift.js` `emitCreateElementFromMarkup`) covers the RECONCILED lift
 path — the block form `${ for (let x of @c) { lift <m if=…> } }`, which is bryan's exact flagged shape (his
@@ -8820,8 +8832,15 @@ inline-lift reconcile gap, not just `if=` — needs its own reproduce); (2) whet
 non-reconcile structural add/remove. **Filed so the §17.1 hole is not misrepresented as fully closed** — the
 reconciled/block form (the reported violation) IS fixed; this compact form is the residual. — `NEW S297; MED; open`
 
-### g-lift-tier0-if-value-indexed-display-toggle-deferred — a sole-root Tier-0 for-lift `if=` whose predicate is a value-indexed `@cell == item.field` keeps the O(2) display toggle (hides, does not structurally remove)
-<!-- @gap id=g-lift-tier0-if-value-indexed-display-toggle-deferred sev=LOW status=deferred -->
+### g-lift-tier0-if-value-indexed-display-toggle-deferred — a sole-root Tier-0 for-lift `if=` whose predicate is a value-indexed `@cell == item.field` keeps the O(2) display toggle (hides, does not structurally remove) — `RESOLVED S469`
+<!-- @gap id=g-lift-tier0-if-value-indexed-display-toggle-deferred sev=LOW status=resolved -->
+**RESOLVED S469** (branch `s469-lift-if-render-gate`). The value-indexed predicate keeps its `_scrml_reactive_subscribe_when` O(2) dispatch
+and its update is now the swap, so the element is removed, not hidden. When the bucket value reads the row
+(`@sel == r.id`) a live-keyed render-gate effect follows the row's value and moves the registration (the
+narrower sub-gap of [[g-lift-per-item-if-directive-not-reactive-on-reconcile]]), with the cell read untracked so a
+write stays O(2) — the browser test counts the swaps: 1 then 2 over 40 rows. The
+`// W-LIFT-TIER0-IF-VALUE-INDEXED-DISPLAY-TOGGLE-DEFERRED` comment is gone.
+
 **NEW S297 (narrower sub-gap of the Tier-0 structural-if arc).** The sole-root Tier-0 for-lift per-item
 `if=` is now structural for item-reading (`r.on`) and plain-cell (`@show`) predicates. The ONE sole-root
 shape still on the display toggle is the S103 value-indexed select-row predicate (`@cell == item.field`,
@@ -12126,6 +12145,13 @@ Surfaced while scoping [[g-item-derived-local-stale-in-per-item-effect-paths]]. 
 ### g-lift-per-item-if-directive-not-reactive-on-reconcile — a per-item `if=` conditional-display directive in a Tier-0 reconciled `${for…lift}` is evaluated ONCE at create and stays stale on REPLACE — `NEW S293 (Peter, adversarial finder on the attr-reactivity fix); MED; lift per-item reconcile family`
 <!-- @gap id=g-lift-per-item-if-directive-not-reactive-on-reconcile sev=MED status=resolved -->
 
+**S469 round 5 — REOPENED as part of [[g-lift-gate-placement-inherits-main-staleness-s469]]** (main's placement
+kept: the bucket is keyed on the create-time row field). Round 1's text below is the record. ~~**S469 — the narrower
+deferred sub-gap (the value-indexed predicate's ITEM side stale after a same-key REPLACE) is RESOLVED** (branch `s469-lift-if-render-gate`): on a render gate it had become fail-OPEN (a row whose own key revoked the gate kept the
+element). A live-keyed render-gate effect now re-reads the row's value and moves the `subscribe_when` bucket;
+the updater re-resolves the row. Pinned by pack `n23` "value-indexed row side" (4) and the browser test.
+`tryEmitLiftIfReactive` (named below) is gone — `emitLiftIfGate` is the one lowering.~~
+
 **RESOLVED S335-peter** — re-verified vs HEAD `cdf19c01`: a Tier-1 `<each key= as r>` per-row `if=(r.active)` emits a reconcile-reactive effect that re-resolves the item and re-applies on reconcile (`_scrml_mount_track(_scrml_effect(...))`); the buggy once-called create-time closure is absent. The Tier-1 each path now shares the Tier-0 fix.
 Surfaced by the S293 adversarial pass on [[g-lift-per-item-attribute-binding-not-reactive-on-reconcile]]. A per-item `if=<expr over the item>` (conditional display) emits a create-time `function _scrml_if_…() { el.style.display = (e.active) ? "" : "none"; }` called ONCE, closing over the create-time item, with NO `_scrml_effect` re-resolve and no cell subscription (a raw item field has no `@cell` to subscribe to). So on a same-key REPLACE with node reuse, the reused node keeps its create-time display while the sibling text/attr/`class:` bindings (now) update. **Confirmed codegen on `db879d01`** (`lift <div if=e.active is some>` → `_scrml_if_…()` called once, no re-resolve). SAME failure CLASS as the resolved attr/text/local gaps, DIFFERENT code path (the `if=` directive branch — `emitSetAttrs` ~`if=` region + `emitCreateElementFromMarkup` ~1341 — not the value-attribute `setAttribute` path), deliberately out of the attr fix's scope. **Adopter-relevant: this is Fieldman/assetManagement workaround #3** (per-row `if=` inside `<each>` gated via a dynamic class instead). **The Tier-1 `<each>` per-row `if=` SHARES the hole — VERIFIED executed-DOM S293** (`<each in=@rows key=@.id><li if=@.active is some>`: render all-active, then same-key REPLACE flipping one item inactive → the reused `<li>` stays visible; the `if=` display is not re-evaluated on reconcile). So the fix spans BOTH the Tier-0 for-lift path AND the Tier-1 each path (`emit-each.ts`).
 
@@ -14718,7 +14744,7 @@ reorders; 9 of 10 fail on main, the 10th is the no-`if=` control).
 | markup `if=` on the row ROOT (`<errorBoundary>` included) | gated, reactive (`_scrml_ifrow_apply`) | — |
 | markup `if=` on a NON-root element (`<errorBoundary>` included) | was a create-time gate (closed on grant, **OPEN on revoke**); reactive both ways since round 2 | [[g-each-nested-peritem-if-not-reactive]] (resolved S469) |
 | markup `if=` on a root of a MULTI-root item | was a create-time gate (**OPEN on revoke**); reactive since round 2 | [[g-each-peritem-if-multiroot-deferred]] (resolved S469) |
-| markup `if=` in lifted markup | `display:none` toggle — content stays in the DOM | [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]] |
+| markup `if=` in lifted markup | was a `display:none` toggle (content in the DOM); the element⇄comment render gate at every position since S469 | [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]] (resolved S469) |
 
 ✅ **SPEC §17.1.2.3 corrected (round 2, PA correction):** it now states that `if=` in a row template is honoured and
 reactive at every position; the S302 carve-out is kept struck in place, and §34 `W-IF-IN-EACH` is retired.
@@ -16685,9 +16711,17 @@ Pre-existing (reproduced with the #699 change stashed), orthogonal to the prop l
 > the §42 keyword family is the ENTIRE truncation class (every member's leftover run begins with `is`);
 > every punctuation operator survives intact. Quoted and parenthesized forms already lower correctly.
 
-### g-lift-each-opener-if-is-silently-dropped-list-renders-ungated — an opener `if=` on a LIFT-parsed `<each>` is discarded entirely; the list renders ungated at exit 0 with zero diagnostics
-<!-- @gap id=g-lift-each-opener-if-is-silently-dropped-list-renders-ungated sev=HIGH status=narrowed locus=compiler/src/codegen/emit-lift.js(a lift whose ROOT is `<each>` — `lift <each …>` — is emitted as a literal `<each>` HTML element; the if= becomes the Tier-0 display toggle)+compiler/src/codegen/emit-each.ts(eachBlockFromMarkupNode — reads if= since #1491) prov=spec:§17.1.2.3-names-fail-OPEN-as-the-dangerous-direction-for-this-attribute;empirical:S469-s469-match-if-in-row-r2(re-measured-six-lift-carriers) -->
+### g-lift-each-opener-if-is-silently-dropped-list-renders-ungated — an opener `if=` on a LIFT-parsed `<each>` is discarded entirely; the list renders ungated at exit 0 with zero diagnostics — `RESOLVED S469`
+<!-- @gap id=g-lift-each-opener-if-is-silently-dropped-list-renders-ungated sev=HIGH status=resolved locus=compiler/src/codegen/emit-lift.js(a lift whose ROOT is `<each>` — `lift <each …>` — is emitted as a literal `<each>` HTML element; the if= becomes the Tier-0 display toggle)+compiler/src/codegen/emit-each.ts(eachBlockFromMarkupNode — reads if= since #1491) prov=spec:§17.1.2.3-names-fail-OPEN-as-the-dangerous-direction-for-this-attribute;empirical:S469-s469-match-if-in-row-r2(re-measured-six-lift-carriers) -->
 
+> **✅ S469 — RESOLVED** (branch `s469-lift-if-render-gate`). The last carrier — an `<each>` that IS the lifted root
+> (`${ if (true) { lift <each in=@xs as y if=…>…</each> } }`) — is lowered through the same shared emit-each
+> path a nested lifted `<each>` takes (`emitCreateElementFromMarkup` → `tryEmitNestedLiftEach`): it iterates, its
+> alias binds, and its `if=` is the row-scoped gate. It was a literal `<each>` element (body rendered once, alias
+> unbound — `ReferenceError: y is not defined` crashed the pack harness — and the `if=` a display toggle). Pack
+> `n23` "lifted each root" (plain / call: PASS; quoted: PASS-REFUSED, E-CG-003 — the `<each>` reader refuses a
+> quoted `if=`), browser test "an <each> that IS the lifted root".
+>
 > **⛑ S469 — NARROWED, mostly stale after #1491 (re-measured on `s469-match-if-in-row` round 2, through the
 > security-failable-pack harness, `<each in=@rows key=@.id if=(@pw == "secret")>`).** Gated now (PASS: wrong →
 > nothing, right → the list): the `<each>` nested in markup lifted by a `${ if … lift }` block, by a
@@ -18041,7 +18075,16 @@ emitted effect body — it changes SSR-body output bytes, which is why it was ke
 Pre-existing. The S427 browser test deliberately asserts per-mount fetch DELTAS so it does not pin the stray.
 
 ### g-lifted-markup-ignores-if-attr-and-false-checked — inside lifted markup, `if=` on a child element and `checked=${false}` are ignored — TodoMVC rows show both `.view` and `input.edit`, with `checked` inverted — `NEW S427-peter; MED; open`
-<!-- @gap id=g-lifted-markup-ignores-if-attr-and-false-checked sev=MED status=open locus=searched:compiler/src/codegen/emit-lift.js,compiler/src/codegen/emit-html.ts—not-traced prov=review:S427-adversarial-round-1-F4-p14-reproduced-on-base-at-top-level -->
+<!-- @gap id=g-lifted-markup-ignores-if-attr-and-false-checked sev=MED status=narrowed locus=searched:compiler/src/codegen/emit-lift.js,compiler/src/codegen/emit-html.ts—not-traced prov=review:S427-adversarial-round-1-F4-p14-reproduced-on-base-at-top-level -->
+
+> **S469 — NARROWED** (branch `s469-lift-if-render-gate`). The `if=` half is resolved by
+> [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]]: a lifted `if=` is a render gate, so a TodoMVC row
+> holds `.view` OR `input.edit`, never both (the `select-row-value-indexed-regression` test asserts presence).
+> **Still open — the `checked` half, not in that lane:** re-measured S469, lifted `checked=${false}` emits
+> `setAttribute("checked", String(false ?? ""))` — the attribute is PRESENT, so the box is checked; at top level
+> `checked=${false}` is dropped and `checked=@done` is written as the static HTML attribute `checked="done"` (no
+> client binding), so the box renders checked whatever the cell holds. Fix direction: lower a boolean attribute
+> (`checked` / `disabled` / `selected` / …) from a value as the DOM property / presence, at both sites.
 
 Found once TodoMVC's rows started rendering (S427). Same on base at top level (`p14`). The S427 TodoMVC tests
 assert labels only, so the app still LOOKS broken even though its rows now render.
@@ -18349,7 +18392,9 @@ arm name, so it is re-wired per entry), `show=@cf` does not. The fix is to wire 
 ### g-lifted-each-if-attribute-silently-ignored — `if=` on an `<each>` inside lifted markup is never read; the list always renders — `NEW S429-peter; MED; RESOLVED S469`
 <!-- @gap id=g-lifted-each-if-attribute-silently-ignored sev=HIGH status=resolved locus=compiler/src/codegen/emit-each.ts(eachBlockFromMarkupNode never read if=; now carried as ifCond and gated by lowerRowScopedEachIfGate in emitNestedEachFromMarkup)+compiler/src/attribute-registry.js(`if` missing from the <each> allowlist → the false W-ATTR-001) prov=empirical:S429-each-alias-dev-agent-reported-on-main-085ddbe8-NOT-PA-verified;empirical:S469(reproduced on ea871fdfe — `${ for (r of @rows) { lift <div><each in=r.cells as c if=(@pw == "secret")>LOGGED IN</each></div> } }` renders LOGGED IN with @pw = "wrong");dispatch:s469-nested-each-if -->
 
-**RESOLVED S469** (branch `s469-nested-each-if`, with [[g-nested-each-if-guard-dropped-s469]]): the lifted `<each>`'s `if=`
+**RESOLVED S469** (branch `s469-nested-each-if`, with [[g-nested-each-if-guard-dropped-s469]]; re-verified on
+`s469-lift-if-render-gate` — pack `n19` lifted shapes PASS, and an `<each>` that is itself the lifted root is now
+gated too, [[g-lift-each-opener-if-is-silently-dropped-list-renders-ungated]]): the lifted `<each>`'s `if=`
 is carried as `ifCond` and gated by the same row-scoped gate as a nested `<each>`; `if` is in the `<each>` attribute
 allowlist, so the false `W-ATTR-001` ("no compile-time effect") is gone. Pins:
 `compiler/tests/unit/nested-each-if-guard-s469.test.js`, `compiler/tests/browser/nested-each-if-guard-s469.browser.test.js`,
@@ -26357,12 +26402,263 @@ Reproduced on the S462 head (round 8): both handler forms exit 0 with no diagnos
 ### g-etype046-blind-in-explicit-lift-markup-s462 — E-TYPE-046 does not check explicit `lift` markup at all: `${ for (x of @xs) { lift <p>${@user.name}</p> } }` and `lift <button onclick={ @out = @user.name }>…` compile clean with `<user>: User | not` — neither the render read nor the handler is judged — `NEW S462 (made explicit; the walker comment calls it a pre-existing coverage hole); HIGH; open`
 <!-- @gap id=g-etype046-blind-in-explicit-lift-markup-s462 sev=HIGH status=open locus=compiler/src/presence-narrowing.ts(walkNodeNarrowed does not descend into a `lift-expr`'s markup; only the implied-lift check pieces of `expandCheckPieces` are judged) prov=review:s462-narrowing-review-8;empirical:s462-narrowing-round7 -->
 
-Closing it is newly-rejecting (measure the corpus). When it closes, an `if=` inside a `for … lift` row must NOT narrow (its children or its handlers): it is a display toggle, not a render gate — `g-lift-row-if-is-display-toggle-not-a-render-gate-s462`.
+Closing it is newly-rejecting (measure the corpus). ~~When it closes, an `if=` inside a `for … lift` row must NOT narrow (its children or its handlers): it is a display toggle, not a render gate — `g-lift-row-if-is-display-toggle-not-a-render-gate-s462`.~~ **S469:** that entry is resolved — every lifted `if=` is now a render gate (element⇄comment swap, ordered before the write's ordinary effects), so when this hole closes a lifted `if=` narrows its children and handlers like any render gate (the Q18 rule applies). Re-measured S469 on `s469-lift-if-render-gate`: the walk still does not descend into explicit `lift` markup (both forms above compile clean) — this entry stays open.
 
-### g-lift-row-if-is-display-toggle-not-a-render-gate-s462 — an `if=` inside a `for … lift` row lowers to a `style.display` toggle (the element stays mounted and its listeners reachable), so it is NOT a render gate: the §42.3.5 Q18 exemption (a gated handler keeps the gate's narrowing) must not apply there, and its children are not unmounted either — `NEW S462; MED; open`
-<!-- @gap id=g-lift-row-if-is-display-toggle-not-a-render-gate-s462 sev=MED status=open locus=compiler/src/codegen/emit-lift.js(LIFT-3 per-item if= display toggle ~:1547, `_scrml_if__…` + `_scrml_reactive_subscribe`);compiler/src/presence-narrowing.ts(walkNodeNarrowed — does not descend into a lift-expr's markup) prov=empirical:s462-narrowing-round7 -->
+### g-lift-row-if-is-display-toggle-not-a-render-gate-s462 — an `if=` inside a `for … lift` row lowers to a `style.display` toggle (the element stays mounted and its listeners reachable), so it is NOT a render gate: the §42.3.5 Q18 exemption (a gated handler keeps the gate's narrowing) must not apply there, and its children are not unmounted either — `NEW S462; MED; RESOLVED S469`
+<!-- @gap id=g-lift-row-if-is-display-toggle-not-a-render-gate-s462 sev=MED status=resolved locus=compiler/src/codegen/emit-lift.js(LIFT-3 per-item if= display toggle ~:1547, `_scrml_if__…` + `_scrml_reactive_subscribe`);compiler/src/presence-narrowing.ts(walkNodeNarrowed — does not descend into a lift-expr's markup) prov=empirical:s462-narrowing-round7;empirical:S469(pack n23 on main 29b6320ad: 59 FAIL + 3 harness crashes of 62) -->
+
+**RESOLVED S469** (branch `s469-lift-if-render-gate`). Every `if=` in lifted markup is now the element⇄comment render gate `<each>` rows use
+(`_scrml_ifrow_apply`), through ONE lowering, `emit-lift.js` `emitLiftIfGate` — the AST path
+(`emitCreateElementFromMarkup`) and the attribute-string path (`emitSetAttrs`, reached by the legacy fragmented
+lift parse) alike: a `for … lift` row root, a nested element at any depth, one root of a multi-root row (the
+swap moves the node in the row's `_scrml_group_of` array), the root of a non-loop `if … lift` / bare `lift`, a
+markup value (a function returning markup, a ternary arm, a markup-typed `const`), a component in a row. The
+element is built once; the comment holds its place while false; the swap runs in a TRACKING render-gate
+effect (a live-keyed per-item one in a row, disposed with the row; the arm's own effect in an `if … lift`
+arm; its own effect elsewhere) — except a value-indexed `@cell == v` predicate in a row, which keeps the
+S103 O(2) `_scrml_reactive_subscribe_when` bucket and a live-keyed effect that follows `v` (round 2: round 1
+kept `@name`-token cell subscriptions outside rows — see below). Also closed on the way: a call-ref `if=allowed(@pw)` and a quoted
+`if="…"` in lifted markup were written as a plain `if` ATTRIBUTE (no gate at all); a bare `if` / an unreadable
+value kind is now E-CG-003 (gated false); `_scrml_ifrow_apply(` ships the `reconciliation` chunk for a non-loop
+lift (emit-client.ts post-emit gate). Pins: `compiler/tests/browser/lift-if-render-gate-s469.browser.test.js`, `compiler/tests/unit/lift-if-render-gate-s469.test.js`, the security-failable-pack `n23` family (62 shapes: 59 FAIL + 3 crashes on main → 61 PASS + 1
+PASS-REFUSED). SPEC §17.1's "Exception, Tier-0 lifted markup" sentence is replaced by the rule it now meets.
+**Q18 (§42.3.5):** the premise this entry denied — a gated lifted handler is unreachable while the gate is
+false — now holds: the swap runs in a render-gate effect, or (subscriptions / value-indexed fan-out) inside
+`_scrml_reactive_set` after the write's gate effects and BEFORE its ordinary effects, and a detached
+element's direct listener returns early (`isConnected === false`). The narrowing walk still skips explicit
+`lift` markup (re-measured S469: `lift <p>${@user.name}<button onclick=${ @out = @user.name }>` over
+`User | not` compiles clean) — that is [[g-etype046-blind-in-explicit-lift-markup-s462]], kept open there.
+
+**Round 2 (review of `f2226103b`)** (branch `s469-lift-if-render-gate` round 2):
+- **F1 (HIGH, fail-open in round 1):** outside a reconciled row the gate was re-run by
+  `_scrml_reactive_subscribe` on the `@name` tokens found in the attribute TEXT, so `if=isAdmin()` (the cell read
+  inside the function), `if=(isAdmin() && true)` — in a bare lift, an `if … lift` arm, a `for` over a non-reactive
+  iterable — stayed open after the cell revoked it. Every non-row gate is now its own tracking render-gate effect;
+  the text reader is gone. Pack `n23` "indirect" / "indirect and": 14 FAIL on `f2226103b` → PASS.
+- **F2 (MED):** a removed row's gate effect and value-bucket registration stayed alive (bucket fires per two `@sel`
+  writes grew 3, 8, 12, 16 over empty/re-add cycles; a leaked updater swapped content open inside the detached
+  row). The gate effect now disposes itself (queued) when the row's key no longer resolves and releases its
+  bucket. Browser churn test: 3 per cycle over 10 cycles of 100 rows.
+- **F4 (LOW):** a lifted `bind:` input → cell listener lacked the detached guard; a held, gated-off input
+  dispatching `input` wrote the cell. Guarded (`guardDetachedListener`).
+- Lifecycle: these gates keep the element and its state across off → on — filed as
+  [[g-row-and-lift-if-gate-not-memoryless-s469]]; SPEC §17.1 says so.
+
+**Round 3 (review of `060495fe2`)** (branch `s469-lift-if-render-gate` round 3):
+- **F1 (HIGH, a round-2 regression, fail-open; main was correct):** a gate's own effect re-read a LOCAL of the
+  lift body with its FINAL value — `let i = 0; while (i < 3) { lift <b if=(i == @n)>…; i = i + 1 }` opened all
+  three at `@n = 3`; likewise a counter over `@items`, an accumulator, `i != @n`, a flag set after the lift, and
+  `show=`. The gate's effect (and a row's value-bucket updater) now runs in a scope whose parameters snapshot the
+  condition's free locals at render time; outside a row the condition is also read inline, so the enclosing group
+  keeps the read as on main. Pack `n23` "body local" (13 shapes: 8 FAIL on `060495fe2` → PASS), browser tests.
+**Round 5 (review of `5e18bc99e`) — RE-SCOPED: main's evaluation placement is the oracle; only the DOM
+operation changed.** Rounds 2–4 each added a JS-scope reader deciding when a gate could have its own effect, and
+each was incomplete (round 5's review: a local shadowing a file function, a local named like a JS global, a
+reassigned item-derived local, a destructured binder; function decls in a group body). All of it is removed —
+own gate effects, name classification, snapshots, the keyed→plain fallback. `emitLiftIfGate` now evaluates the
+condition exactly where main evaluated the display toggle (A: sole row root per-item effect; B: a row-reading
+condition's per-item effect; C: the LIVE arm effect; D: where the element is built + main's `@name` /
+value-indexed subscriptions), and swaps instead of toggling `display`. `show=` takes the same placements. Kept
+(orthogonal, re-verified): call-ref / quoted conditions read, E-CG-003 for a bare `if` (lifted and top level),
+the component `@` fix, the lifted bind guard, the lifted `<each>` root, subscription / bucket release through
+the #1508 owner tree (`_scrml_mount_track`) and an `if … lift` arm render as an owner scope (typeof-guarded
+calls, no runtime cost without lists). Positions stale on main stay stale here and are filed:
+[[g-lift-gate-placement-inherits-main-staleness-s469]]. The swap is its own runtime chunk `ifrow` (ratchet §4).
+
+**Round 4 (review of `e7c7f7a28`):**
+- **F-A (HIGH, round-3 regression, fail-open; main was correct):** a local CLOSURE escaped the snapshot (callees
+  were skipped, and a closure reads its locals by reference): `let ok = false; const allowed = () => ok || @n > 5;
+  lift <b if=(allowed())>…; ok = true` showed the content at `@n = 2`; a counter closure opened every row at
+  `@n = 3`. Replaced by ONE fail-closed rule (`_liftGateIsSelfContained`): a gate is its own effect only when every
+  name it reads (callees included) is a compiler name, the row item / a replayed item-derived local, a file-level
+  function or a JS global; anything else is read INLINE in the render (main's lowering), and a keyed loop whose
+  gate reads such a name is lowered plain. Pack `n23` +12 (4 FAIL on `e7c7f7a28` → PASS), browser 24.
+- **F-C:** a mutated local array / object (`seen.push`, `o.c = o.c + 1`) is read inline at render — 24 browser
+  cases (if= / show= × group / arm / row × closure flag / closure counter / array / object) pass; on main all 24
+  fail (lifted `if=` was a display toggle, `show=` was ignored), so nothing of this shape remains to file.
+- **F-D (MED, end-user cost):** see the runtime-size ratchet §4 — a lifted `if=` page with no list shipped the
+  reconciler and owner tree (stripped 4,016 → 7,453 B gzip); `_scrml_ifrow_apply` now lives in the `lift` chunk
+  (4,303 B).
+- **F2 (MED, a leak, not fail-open):** [[g-lift-gate-not-released-on-outer-owner-teardown-s469]], resolved on
+  the #1508 owner-scope tree (bucket release registered with the row scope; an `if … lift` arm render is an owner
+  scope).
 
 Found while making the Q18 premise true by effect ordering (S462 round 7). `${ for (x of @xs) { lift <li><div if=@user><button onclick={ @out = @user.name }>…</button></div></li> } }` emits `_scrml_lift_el_N.style.display = (@user) ? "" : "none"` (and the S293/W-LIFT-TIER0 deferred value-indexed and multi-root forms are display toggles too): the button stays connected while `@user` is `not`, so a programmatic `.click()` (or any non-user dispatch) runs the handler. TODAY no false acceptance results, because the §42.3.5 walk does not check explicit `lift` markup at all (the pre-existing coverage hole noted in presence-narrowing.ts `expandCheckPieces`) — neither the handler nor `${@user.name}` there is judged. When that hole closes (newly-rejecting), the walk must treat a `lift`-row `if=` as `show=` (no narrowing for children or handlers) unless the lowering becomes structural. `<each>` per-row `if=` IS structural (`_scrml_ifrow_apply` swap, a render-gate effect since round 7).
+
+
+
+
+### g-lift-gate-placement-inherits-main-staleness-s469 — a lifted `if=` / `show=` is re-evaluated only at main's display-toggle placements: a cell read inside a called function (outside a row), a value-indexed `@cell == row.field` whose field changes under the same key, and a body local re-read in a keyed row are never re-read — a revoked guard stays OPEN — `NEW S469; HIGH; open`
+<!-- @gap id=g-lift-gate-placement-inherits-main-staleness-s469 sev=HIGH status=open locus=compiler/src/codegen/emit-lift.js(emitLiftIfGate placements A–D, kept from main's display toggle: D subscribes to the `@name` tokens in the attribute text; the value bucket is registered under the create-time row field)+compiler/src/codegen/emit-reactive-wiring.ts(a plain group is effect-wrapped only when its code names a reactive read) prov=review:s469-lift-if-render-gate-round-5;empirical:S469(main 0a2d747d3 and the branch: every position below FAILs / is stale on both) -->
+
+Filed by s469-lift-if-render-gate round 5, which re-scoped the lane to "main's evaluation placement is the oracle;
+only the DOM operation changes". These positions are stale on main (where the content additionally stayed in the
+DOM as `display: none`), and are now stale with the content removed — the same visible result, the same staleness:
+
+| position | why it is not re-read | pins (expected-fail) |
+|---|---|---|
+| `if=isAdmin()` / `if=(isAdmin() && true)` / `show=visible()` — a cell read only inside a called function — in a bare lift, an `if … lift` arm, a plain loop, a row | D subscribes to the `@` names in the attribute TEXT (none); the plain group is not an effect when its code names no reactive read | pack `n23` "indirect" / "indirect and" (30); browser "F1" (8), "`show=`" (3) |
+| a value-indexed `@pw == r.k` whose row's `k` changes under the same key | the `subscribe_when` bucket and its updater use the create-time `r.k` | pack `n23` "value-indexed row side" (4); browser "value-indexed, the ROW side" |
+| a body local / local closure read in a keyed row (`let ok = false; … lift <b if=(ok …)> …; ok = true`), a mutated local array in an arm or row | D's updater re-reads the local's FINAL value when the cell changes | pack `n23` "body local (row)" (2); browser round-3 / F-A row and arm cases (8) |
+| a file function reading a file-level `let` mutated after render (M1) | the function's cell read is not in the text, and the group is not re-run | browser "M1b" |
+
+Also (round-5 final review, F2, left as is — main refused the shape): at a sole row root, a body local written after
+the lift makes `show=` (the per-item effect re-reads the final value) and `if=` (placement A, likewise) disagree with
+the render-time value; main compiled neither.
+Also found by the review, recorded here: a `function` declared in a group body over a group `let` (M1a) is
+hoisted to file level and throws `ReferenceError` at its first call (fails loud, main too); a destructured row
+binder `for ({ id } of @rows)` is refused `E-CODEGEN-INVALID-LOGIC` (main too). The visible set of the review's
+H1–H3 shapes equals main's at every step (browser "S469 round 5 — the review's H1–H4 / M1 shapes").
+Fix direction: give every position one re-evaluation rule that tracks everything the condition reads — the
+tracking effect rounds 2–4 tried — but decided from the compiler's own scope analysis (the binder / declaration
+tables), not from a second reader of the emitted JS; that is a design change for its own lane, measured against
+this table.
+
+### g-lift-gate-not-released-on-outer-owner-teardown-s469 — a lifted row gate whose row is removed by an OUTER owner (an `if … lift` arm switching away, an outer lift row removed) is never released: its value-bucket registration and gate effects stay live — `NEW S469; MED; RESOLVED S469`
+<!-- @gap id=g-lift-gate-not-released-on-outer-owner-teardown-s469 sev=MED status=resolved locus=compiler/src/codegen/emit-lift.js(maybeWrapLiftPerItemEffect gate self-dispose fires only when the row's OWN key stops resolving)+compiler/src/runtime-template.js(_scrml_effect has no dispose/cleanup hook; _scrml_lift_arm_run disposes owned effects, not value buckets) prov=review:s469-lift-if-render-gate-round-2(F2);empirical:S469 -->
+
+Filed by the review of `060495fe2` (F2). Round 2 made a row's gate release itself (and its
+`_scrml_reactive_subscribe_when` bucket) when its key no longer resolves. A row removed by an OUTER owner never gets
+there: (a) in `${ if (@show) { for (r of @items) { lift <div><b if=(@sel == r.id)>E</b></div> } } }`, each
+`@show` off → on leaves the old rows' buckets registered — measured S469: 2 → 4 → 6 → 8 buckets over three toggles
+(the arm disposes the effects it owns, but a value bucket is not an effect), and the old updaters run against the
+detached rows on every `@sel` write; a lift-in-lift outer row removal does the same; (b) a plain gate in an inner
+row of a removed outer row keeps swapping its detached element (the inner list is never reconciled again, so the
+inner key keeps resolving). Not fail-open — the swapped nodes are detached — but the O(2) claim fails under churn
+and work grows with every teardown. Fix direction: release from the owner's teardown (an effect cleanup hook /
+the owner-scope tree), not only the `resolve → null` path. That tree is what **s469-effect-scope-dispose** builds
+(not merged when filed); do it once both have landed, rather than a second teardown mechanism here.
+
+**RESOLVED S469** (branch `s469-lift-if-render-gate` round 3, after #1508 landed — the owner-scope tree, no second
+mechanism): (b) was already closed by the tree (an inner row's gate effect remembers its row scope, which dies
+with the outer row: 0 swaps after removal). (a) two changes reuse it — the value-bucket release is registered with
+the row's scope (`_scrml_mount_track`, open while the row factory runs), and each render of an `if … lift` arm
+(`_scrml_lift_arm_run`, emit-reactive-wiring.ts) is now an `as` owner scope, its tree calls each behind a
+`typeof` guard (round 5) — so they run only when the 'owner' chunk ships (rows exist), never pull it in, and add
+no runtime bytes; a re-render or the arm's end destroys the rows it rendered (the `scrml fix` given-presence
+verify compares the runtime too). Round 5 also registers main's per-`@name` updater subscriptions with the owner
+scope. Measured: buckets 2,2,…,2 over 10 arm toggles (was 2 → 4 → 6 → 8) and over 10
+outer-row removals; the live rows alone swap on `@sel` writes. Pins: browser `lift-if-render-gate-s469` "F2".
+
+### g-while-lift-in-reconciled-row-escapes-the-row-s469 — a `while` loop inside a reconciled `${ for (r of @rows) { … } }` row lifts its markup OUTSIDE the list (the ambient target), duplicated per render; its gates still toggle, but the escaped content is outside the list's reconcile and its text interpolations are frozen — `NEW S469; HIGH; open`
+<!-- @gap id=g-while-lift-in-reconciled-row-escapes-the-row-s469 sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts(the row factory routes lift-expr / if-stmt / for-stmt children to the row fragment; a while-stmt falls to emitLogicNode, whose lift is the global `_scrml_lift(…)`) prov=empirical:S469(s469-lift-if-render-gate rounds 3-4, reproduced on main 0a2d747d3 and on the branch);review:s469-lift-if-render-gate-round-3(F-B) -->
+
+Found while writing the round-3 tests; raised MED → HIGH by the review of `e7c7f7a28` (F-B). Measured S469 in
+happy-dom with the pruned runtime: `<pw> = "secret"`, `<rows> = [{ id: 1 }]`,
+`<div id="out">${ for (row of @rows) { let i = 0  while (i < 2) { lift <b if=(@pw == "secret")>LOGGED IN</b>
+i = i + 1 } } }</div>`:
+
+| tree | granted: in `#out` / anywhere | after `@pw = "wrong"` | after a 2nd row |
+|---|---|---|---|
+| main `0a2d747d3` | 0 / 4 | 0 / 4 (text still in the page) | 0 / 8 |
+| branch (round 4) | 0 / 4 | 0 / **4 — still mounted** | 0 / 4 |
+
+**Corrected S469 round 6** (review of `3214a9a60`): on main the escaped gates keep TOGGLING (`display`), and on this
+branch they keep swapping — the visible set after `@pw = "wrong"` equals main's (0 visible), so the row above
+reads: the elements are still in the page on main (`display: none`, text present), absent here. What is frozen is
+the escaped markup's TEXT (`textContent` / interpolations read the loop local's final value) and its place: it sits
+outside `#out`, is duplicated by every render, and is never removed by the row's reconcile. Round 5 regressed this
+(the escaped gates' subscriptions were registered with the row's owner scope, which the reconciler drops at mount
+when the factory returns nothing — SECRET stayed visible with 0 subscribers); round 6 registers them only when the
+element lands in the row (`_withLiftTarget` / `_liftLandsOutsideRow`). Pinned by the browser block "S469 round 6"
+(18 shapes: plain row, nested row, row in `<each>`, arm→row, arm-else→row, arm inside a row × a cell / value-indexed
+/ counter condition — head's visible set equals main's at every step).
+
+The while body's lift is emitted as the global `_scrml_lift(() => …)` — the ambient target, which is null during a
+reconcile, so the `[data-scrml-lift-target]` / `document.body` fallback — and the row factory returns
+`tmp.firstChild` = null. So the markup lands OUTSIDE `#out`, is DUPLICATED (2 iterations × 2 renders), and is never
+reached by the row's reconcile or its gates' row scope: a guard revoked after render keeps the content in the DOM
+(**fail-open**), on main as well as here. Text interpolations in it also read the loop local's final value. Not
+fixed in the lift-if lane (a lowering of `while` inside a row, not of `if=`). Fix direction: route a while-stmt
+child like the for-stmt one (LIFT-5) into the row fragment — and, since its body writes a binding outside it, let
+forLiftTreeHasImpureLoop lower the row plain (the counter case already does); pin with an executed test asserting
+the content is inside `#out` and leaves on revoke.
+
+### g-toplevel-bare-show-renders-ungated-s469 — a top-level bare `<b show>` (no condition) is written as a plain attribute: always visible, no diagnostic — `NEW S469; LOW; open`
+<!-- @gap id=g-toplevel-bare-show-renders-ungated-s469 sev=LOW status=open locus=compiler/src/codegen/emit-html.ts(show= handled only for variable-ref / expr values) prov=review:s469-lift-if-render-gate-round-2;empirical:S469(main + branch: `<b show>A</b>` in the HTML) -->
+
+Lifted markup refuses it (E-CG-003) since round 2, and a top-level bare `if` since round 2; a top-level bare `show`
+still renders. `show=` is visibility, not a gate (§17.2), hence LOW. Fix direction: E-CG-003, as for `if`.
+
+### g-toplevel-quoted-show-not-a-toggle-s469 — a top-level QUOTED `show="@n >= 3"` is written as the attribute text, never a toggle — `NEW S469; LOW; open`
+<!-- @gap id=g-toplevel-quoted-show-not-a-toggle-s469 sev=LOW status=open locus=compiler/src/codegen/emit-html.ts(show= on a string-literal value) prov=review:s469-lift-if-render-gate-round-2;empirical:S469(HTML holds `show="@n &gt;= 3"`, no client binding) -->
+
+§17.1 / §5.2 make a quoted condition the expression; a top-level quoted `if=` is lowered as one, a quoted `show=`
+is not. The element stays visible. Lifted markup reads it as the expression since round 2.
+
+### g-lift-boolean-attr-set-once-s469 — a lifted boolean attribute bound to a cell (`disabled=@ok`) is set once with `setAttribute(name, value)` and never updates — `NEW S469; LOW; open`
+<!-- @gap id=g-lift-boolean-attr-set-once-s469 sev=LOW status=open locus=compiler/src/codegen/emit-lift.js(variable-ref attribute value → pushLiftAttrSet: an effect only in a row or LIVE mode) prov=review:s469-lift-if-render-gate-round-2;empirical:S469 -->
+
+`${ lift <span><button disabled=@ok>x</button></span> }` emits `setAttribute("disabled", _scrml_reactive_get("ok"))`
+once, outside any effect. And `setAttribute("disabled", false)` DISABLES the button (the attribute is present):
+the boolean-attribute half of [[g-lifted-markup-ignores-if-attr-and-false-checked]]. Fix direction: a tracking effect
+writing the DOM property / attribute presence.
+
+### g-test-isolation-gated-handler-narrowing-uncaught-typeerror-s469 — `browser-gated-handler-narrowing-s462` raises an uncaught `TypeError … reactive_get("user").name` that the NEXT browser file's window-error collector counts — `NEW S469; LOW; RESOLVED S469`
+<!-- @gap id=g-test-isolation-gated-handler-narrowing-uncaught-typeerror-s469 sev=LOW status=resolved locus=compiler/tests/browser/browser-gated-handler-narrowing-s462.browser.test.js(a lingering effect / handler after its test ends)+compiler/tests/browser/browser-handler-if-else-helpers-s462.browser.test.js(`<match> arm, ;-sequence` collects it) prov=review:s469-lift-if-render-gate-round-2;empirical:S469(main: running the two files in one process fails the second's `;`-sequence case; each alone passes) -->
+
+Measured S469 on main and on this branch: `bun test …gated-handler-narrowing-s462… …handler-if-else-helpers-s462…`
+→ 1 fail (8 `TypeError: null is not an object (evaluating '_scrml_cs_reactive_get("user").name')` in the second
+file's collector); either file alone passes. A sharded run fails it whenever the two share a shard. Fix
+direction: tear down the first file's page (dispose its effects / reset the window) after each test, or scope the
+collector to the test's own mount.
+
+**RESOLVED S469** by #1511 (s469-browser-suite-health, `0249c41f3` "isolate per-mount listeners in the s462
+gated/if-else files"): re-run on this branch after merging main — the two files in one process: 77 pass, 0 fail.
+
+### g-row-and-lift-if-gate-not-memoryless-s469 — an `if=` gate in an `<each>` row or in lifted markup keeps the SAME element (its state, its live inner bindings) across false → true; §6.7.2 says an `if=` scope destroys on false and re-mounts memorylessly — `NEW S469; MED; open`
+<!-- @gap id=g-row-and-lift-if-gate-not-memoryless-s469 sev=MED status=open locus=compiler/src/codegen/emit-lift.js(emitLiftIfGate)+compiler/src/codegen/emit-each.ts(renderTemplateChildToJs if= swap)+compiler/src/runtime-template.js(_scrml_ifrow_apply) prov=review:s469-lift-if-render-gate-round-1(F3);empirical:S469(browser lift-if-render-gate-s469 "built once, re-mounted": the same button node returns) -->
+
+Filed by the review of `f2226103b` (F3). The row and lifted gates are the element⇄comment swap
+(`_scrml_ifrow_apply`): the element is built once, so on re-show an input still holds its typed value and the
+element's inner bindings (text / class / attribute effects, nested lists) were never disposed — they kept
+updating the detached element while it was hidden. §6.7.2 / §6.7.2.1 make an `if=`-conditional element a
+lifecycle SCOPE: destroy on false, and on re-mount re-run every bare expression and restart every `<timer>` /
+`<poll>` "exactly as if mounting for the first time". The top-level `if=` (the `<template>` mount / unmount
+controller) does that; rows and lifted markup do not. Not a visibility hole — the element is absent while
+false and its listeners return early when detached — a lifecycle divergence, stated in SPEC §17.1 as an
+impl#1 divergence. Fix direction: give the swap a mount scope — rebuild the element on false → true (the factory
+already exists) and dispose its bindings on true → false — or rule that rows / lifted gates are a separate,
+state-keeping form and say so in §6.7.2.
+
+### g-toplevel-bare-if-renders-ungated-s469 — a top-level bare `<b if>` (no condition) rendered the element ungated, as a plain `if` attribute, with no diagnostic — `NEW S469; HIGH; RESOLVED S469`
+<!-- @gap id=g-toplevel-bare-if-renders-ungated-s469 sev=HIGH status=resolved locus=compiler/src/codegen/emit-html.ts(the §17.1 mount gate: isGateableIfValue false → fell through to the attribute path) prov=review:s469-lift-if-render-gate-round-1 -->
+
+Found by the review of `f2226103b`. `<div><b if>A</b></div>` emitted `<b if>A</b>` — rendered, no gate, exit 0
+(fail-open: a guard written without its condition). **RESOLVED S469** (branch `s469-lift-if-render-gate` round 2): a lowercase-tag `if` the gate
+cannot read is **E-CG-003** and the element is not emitted, as in lifted markup and `<each>` rows. A quoted or
+expression value is unaffected (it parses as `expr`); `if=true` / `if=false` are E-SCOPE-001 already. Still
+not covered: `if` on a CAPITAL-initial component tag, whose own path owns its mount. Pin:
+`compiler/tests/unit/lift-if-render-gate-s469.test.js`.
+
+### g-component-cell-ref-in-lift-bare-name-s469 — a component whose body names a cell as a bare attribute value (`if=@ok`, `class:on=@ok`, `title=@ok`) lowered it to the bare name `ok` when used inside lifted markup — `ReferenceError: ok is not defined` at run time — `NEW S469; MED; RESOLVED S469`
+<!-- @gap id=g-component-cell-ref-in-lift-bare-name-s469 sev=MED status=resolved locus=compiler/src/codegen/emit-lift.js(variable-ref attribute values: the text fallback stripped the `@`) prov=review:s469-lift-if-render-gate-round-1 -->
+
+Found by the review of `f2226103b`. A component body expanded into lifted markup reaches emit-lift without the
+attribute's expression node; the variable-ref fallback passed the name with its `@` stripped, so `if=@ok` became
+`(ok)` (and `class:on=@ok`, `title=@ok`, an `on…=@handler` likewise). At top level the same component was correct.
+**RESOLVED S469** (branch `s469-lift-if-render-gate` round 2): the text fallback keeps the `@` (liftConditionValue, the class: and value-attribute
+sites). Pins: browser `lift-if-render-gate-s469` "a component whose body reads `@ok`", unit (no bare `ok`).
+
+### g-timer-in-gated-element-keeps-ticking-s469 — a `<timer>` inside a top-level `if=`-gated element keeps running after the gate closes — `NEW S469; MED; open`
+<!-- @gap id=g-timer-in-gated-element-keeps-ticking-s469 sev=MED status=open locus=searched:compiler/src/codegen/emit-event-wiring.ts(the if= mount controller)+compiler/src/runtime-template.js(timers chunk; _scrml_unmount_scope)—not-traced prov=review:s469-lift-if-render-gate-round-1;empirical:S469 -->
+
+Found by the review of `f2226103b`; reproduced S469 (happy-dom, pruned runtime):
+`<on> = true <n> = 0 <div id="g" if=@on><timer interval=20>${ @n = @n + 1 }</timer></div>` — `@n` = 4 when
+`@on` goes false, the element is unmounted (`#g` absent), and `@n` = 10 120 ms later. §6.7.2 step order destroys a
+scope's timers on false (and §6.7.2.1 restarts them on re-mount); the `<outlet>` route-region teardown does stop its
+timers (browser-navigate-soft-nav M1 Phase 4), the `if=` scope does not. A side effect that keeps running after its
+guard closed. Not in the lifted-markup lane (a top-level gate). Fix direction: register the timer's stop with the
+mount scope it is created in (`_scrml_active_mount_scope` / `_scrml_register_cleanup`), as the outlet region does.
+
+### g-lift-show-attr-written-as-plain-attribute-s469 — `show=` in lifted markup was written as a plain `show` attribute: no toggle, the element always visible — `NEW S469; MED; RESOLVED S469`
+<!-- @gap id=g-lift-show-attr-written-as-plain-attribute-s469 sev=MED status=resolved locus=compiler/src/codegen/emit-lift.js(emitCreateElementFromMarkup / emitSetAttrs: no `show` branch) prov=review:s469-lift-if-render-gate-round-1 -->
+
+Found by the review of `f2226103b`: `${ lift <b show=@on>x</b> }` emitted `setAttribute("show", …)`. §17.2:
+`show=` hides with `display: none` while false. **RESOLVED S469** (branch `s469-lift-if-render-gate` round 2): `emitLiftShowBinding` — the same
+condition reader as `if=` (liftConditionValue: cell / expression / call / quoted; a bare `show` is E-CG-003), a
+tracking display toggle (a live-keyed per-item effect in a row). Pins: browser "`show=` in lifted markup" (row,
+bare lift, `if … lift` arm, a cell read through a function), unit.
 
 ### g-stdlib-auth-diagnostics-nondeterministic-under-load-s462 — `stdlib/auth/index.scrml` produced DIFFERENT diagnostics between two compiles of the same tree when the corpus measurement ran under parallel load, on both the base and the head tree (cause not traced) — `NEW S462; LOW; open`
 <!-- @gap id=g-stdlib-auth-diagnostics-nondeterministic-under-load-s462 sev=LOW status=open locus=searched:stdlib/auth/index.scrml,compiler/src/api.js(per-compilation state reset between in-process compiles — not traced) prov=review:s462-narrowing-round5;empirical:s462-narrowing-ends-on-write-corpus-measure -->
@@ -27115,6 +27411,16 @@ Still as described on main (S464). The test scans whole outputs that include the
 
 ### g-lift-group-non-single-if-rerender-loses-input-state-s462 — a reactive markup lift group that is NOT a single `if` / if-chain (a bare `${ lift … }` group, a `for` group with mixed reads, …) still re-renders its whole body on every read change, so an `<input>` inside loses focus and typed text — `NEW S462; LOW; open (pre-existing, not a regression)`
 <!-- @gap id=g-lift-group-non-single-if-rerender-loses-input-state-s462 sev=LOW status=open locus=compiler/src/codegen/emit-reactive-wiring.ts:907(emitLiftGroup — the plain group's `_scrml_effect` clears the placeholder and re-runs the block; only emitLiftIfChainGroup :1015 gets the arm-selector + LIVE per-binding effects) prov=review:s462-markup-if-stale-render -->
+> **S469 round 5:** main's placement again (the gate is read where the element is built), so a gate flip
+> re-renders a plain group exactly as on main; the round-2 "flip in place" is gone (browser test kept as an
+> expected failure).
+>
+> **S469 — narrowed for `if=`, still open otherwise** (`s469-lift-if-render-gate` round 2). A lifted `if=` is now
+> its own tracking effect, so a gate FLIP no longer re-renders a plain group (pinned: a bare `${ lift … }` keeps a
+> sibling input's node and value across flips, and a deep write `@u.ok = false` still closes the gate). Any other
+> reactive read in the group (`${@n}` in the same body) still re-renders the whole body and replaces the input —
+> re-executed. The fix direction below is unchanged.
+
 Recorded by s462-markup-if-stale-render, which fixed the single-`if` / if-chain shape (arm selector + LIVE mode: per-binding effects, listeners and input state kept while the arm stays) and deliberately left every other group byte-identical to base. Located-not-traced, not re-executed S464 (the shape is the documented pre-#1397 behaviour of the plain group). The brief's own requirement for the chain — "A full re-render is acceptable only if it provably keeps listeners and input state" — is unmet for the other group shapes. Fix direction: extend LIVE per-binding updates (or a keyed body diff) to the plain group, so a read change updates the binding in place.
 
 ### g-lift-legacy-reactive-subscribe-leaks-per-rerender-s462 — outside LIVE mode, an element built in a lift body registers `_scrml_reactive_subscribe(cell, updater)` without keeping the disposer, so each re-render of the group adds one more subscription (to a detached element) — `NEW S462; MED; open`
@@ -27237,3 +27543,18 @@ The client string pipeline's last pass now lowers `==` per §45.4 (`lowerEqualit
 <!-- @gap id=g-bootstrap-local-shadows-state-accepted-s469 sev=LOW status=open locus=searched:compiler/self-host-v2/*.scrml(grep `COLLIDES` — zero hits; no E-NAME-COLLIDES-STATE emitter) prov=empirical:s469-docs-migrate-3-round-3-probe;review:S469-docs-migrate-3-final-review-item-5 -->
 
 SPEC §6.1 / §34: a local identifier declaration that uses the same name as a registered state cell in scope is `E-NAME-COLLIDES-STATE` (Error). Probe (bootstrap, `bun scripts/scrml-boot.ts compile`): `let <count:int=0/>` at program level and `let count = 5;` inside a function body compiles with no diagnostic. impl#1 emits the code. NERDME.md ("State and reactivity" and "Not in the bootstrap yet") says the bootstrap does not check it yet. Fix direction: the bootstrap's scope pass refuses a `let` / `const` / parameter / arm binder whose name is a state cell in scope.
+
+## §S469-boot-css — gaps the S469 review of `s469-boot-css` (`#{}` CSS on the bootstrap) found outside its fix round (2026-10-23; ruling:user-voice-scrml.md S469 "⭐ RULED — `#{}` CSS on the bootstrap" (scrml-support `f487d21`) and "… scope root, engine in `<empty>`, CSS output" (`0908198`); change `docs/changes/s469-boot-css/`. Each probe re-executed on the branch with the bootstrap front end + printer. FILED, not fixed)
+
+### g-bootstrap-style-attr-bound-value-unguarded-s469 — bootstrap: `<p style=(@c)>` writes a cell's whole value into the `style` attribute with no CSS guard
+Probe: `let <c:string="color: red"/>` + `<p style=(@c)>x</p>` compiles clean; the client writes `rt.attr(scope$, el, "style", () => …c.get())`, and `rt.attr` judges only URL-valued attribute names (§5.2 rule 3), so ANY string reaches `el.style` — `background: url(https://evil.example/leak)` is a network fetch on first paint (no script runs: a CSS `url(javascript:…)` does not execute). The `#{}` bridge (`@c` → `var(--scrml-c)`) is guarded by `cssValueOf` (runtime.js); this path is not, so the CSS-injection pack (`slice-m4/css-injection-pack-s469.test.js`) does NOT cover it and its header says so. **Should it route through `cssValueOf`? Not as is:** `cssValueOf` admits one VALUE, and `style=` holds a declaration LIST (`color: red; padding: 2px`). Fix direction (recommended): a `cssDeclarationsOf` guard in the runtime that splits on `;` outside parentheses, admits each `prop: value` whose property is a plain name and whose value passes `cssValueOf`, and writes them with `el.style.setProperty` (refusing the whole value — fail closed — on any part that does not pass). §65.4.2 makes the quoted `style="…"` the dynamic-CSS channel; a `style=(expr)` binding is the same channel and needs the same wall.
+<!-- @gap id=g-bootstrap-style-attr-bound-value-unguarded-s469 sev=MED status=open locus=compiler/self-host-v2/slice-m1/runtime/runtime.js(attr~1744;urlGuardOf-only)+compiler/self-host-v2/print.scrml(Attr.Bound-style) prov=empirical:S469-boot-css-review-F4 -->
+
+### g-bootstrap-css-residuals-s469 — bootstrap `#{}` CSS: LOW residuals (accepted with no diagnostic, or a reader edge)
+1. **`url(@c)` is printed literally.** `p { background: url(@c); }` with a declared cell `c` compiles clean and prints `url(@c)` — the reader keeps an unquoted `url(…)` verbatim (CSS treats its content as a URL, so `@c` is not a reference there), and the browser requests the relative URL `@c`. Fix direction: E-CSS-SYNTAX on an `@` inside an unquoted `url(…)` ("a cell cannot be spliced into a url — §25.7 bridges a whole value"), or bridge the whole `url()` (unruled).
+2. **`:root` / `:host` inside a component scope match nothing.** In `@scope (…) { :root { … } }` `:root` is the document root, never inside the scope (and `:host` needs a shadow root); the rule is silently dead. Fix direction: E-CSS-SYNTAX (or a W-) naming `:scope` / the root's own class.
+3. **An author `data-scrml` attribute collides with the scope key.** The compiler replaces an author `data-scrml` on a component ROOT (lower.scrml `stampAttrs`), but one written on any other element is kept, and it both opens the matching component's scope there and acts as a donut limit for the enclosing component. Fix direction: refuse `data-scrml` as an author attribute (it is compiler-owned, like `data-scrml-gated`).
+4. **An extra `}`** directly after a block (only whitespace between) is now E-CSS-SYNTAX (fixed in this change, ruled S469 item 1). Still open: an extra `}` further on in markup text — after other text — is page text with no diagnostic; it is indistinguishable from content there.
+5. **`-->`** as a selector: `--> p { … }` was read as a type selector `--` (fixed in this change: an element name must start with a letter). The broader class — CSS's `<!--` / `-->` CDO/CDC tokens — needs no rule while every `<` is refused.
+6. **CR-only line endings** (round 3 comment model). The reader ends a `//` comment, a bad (unterminated) string and the `url(` extent bound at `\n` only, so in a file with bare `\r` line breaks a `//` comment runs to the end of the block (silently eating the rules after it) and an unterminated string's recovery skips too far. Fix direction: treat `\r`, `\r\n` and `\f` as line breaks wherever the reader looks for one (CSS Syntax §3.3 preprocessing does exactly that).
+<!-- @gap id=g-bootstrap-css-residuals-s469 sev=LOW status=open locus=compiler/self-host-v2/css-syntax.scrml(parseValue-url;parseCompound-pseudo)+compiler/self-host-v2/lower.scrml(stampAttrs) prov=empirical:S469-boot-css-review-F6 -->

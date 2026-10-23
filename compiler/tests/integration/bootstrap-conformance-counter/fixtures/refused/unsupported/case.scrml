@@ -1,9 +1,7 @@
 <program>
     let <count:int=0/>
-    #{
-        p { color: red; }
-    }
     <main>
         <p>${@count}</p>
+        ^{ 1 }
     </main>
 </program>

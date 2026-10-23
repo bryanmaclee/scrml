@@ -1,0 +1,1148 @@
+// =============================================================================
+// self-host-v2 / css-syntax.scrml — THE `#{…}` READER (s469-boot-css). The
+// parser (parse.scrml) hands it the source at a `#{`; it returns the block as
+// syntax (ast.scrml ACss) and its findings. CSS is a foreign language: this is
+// its parse, structural, once — nothing downstream reads CSS text again
+// (dpa-051 §3.6). The selector grammar and the value scan follow the stylesheet
+// shim's (css-ingest.scrml), which this module supersedes for source input.
+//
+// WHAT IT READS (SPEC §9.1, §25, §65):
+//   - a selector rule `sel, sel { prop: value; … }` — the selector parsed into a
+//     Core selector tree (§65.2.5: "validate author selectors and fail loud …
+//     an unparseable selector is a compile error, never a silent drop");
+//   - a bare declaration `prop: value;` with no selector (a §9.1 flat block);
+//   - `@charset "…";` and `@import url(…) conds;` (§65.8 hoisting — where they
+//     may stand is analyze's);
+//   - inside a rule, the §25.2 definition `name = value;` → `--name: value`;
+//   - in a value, `@name` (§25.7 / §65.3.2) as a reference node; strings and
+//     `url(…)` verbatim (an `@` inside them is text); comments dropped.
+//
+// WHAT IT REFUSES (each with a span the author can act on):
+//   E-CSS-SYNTAX — malformed CSS: an unclosed `#{`, an unterminated string or
+//     comment, an unclosed `(` / `[` / `url(`, a declaration with no `:` or no
+//     value, a property that is not a name, a `;` missing between two
+//     declarations, an unparseable selector, a stray `@`, and ANY `<` (the
+//     sheet is printed inside the page's `<style>` raw-text element; with no
+//     `<` in it no text can close that element — write `\3c` in a string).
+//   E-BOOTSTRAP-UNSUPPORTED — ruled CSS the bootstrap does not carry yet:
+//     every other at-rule (`@media`, `@supports`, `@keyframes`, `@font-face`,
+//     `@layer`, `@container`, …), nested rules / `&` (CSS nesting), `@apply`
+//     (§26.8), `!important` (§65.7 — internal vs interop is not classified),
+//     (`${…}` inside a block is E-CSS-SYNTAX: never allowed, ruled S469 — a cell
+//     reaches CSS only through `@name`, §25.7; dynamic raw CSS is only the quoted
+//     `style="…"`, §65.4.2.)
+//
+// impl#1 workarounds: F14 (braces only via LB()/RB()); a `/*`, `${` or `#{`
+// spelled in a string literal is assembled from pieces.
+// =============================================================================
+${
+    import { SimpleSel, Combinator, Compound, SelLink, ComplexSel } from "./core.scrml"
+    import { ASpan, ACssRef, ACssPart, ACssDecl, ACssRule, ACssItem, ACss, mkSpan } from "./ast.scrml"
+
+    fn LB() -> string { return "{" }
+    fn RB() -> string { return "}" }
+    fn openComment() -> string { return "/" + "*" }
+    fn closeComment() -> string { return "*" + "/" }
+
+    // A finding: its code, message and absolute source span.
+    export type CssErr:struct = { code: string, text: string, start: int, end: int }
+    // `end`: the offset just past the block's closing `}` (the source length
+    // when it is unclosed). `nid`: the next unused NodeId.
+    export type CssParsed:struct = { css: ACss, end: int, nid: int, errs: CssErr[] }
+
+    fn err(code: string, msg: string, start: int, end: int) -> CssErr {
+        return { code: code, text: msg, start: start, end: end }
+    }
+    fn syntax(msg: string, start: int, end: int) -> CssErr { return err("E-CSS-SYNTAX", msg, start, end) }
+    fn unsupported(msg: string, start: int, end: int) -> CssErr { return err("E-BOOTSTRAP-UNSUPPORTED", msg, start, end) }
+
+    // =========================================================================
+    // Characters.
+    // =========================================================================
+    fn charAt(s: string, i: int) -> string { return s.substring(i, i + 1) }
+    fn letters() -> string { return "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" }
+    fn digits() -> string { return "0123456789" }
+    fn isLetter(c: string) -> boolean { return c.length == 1 && letters().indexOf(c) >= 0 }
+    fn isDigit(c: string) -> boolean { return c.length == 1 && digits().indexOf(c) >= 0 }
+    fn isSpace(c: string) -> boolean { return c.length == 1 && " \t\n\r\f".indexOf(c) >= 0 }
+    fn isQuote(c: string) -> boolean { return c == "\"" || c == "'" }
+    // A CSS identifier (ASCII subset): letters, digits, `-`, `_`; not starting with a digit.
+    fn isNonAscii(c: string) -> boolean { return c.length == 1 && c.charCodeAt(0) >= 128 }
+    fn isNameStart(c: string) -> boolean { return isLetter(c) || c == "_" || c == "-" || isNonAscii(c) }
+    fn isNameChar(c: string) -> boolean { return isNameStart(c) || isDigit(c) }
+    // An `@` reference (§65.3.2): an identifier; a theme token may be hyphenated.
+    fn isRefStart(c: string) -> boolean { return isLetter(c) || c == "_" }
+    fn isRefChar(c: string) -> boolean { return isRefStart(c) || isDigit(c) || c == "-" }
+
+    fn readName(s: string, i: int) -> string {
+        let j = i
+        if (j < s.length && isNameStart(charAt(s, j))) {
+            j = j + 1
+            while (j < s.length && isNameChar(charAt(s, j))) { j = j + 1 }
+        }
+        return s.substring(i, j)
+    }
+
+    fn isHex(c: string) -> boolean { return c.length == 1 && "0123456789abcdefABCDEF".indexOf(c) >= 0 }
+
+    // A class / id name with CSS escapes (CSS Syntax §4.3.7, review F5): `\31 0`
+    // (a hex escape, up to six digits and one optional whitespace) or `\:` (any
+    // other character but a line break). Kept AS WRITTEN — the browser decodes it;
+    // an escape cannot spell `<` here (the raw `<` is refused, and `\3c` is text).
+    // "" when no name starts at `i`; `bad` when a `\` escapes a line break / EOF.
+    type Ident:struct = { text: string, bad: boolean }
+
+    fn readIdent(s: string, i: int) -> Ident {
+        let j = i
+        let going = true
+        while (going && j < s.length) {
+            const c: string = charAt(s, j)
+            if (c == "\\") {
+                const n: string = charAt(s, j + 1)
+                if (n.length == 0 || n == "\n" || n == "\r" || n == "\f") return { text: s.substring(i, j), bad: true }
+                if (isHex(n)) {
+                    let k: int = j + 1
+                    while (k < s.length && k < j + 7 && isHex(charAt(s, k))) { k = k + 1 }
+                    if (k < s.length && isSpace(charAt(s, k))) k = k + 1
+                    j = k
+                } else {
+                    j = j + 2
+                }
+            } else if (j == i && !isNameStart(c)) {
+                going = false
+            } else if (j > i && !isNameChar(c)) {
+                going = false
+            } else {
+                j = j + 1
+            }
+        }
+        return { text: s.substring(i, j), bad: false }
+    }
+
+    fn nameCharsFrom(s: string, i: int) -> string {
+        let j = i
+        while (j < s.length && isNameChar(charAt(s, j))) { j = j + 1 }
+        return s.substring(i, j)
+    }
+
+    fn readRef(s: string, i: int) -> string {
+        let j = i
+        if (j < s.length && isRefStart(charAt(s, j))) {
+            j = j + 1
+            while (j < s.length && isRefChar(charAt(s, j))) { j = j + 1 }
+        }
+        // a trailing `-` is punctuation, not part of the name (`@gap-` → `@gap` then `-`)
+        while (j > i + 1 && charAt(s, j - 1) == "-") { j = j - 1 }
+        return s.substring(i, j)
+    }
+
+    // A property name: an identifier, or a custom property `--name`.
+    fn isPropName(p: string) -> boolean {
+        if (p.length == 0) return false
+        if (p.substring(0, 2) == "--") {
+            if (p.length == 2) return false
+            let j = 2
+            while (j < p.length) {
+                if (!isNameChar(charAt(p, j))) return false
+                j = j + 1
+            }
+            return true
+        }
+        return readName(p, 0) == p && !isDigit(charAt(p, 0)) && !(p.length >= 2 && charAt(p, 0) == "-" && isDigit(charAt(p, 1)))
+    }
+
+    // Index just past the CSS string opened at `i`, or -1 if it is unterminated
+    // (a CSS string ends at an unescaped newline — a "bad string", CSS Syntax §4.3.5).
+    fn skipString(s: string, i: int, stop: int) -> int {
+        const q: string = charAt(s, i)
+        let j = i + 1
+        while (j < stop) {
+            const c: string = charAt(s, j)
+            if (c == "\\") {
+                j = j + 2
+            } else if (c == q) {
+                return j + 1
+            } else if (c == "\n") {
+                return 0 - 1
+            } else {
+                j = j + 1
+            }
+        }
+        return 0 - 1
+    }
+
+    // Index just past the comment opened at `i` (`/*`), or -1 if it never closes.
+    fn skipComment(s: string, i: int, stop: int) -> int {
+        const k: int = s.indexOf(closeComment(), i + 2)
+        if (k < 0 || k + 2 > stop) return 0 - 1
+        return k + 2
+    }
+
+    // `/*` opens a comment — unless the `/` is escaped (`\/*` is an escaped slash, CSS Syntax §4.3.7).
+    fn atComment(s: string, i: int) -> boolean {
+        if (s.substring(i, i + 2) != openComment()) return false
+        return i == 0 || charAt(s, i - 1) != "\\"
+    }
+
+    // An unquoted-or-quoted `url(` at `i` (not the tail of a longer name, `myurl(`).
+    // Its contents are VERBATIM — a URL has no comments (`url(a/*x*/.css)` keeps
+    // its `/*x*/`; `url( //cdn/x.png)` is not a `//` comment) — so every scanner
+    // steps over it whole. The index just past its `)`, or -1 when it is unclosed
+    // (then it is scanned as text, and the value scan names the unclosed `url(`).
+    fn urlEnd(s: string, i: int) -> int {
+        if (s.substring(i, i + 4).toLowerCase() != "url(") return 0 - 1
+        if (i > 0 && isNameChar(charAt(s, i - 1))) return 0 - 1
+        const k: int = closeOf(s, i + 3, "(", ")")
+        if (k < 0) return 0 - 1
+        // bounded: a `url(` never spans a line break or a brace — an unclosed one must
+        // not swallow the block's `}` by matching a `)` further on in the page
+        const body: string = s.substring(i, k)
+        if (body.indexOf("\n") >= 0 || body.indexOf(LB()) >= 0 || body.indexOf(RB()) >= 0) return 0 - 1
+        return k + 1
+    }
+
+    // §4.7 / §27: `//` is scrml's line comment, in CSS too (review F3). It opens a
+    // comment at a line start or after whitespace — so `url(http://x)` and a
+    // `a//b` stay content (the S444 free-text reading, applied here) — and runs to
+    // the end of the line.
+    fn lineCommentAt(s: string, i: int) -> boolean {
+        if (s.substring(i, i + 2) != "//") return false
+        return i == 0 || isSpace(charAt(s, i - 1))
+    }
+
+    // [from, to) with every `//` comment blanked (spaces; line breaks kept, so
+    // every offset — and every span — is unchanged). Strings and `/* */` are
+    // skipped, so a `//` inside them is their text.
+    fn maskLineComments(s: string, from: int, to: int) -> string {
+        let out: string = s.substring(0, from)
+        let j: int = from
+        while (j < to) {
+            const c: string = charAt(s, j)
+            if (isQuote(c)) {
+                const k: int = skipString(s, j, to)
+                const e: int = k < 0 ? to : k
+                out = out + s.substring(j, e)
+                j = e
+            } else if (urlEnd(s, j) >= 0) {
+                const e: int = urlEnd(s, j)
+                out = out + s.substring(j, e)
+                j = e
+            } else if (atComment(s, j)) {
+                const k: int = skipComment(s, j, to)
+                const e: int = k < 0 ? to : k
+                out = out + s.substring(j, e)
+                j = e
+            } else if (lineCommentAt(s, j)) {
+                let e: int = s.indexOf("\n", j)
+                if (e < 0 || e > to) e = to
+                out = out + " ".repeat(e - j)
+                j = e
+            } else {
+                out = out + c
+                j = j + 1
+            }
+        }
+        return out + s.substring(to, s.length)
+    }
+
+    // =========================================================================
+    // The block's extent: the `}` matching `#{` (strings and comments skipped,
+    // braces counted). An unterminated string is skipped to its line's end so
+    // the extent survives it (its finding is the value scan's).
+    // =========================================================================
+    fn blockEnd(s: string, open: int) -> int {
+        let depth = 1
+        let j: int = open + 2
+        while (j < s.length) {
+            const c: string = charAt(s, j)
+            if (isQuote(c)) {
+                const k: int = skipString(s, j, s.length)
+                if (k < 0) {
+                    const nl: int = s.indexOf("\n", j)
+                    if (nl < 0) return 0 - 1
+                    j = nl + 1
+                } else {
+                    j = k
+                }
+            } else if (urlEnd(s, j) >= 0) {
+                j = urlEnd(s, j)
+            } else if (atComment(s, j)) {
+                const k: int = skipComment(s, j, s.length)
+                if (k < 0) return 0 - 1
+                j = k
+            } else if (lineCommentAt(s, j)) {
+                const nl: int = s.indexOf("\n", j)
+                if (nl < 0) return 0 - 1
+                j = nl
+            } else if (c == LB()) {
+                depth = depth + 1
+                j = j + 1
+            } else if (c == RB()) {
+                depth = depth - 1
+                if (depth == 0) return j
+                j = j + 1
+            } else {
+                j = j + 1
+            }
+        }
+        return 0 - 1
+    }
+
+    // An unclosed block's recovery point: the first `<` outside a string or a
+    // comment — CSS never holds one (every `<` is refused), so markup resumes
+    // there — else the end of the source.
+    fn blockStop(s: string, open: int) -> int {
+        let j: int = open + 2
+        while (j < s.length) {
+            const c: string = charAt(s, j)
+            if (isQuote(c)) {
+                const k: int = skipString(s, j, s.length)
+                if (k < 0) {
+                    const nl: int = s.indexOf("\n", j)
+                    if (nl < 0) return s.length
+                    j = nl + 1
+                } else {
+                    j = k
+                }
+            } else if (urlEnd(s, j) >= 0) {
+                j = urlEnd(s, j)
+            } else if (atComment(s, j)) {
+                // an unclosed comment is itself a finding; the scan for the `<` goes on through it
+                const k: int = skipComment(s, j, s.length)
+                j = k < 0 ? j + 2 : k
+            } else if (lineCommentAt(s, j)) {
+                const nl: int = s.indexOf("\n", j)
+                if (nl < 0) return s.length
+                j = nl
+            } else if (c == "<") {
+                return j
+            } else {
+                j = j + 1
+            }
+        }
+        return s.length
+    }
+
+    // A `${` at `j` (unruled inside CSS): the index just past its balanced `}`,
+    // or `stop`. Scanners step over it whole, so the value scan names it.
+    fn atInterp(s: string, j: int) -> boolean { return charAt(s, j) == "$" && charAt(s, j + 1) == LB() }
+
+    fn skipInterp(s: string, j: int, stop: int) -> int {
+        let depth = 0
+        let k: int = j + 1
+        while (k < stop) {
+            const c: string = charAt(s, k)
+            if (c == LB()) depth = depth + 1
+            if (c == RB()) {
+                depth = depth - 1
+                if (depth == 0) return k + 1
+            }
+            k = k + 1
+        }
+        return stop
+    }
+
+    // =========================================================================
+    // Reader state, threaded.
+    // =========================================================================
+    type CS:struct = { src: string, nid: int, errs: CssErr[] }
+
+    fn withErr(cs: CS, e: CssErr) -> CS { return { src: cs.src, nid: cs.nid, errs: cs.errs.concat([e]) } }
+    fn bump(cs: CS) -> CS { return { src: cs.src, nid: cs.nid + 1, errs: cs.errs } }
+
+    // Skip whitespace and comments from `i` (to `stop`); an unclosed comment is
+    // reported and ends the scan at `stop`.
+    type At:struct = { pos: int, cs: CS }
+
+    fn skipTrivia(cs: CS, i: int, stop: int) -> At {
+        let j = i
+        let c: CS = cs
+        let going = true
+        while (going && j < stop) {
+            if (isSpace(charAt(cs.src, j))) {
+                j = j + 1
+            } else if (atComment(cs.src, j)) {
+                const k: int = skipComment(cs.src, j, stop)
+                if (k < 0) {
+                    c = withErr(c, syntax("this CSS comment is never closed — end it with `" + closeComment() + "`", j, j + 2))
+                    j = stop
+                } else {
+                    j = k
+                }
+            } else {
+                going = false
+            }
+        }
+        return { pos: j, cs: c }
+    }
+
+    // The first of `{` / `;` at nesting depth 0 in [i, stop) — strings, comments,
+    // `(…)` and `[…]` skipped — or `stop`. `ch` is what was found ("" = none).
+    type Stop:struct = { pos: int, ch: string }
+
+    fn nextStop(s: string, i: int, stop: int) -> Stop {
+        let depth = 0
+        let j = i
+        while (j < stop) {
+            const c: string = charAt(s, j)
+            if (isQuote(c)) {
+                const k: int = skipString(s, j, stop)
+                if (k < 0) {
+                    const nl: int = s.indexOf("\n", j)
+                    if (nl < 0 || nl >= stop) return { pos: stop, ch: "" }
+                    j = nl + 1
+                } else {
+                    j = k
+                }
+            } else if (urlEnd(s, j) >= 0) {
+                j = urlEnd(s, j)
+            } else if (atComment(s, j)) {
+                const k: int = skipComment(s, j, stop)
+                if (k < 0) return { pos: stop, ch: "" }
+                j = k
+            } else if (atInterp(s, j)) {
+                j = skipInterp(s, j, stop)
+            } else {
+                if (c == "(" || c == "[") depth = depth + 1
+                if ((c == ")" || c == "]") && depth > 0) depth = depth - 1
+                if (depth == 0 && (c == LB() || c == ";")) return { pos: j, ch: c }
+                j = j + 1
+            }
+        }
+        return { pos: stop, ch: "" }
+    }
+
+    // The `}` closing the `{` at `open` (within `stop`), or -1.
+    fn closeBrace(s: string, open: int, stop: int) -> int {
+        let depth = 0
+        let j = open
+        while (j < stop) {
+            const c: string = charAt(s, j)
+            if (isQuote(c)) {
+                const k: int = skipString(s, j, stop)
+                if (k < 0) {
+                    const nl: int = s.indexOf("\n", j)
+                    if (nl < 0 || nl >= stop) return 0 - 1
+                    j = nl + 1
+                } else {
+                    j = k
+                }
+            } else if (urlEnd(s, j) >= 0) {
+                j = urlEnd(s, j)
+            } else if (atComment(s, j)) {
+                const k: int = skipComment(s, j, stop)
+                if (k < 0) return 0 - 1
+                j = k
+            } else {
+                if (c == LB()) depth = depth + 1
+                if (c == RB()) {
+                    depth = depth - 1
+                    if (depth == 0) return j
+                }
+                j = j + 1
+            }
+        }
+        return 0 - 1
+    }
+
+    // Text with comments replaced by one space (strings kept verbatim).
+    fn stripComments(s: string) -> string {
+        let out = ""
+        let j = 0
+        while (j < s.length) {
+            const c: string = charAt(s, j)
+            if (isQuote(c)) {
+                const k: int = skipString(s, j, s.length)
+                const e: int = k < 0 ? s.length : k
+                out = out + s.substring(j, e)
+                j = e
+            } else if (urlEnd(s, j) >= 0) {
+                const e: int = urlEnd(s, j)
+                out = out + s.substring(j, e)
+                j = e
+            } else if (atComment(s, j)) {
+                const k: int = skipComment(s, j, s.length)
+                out = out + " "
+                j = k < 0 ? s.length : k
+            } else {
+                out = out + c
+                j = j + 1
+            }
+        }
+        return out
+    }
+
+    // WALL 1 (round 3, review: "make it structural"). Once the block's extent is
+    // known, its RAW source slice is scanned for `<` skipping NOTHING — not a
+    // string, a comment, a `url(`, an escape. Ruling S469 item 1 read literally:
+    // "any `<`". (Two rounds found a skip rule hiding a `<` — a `/*` in a string,
+    // then a `/*` in an unquoted `url(`; a scan with no skip rule has none to get
+    // wrong.) A `<` in a comment is refused too: comments are not printed anyway.
+    fn firstLt(s: string, from: int, to: int) -> int {
+        const k: int = s.indexOf("<", from)
+        if (k < 0 || k >= to) return 0 - 1
+        return k
+    }
+
+    fn ltErr(at: int) -> CssErr {
+        return syntax("a `<` cannot appear in a `#" + LB() + "…" + RB() + "` block — the stylesheet is printed inside the page's `<style>` element, where `</style` would end it; in a string write the CSS escape `\\3c ` instead (§65)", at, at + 1)
+    }
+
+    // =========================================================================
+    // Selectors (§65.2.5: parse, fail loud). A selector list → its arms.
+    // =========================================================================
+    type ArmsR:struct = { arms: string[], err: string }
+
+    fn closeOf(s: string, i: int, open: string, close: string) -> int {
+        let depth = 0
+        let j = i
+        while (j < s.length) {
+            const c: string = charAt(s, j)
+            if (isQuote(c)) {
+                const k: int = skipString(s, j, s.length)
+                if (k < 0) return 0 - 1
+                j = k
+            } else {
+                if (c == open) depth = depth + 1
+                if (c == close) {
+                    depth = depth - 1
+                    if (depth == 0) return j
+                }
+                j = j + 1
+            }
+        }
+        return 0 - 1
+    }
+
+    fn splitArms(s: string) -> ArmsR {
+        let arms: string[] = []
+        let depth = 0
+        let start = 0
+        let j = 0
+        while (j < s.length) {
+            const c: string = charAt(s, j)
+            if (isQuote(c)) {
+                const k: int = skipString(s, j, s.length)
+                if (k < 0) return { arms: [], err: "an unterminated string" }
+                j = k
+            } else {
+                if (c == "(" || c == "[") depth = depth + 1
+                if (c == ")" || c == "]") depth = depth - 1
+                if (c == "," && depth == 0) {
+                    arms = arms.concat([s.substring(start, j)])
+                    start = j + 1
+                }
+                j = j + 1
+            }
+        }
+        return { arms: arms.concat([s.substring(start, s.length)]), err: "" }
+    }
+
+    type CompR:struct = { parts: SimpleSel[], next: int, err: string }
+
+    // §65.2.5 "validate author selectors and fail loud": a pseudo-class or
+    // pseudo-element the browser does not know makes it DROP the whole rule,
+    // silently — so an unknown name is refused (a vendor-prefixed one, `-webkit-…`,
+    // is the author's interop choice and passes).
+    fn knownPseudoClasses() -> string[] {
+        return ["active", "any-link", "autofill", "blank", "buffering", "checked", "closed", "current", "default", "defined", "dir",
+                "disabled", "empty", "enabled", "first", "first-child", "first-of-type", "focus", "focus-visible", "focus-within",
+                "fullscreen", "future", "has", "host", "host-context", "hover", "in-range", "indeterminate", "invalid", "is", "lang",
+                "last-child", "last-of-type", "left", "link", "local-link", "modal", "muted", "not", "nth-child", "nth-col",
+                "nth-last-child", "nth-last-col", "nth-last-of-type", "nth-of-type", "only-child", "only-of-type", "open", "optional",
+                "out-of-range", "past", "paused", "picture-in-picture", "placeholder-shown", "playing", "popover-open", "read-only",
+                "read-write", "required", "right", "root", "scope", "seeking", "stalled", "state", "target", "target-within",
+                "user-invalid", "user-valid", "valid", "visited", "volume-locked", "where",
+                // the CSS2 pseudo-elements, still valid with one colon
+                "before", "after", "first-line", "first-letter"]
+    }
+    fn knownPseudoElements() -> string[] {
+        return ["after", "backdrop", "before", "checkmark", "column", "cue", "cue-region", "details-content", "file-selector-button",
+                "first-letter", "first-line", "grammar-error", "highlight", "marker", "part", "picker", "picker-icon", "placeholder",
+                "scroll-marker", "scroll-marker-group", "selection", "slotted", "spelling-error", "target-text", "view-transition",
+                "view-transition-group", "view-transition-image-pair", "view-transition-new", "view-transition-old"]
+    }
+    fn isVendor(n: string) -> boolean {
+        const l: string = n.toLowerCase()
+        return l.substring(0, 8) == "-webkit-" || l.substring(0, 5) == "-moz-" || l.substring(0, 4) == "-ms-" || l.substring(0, 3) == "-o-"
+    }
+    fn pseudoKnown(n: string, element: boolean) -> boolean {
+        if (isVendor(n)) return true
+        const l: string = n.toLowerCase()
+        const names: string[] = element ? knownPseudoElements() : knownPseudoClasses()
+        for (const k of names) {
+            if (k == l) return true
+        }
+        return false
+    }
+    // `:is()` / `:where()` / `:not()` / `:has()` take a selector list — parsed
+    // here, so a forgiving list never hides an unparseable arm (§65.2.5). A
+    // `:has()` arm may lead with a combinator (a relative selector).
+    fn pseudoArgErr(n: string, arg: string) -> string {
+        const l: string = n.toLowerCase()
+        if (l != "is" && l != "where" && l != "not" && l != "has") return ""
+        const split: ArmsR = splitArms(arg)
+        if (split.err.length > 0) return "`:" + n + "(…)`: " + split.err
+        for (const a0 of split.arms) {
+            let a: string = a0.trim()
+            if (l == "has" && combOf(charAt(a, 0)) is given) a = a.substring(1, a.length)
+            const r: ComplexR = parseComplex(a)
+            if (r.err.length > 0) return "`:" + n + "(" + arg + ")`: " + r.err
+        }
+        return ""
+    }
+
+    fn compErr(msg: string) -> CompR { return { parts: [], next: 0, err: msg } }
+
+    fn parseCompound(s: string, i: int) -> CompR {
+        let parts: SimpleSel[] = []
+        let j = i
+        let going = true
+        while (going && j < s.length) {
+            const c: string = charAt(s, j)
+            if (c == "*") {
+                parts = parts.concat([SimpleSel.Universal])
+                j = j + 1
+            } else if (c == ".") {
+                const id: Ident = readIdent(s, j + 1)
+                if (id.bad) return compErr("a `\\` at the end of the class name `." + id.text + "\\` escapes nothing")
+                if (id.text.length == 0) {
+                    if (isDigit(charAt(s, j + 1))) return compErr("a class name cannot start with a digit — escape it: `.\\3" + charAt(s, j + 1) + " " + nameCharsFrom(s, j + 2) + "`")
+                    return compErr("`.` with no class name")
+                }
+                parts = parts.concat([SimpleSel.ClassSel(id.text)])
+                j = j + 1 + id.text.length
+            } else if (c == "#") {
+                const id: Ident = readIdent(s, j + 1)
+                if (id.bad) return compErr("a `\\` at the end of the id `#" + id.text + "\\` escapes nothing")
+                if (id.text.length == 0) {
+                    if (isDigit(charAt(s, j + 1))) return compErr("an id selector cannot start with a digit — escape it: `#\\3" + charAt(s, j + 1) + " " + nameCharsFrom(s, j + 2) + "`")
+                    return compErr("`#` with no id")
+                }
+                parts = parts.concat([SimpleSel.IdSel(id.text)])
+                j = j + 1 + id.text.length
+            } else if (c == "[") {
+                const k: int = closeOf(s, j, "[", "]")
+                if (k < 0) return compErr("an unclosed `[`")
+                parts = parts.concat([SimpleSel.AttrSel(s.substring(j + 1, k))])
+                j = k + 1
+            } else if (c == ":") {
+                if (charAt(s, j + 1) == ":") {
+                    const n: string = readName(s, j + 2)
+                    if (n.length == 0) return compErr("`::` with no pseudo-element name")
+                    if (!pseudoKnown(n, true)) return compErr("`::" + n + "` is not a pseudo-element the browser knows — the rule would be dropped")
+                    parts = parts.concat([SimpleSel.PseudoElement(n)])
+                    j = j + 2 + n.length
+                } else {
+                    const n: string = readName(s, j + 1)
+                    if (n.length == 0) return compErr("`:` with no pseudo-class name")
+                    if (!pseudoKnown(n, false)) return compErr("`:" + n + "` is not a pseudo-class the browser knows — the rule would be dropped")
+                    const after: int = j + 1 + n.length
+                    if (charAt(s, after) == "(") {
+                        const k: int = closeOf(s, after, "(", ")")
+                        if (k < 0) return compErr("an unclosed `(` in `:" + n + "`")
+                        const ae: string = pseudoArgErr(n, s.substring(after + 1, k))
+                        if (ae.length > 0) return compErr(ae)
+                        parts = parts.concat([SimpleSel.PseudoClass(n, s.substring(after + 1, k))])
+                        j = k + 1
+                    } else {
+                        parts = parts.concat([SimpleSel.PseudoClass(n, not)])
+                        j = after
+                    }
+                }
+            } else if (isNameStart(c)) {
+                if (parts.length > 0) return compErr("a type selector after another simple selector")
+                // a type selector (an element name) starts with a letter — `-->`, `--x`, `-a` are not one (review F6)
+                if (c == "-" || c == "_") return compErr("`" + readName(s, j) + "` is not an element name")
+                const n: string = readName(s, j)
+                parts = parts.concat([SimpleSel.TagSel(n)])
+                j = j + n.length
+            } else {
+                going = false
+            }
+        }
+        return { parts: parts, next: j, err: "" }
+    }
+
+    type ComplexR:struct = { sel: ComplexSel, err: string }
+
+    fn emptyComplex() -> ComplexSel { return { head: { parts: [] }, links: [] } }
+    fn complexErr(msg: string) -> ComplexR { return { sel: emptyComplex(), err: msg } }
+
+    fn combOf(c: string) -> Combinator | not {
+        if (c == ">") return Combinator.DirectChild
+        if (c == "+") return Combinator.NextSibling
+        if (c == "~") return Combinator.LaterSibling
+        return not
+    }
+
+    fn parseComplex(arm: string) -> ComplexR {
+        const t: string = arm.trim()
+        if (t.length == 0) return complexErr("an empty selector (a stray `,`?)")
+        const head: CompR = parseCompound(t, 0)
+        if (head.err.length > 0) return complexErr(head.err)
+        if (head.parts.length == 0) return complexErr("unexpected `" + charAt(t, 0) + "`")
+        let links: SelLink[] = []
+        let j: int = head.next
+        while (j < t.length) {
+            let sawSpace = false
+            while (j < t.length && isSpace(charAt(t, j))) {
+                j = j + 1
+                sawSpace = true
+            }
+            if (j < t.length) {
+                const explicit: Combinator | not = combOf(charAt(t, j))
+                let comb: Combinator = Combinator.Descendant
+                if (explicit is given) {
+                    comb = explicit
+                    j = j + 1
+                    while (j < t.length && isSpace(charAt(t, j))) { j = j + 1 }
+                } else if (!sawSpace) {
+                    return complexErr("unexpected `" + charAt(t, j) + "`")
+                }
+                const next: CompR = parseCompound(t, j)
+                if (next.err.length > 0) return complexErr(next.err)
+                if (next.parts.length == 0) {
+                    if (j >= t.length) return complexErr("a combinator with nothing after it")
+                    return complexErr("unexpected `" + charAt(t, j) + "`")
+                }
+                links = links.concat([{ comb: comb, target: { parts: next.parts } }])
+                j = next.next
+            }
+        }
+        return { sel: { head: { parts: head.parts }, links: links }, err: "" }
+    }
+
+    type SelR:struct = { arms: ComplexSel[], err: string }
+
+    fn parseSelector(s: string) -> SelR {
+        const split: ArmsR = splitArms(s)
+        if (split.err.length > 0) return { arms: [], err: split.err }
+        let arms: ComplexSel[] = []
+        for (const a of split.arms) {
+            const r: ComplexR = parseComplex(a)
+            if (r.err.length > 0) return { arms: [], err: r.err }
+            arms = arms.concat([r.sel])
+        }
+        return { arms: arms, err: "" }
+    }
+
+    // =========================================================================
+    // Declaration values: literal text + `@name` references.
+    // =========================================================================
+    type PartsR:struct = { parts: ACssPart[], cs: CS, ok: boolean }
+
+    fn flushText(ps: ACssPart[], buf: string) -> ACssPart[] {
+        if (buf.length == 0) return ps
+        return ps.concat([ACssPart.CText(buf)])
+    }
+
+    // The value in [i, stop) of the declaration of `prop`. `colon` is the `:`'s offset.
+    fn parseValue(cs0: CS, prop: string, colon: int, i: int, stop: int) -> PartsR {
+        const s: string = cs0.src
+        let cs: CS = cs0
+        let parts: ACssPart[] = []
+        let buf = ""
+        let depth = 0
+        let j = i
+        let any = false
+        while (j < stop) {
+            const c: string = charAt(s, j)
+            if (isQuote(c)) {
+                const k: int = skipString(s, j, stop)
+                if (k < 0) return { parts: [], cs: withErr(cs, syntax("this CSS string is never closed — close it with `" + c + "` on the same line", j, j + 1)), ok: false }
+                buf = buf + s.substring(j, k)
+                j = k
+                any = true
+            } else if (s.substring(j, j + 4).toLowerCase() == "url(" && !(j > 0 && isNameChar(charAt(s, j - 1)))) {
+                // verbatim, BEFORE comments: a URL has none (`url(a/*x*/.css)`, `url( //cdn/x.png)`)
+                const k: int = closeOf(s, j + 3, "(", ")")
+                if (k < 0 || k >= stop) return { parts: [], cs: withErr(cs, syntax("this `url(` is never closed — add `)`", j, j + 4)), ok: false }
+                buf = buf + s.substring(j, k + 1)
+                j = k + 1
+                any = true
+            } else if (atComment(s, j)) {
+                const k: int = skipComment(s, j, stop)
+                if (k < 0) return { parts: [], cs: withErr(cs, syntax("this CSS comment is never closed — end it with `" + closeComment() + "`", j, j + 2)), ok: false }
+                buf = buf + " "
+                j = k
+            } else if (c == "!") {
+                return { parts: [], cs: withErr(cs, unsupported("`!important` in a `#" + LB() + RB() + "` block is not in the bootstrap — §65.7 makes internal `!important` an error and allows only an interop escape, and the bootstrap does not classify which this is; drop it (scrml's fixed precedence already decides the rule)", j, stop)), ok: false }
+            } else if (c == "$" && charAt(s, j + 1) == LB()) {
+                return { parts: [], cs: withErr(cs, syntax("`$" + LB() + "…" + RB() + "` is never allowed inside a `#" + LB() + RB() + "` block (§9.1, ruled S469) — a cell's value reaches CSS through `@name` (`color: @accent`, §25.7), and dynamic raw CSS only through a quoted `style=\"…\"` (§65.4.2)", j, j + 2)), ok: false }
+            } else if (c == "@") {
+                const n: string = readRef(s, j + 1)
+                if (n.length == 0) return { parts: [], cs: withErr(cs, syntax("a stray `@` in a CSS value — `@name` names a cell or a theme token (§65.3.2)", j, j + 1)), ok: false }
+                parts = flushText(parts, buf)
+                buf = ""
+                const after: int = j + 1 + n.length
+                if (charAt(s, after) == "." && isRefStart(charAt(s, after + 1))) {
+                    return { parts: [], cs: withErr(cs, unsupported("a member path `@" + n + "." + readRef(s, after + 1) + "` in a CSS value is not in the bootstrap — the §25.7 bridge carries a whole int / number / string cell; declare a derived cell for it", j, after + 1 + readRef(s, after + 1).length)), ok: false }
+                }
+                const r: ACssRef = { nid: cs.nid, span: mkSpan(j, j + 1 + n.length), name: n }
+                cs = bump(cs)
+                parts = parts.concat([ACssPart.CRef(r)])
+                j = j + 1 + n.length
+                any = true
+            } else if (c == ":" && depth == 0) {
+                // a second `:` at the top level: the previous declaration lost its `;`
+                let w: int = j
+                while (w > i && isSpace(charAt(s, w - 1))) { w = w - 1 }
+                let n: int = w
+                while (n > i && isNameChar(charAt(s, n - 1))) { n = n - 1 }
+                const name: string = s.substring(n, w)
+                let ins: int = n
+                while (ins > i && isSpace(charAt(s, ins - 1))) { ins = ins - 1 }
+                if (name.length > 0) return { parts: [], cs: withErr(cs, syntax("a `;` is missing before `" + name + "` — each declaration ends with `;` (insert it here)", ins, ins)), ok: false }
+                return { parts: [], cs: withErr(cs, syntax("an unexpected `:` in the value of `" + prop + "`", j, j + 1)), ok: false }
+            } else {
+                if (c == "(") depth = depth + 1
+                if (c == ")") {
+                    depth = depth - 1
+                    if (depth < 0) return { parts: [], cs: withErr(cs, syntax("an unmatched `)` in the value of `" + prop + "`", j, j + 1)), ok: false }
+                }
+                if (!isSpace(c)) any = true
+                buf = buf + c
+                j = j + 1
+            }
+        }
+        if (depth > 0) return { parts: [], cs: withErr(cs, syntax("an unclosed `(` in the value of `" + prop + "` — add `)`", i, stop)), ok: false }
+        if (!any) return { parts: [], cs: withErr(cs, syntax("the declaration `" + prop + "` has no value — write `" + prop + ": <value>;` or remove it", colon, colon + 1)), ok: false }
+        let out: ACssPart[] = flushText(parts, buf)
+        // trim the outer whitespace of the value (inner text is kept as written)
+        out = trimParts(out)
+        return { parts: out, cs: cs, ok: true }
+    }
+
+    fn trimParts(ps: ACssPart[]) -> ACssPart[] {
+        if (ps.length == 0) return ps
+        let out: ACssPart[] = []
+        let i = 0
+        for (const p of ps) {
+            let q: ACssPart = p
+            if (i == 0) q = trimPart(q, true)
+            if (i == ps.length - 1) q = trimPart(q, false)
+            if (!emptyText(q)) out = out.concat([q])
+            i = i + 1
+        }
+        return out
+    }
+
+    fn trimPart(p: ACssPart, start: boolean) -> ACssPart {
+        return match p {
+            .CText(text: t) :> ACssPart.CText(start ? t.trimStart() : t.trimEnd())
+            .CRef(r: r) :> p
+        }
+    }
+
+    fn emptyText(p: ACssPart) -> boolean {
+        return match p {
+            .CText(text: t) :> t.length == 0
+            .CRef(r: r) :> false
+        }
+    }
+
+    // =========================================================================
+    // A declaration in [i, stop): `prop: value`, or (in a rule) §25.2 `name = value`.
+    // =========================================================================
+    type DeclR:struct = { d: ACssDecl | not, cs: CS }
+
+    // The first `:` (or `=`) at depth 0 outside strings in [i, stop), or -1.
+    fn sepAt(s: string, i: int, stop: int, sep: string) -> int {
+        let depth = 0
+        let j = i
+        while (j < stop) {
+            const c: string = charAt(s, j)
+            if (isQuote(c)) {
+                const k: int = skipString(s, j, stop)
+                if (k < 0) return 0 - 1
+                j = k
+            } else if (urlEnd(s, j) >= 0) {
+                j = urlEnd(s, j)
+            } else if (atComment(s, j)) {
+                const k: int = skipComment(s, j, stop)
+                if (k < 0) return 0 - 1
+                j = k
+            } else if (atInterp(s, j)) {
+                j = skipInterp(s, j, stop)
+            } else {
+                if (c == "(" || c == "[") depth = depth + 1
+                if ((c == ")" || c == "]") && depth > 0) depth = depth - 1
+                if (depth == 0 && c == sep) return j
+                j = j + 1
+            }
+        }
+        return 0 - 1
+    }
+
+    fn parseDecl(cs0: CS, i: int, stop: int, inRule: boolean) -> DeclR {
+        const s: string = cs0.src
+        let cs: CS = cs0
+        const colon: int = sepAt(s, i, stop, ":")
+        let prop = ""
+        let valueAt = 0
+        let sepPos = 0
+        if (colon < 0) {
+            const eq: int = sepAt(s, i, stop, "=")
+            if (eq < 0) {
+                const text: string = stripComments(s.substring(i, stop)).trim()
+                return { d: not, cs: withErr(cs, syntax("`" + text + "` is not a declaration — write `property: value;`" + (inRule ? "" : " (or a selector rule `selector " + LB() + " … " + RB() + "`)"), i, stop)) }
+            }
+            const name: string = stripComments(s.substring(i, eq)).trim()
+            if (!inRule) {
+                return { d: not, cs: withErr(cs, syntax("the §25.2 definition `" + name + " = …` stands only inside a selector rule — write it in a rule, or as `--" + name + ": …;`", i, eq + 1)) }
+            }
+            if (readName(name, 0) != name || name.length == 0 || isDigit(charAt(name, 0))) {
+                return { d: not, cs: withErr(cs, syntax("`" + name + "` is not a CSS variable name (§25.2: `name = value;`)", i, eq)) }
+            }
+            prop = "--" + name
+            valueAt = eq + 1
+            sepPos = eq
+        } else {
+            prop = stripComments(s.substring(i, colon)).trim()
+            valueAt = colon + 1
+            sepPos = colon
+            if (!isPropName(prop)) {
+                let shown: string = prop
+                if (shown.length == 0) shown = "(nothing)"
+                return { d: not, cs: withErr(cs, syntax("`" + shown + "` is not a CSS property name — a declaration is `property: value;`", i, colon)) }
+            }
+        }
+        const pv: PartsR = parseValue(cs, prop, sepPos, valueAt, stop)
+        cs = pv.cs
+        if (!pv.ok) return { d: not, cs: cs }
+        let end: int = stop
+        while (end > i && isSpace(charAt(s, end - 1))) { end = end - 1 }
+        const d: ACssDecl = { nid: cs.nid, span: mkSpan(i, end), prop: prop, value: pv.parts }
+        return { d: d, cs: bump(cs) }
+    }
+
+    // =========================================================================
+    // A rule: `prelude { decls }`. `open` is the `{`, `close` its `}`.
+    // =========================================================================
+    type RuleR:struct = { r: ACssRule | not, cs: CS }
+
+    fn parseRule(cs0: CS, start: int, open: int, close: int) -> RuleR {
+        const s: string = cs0.src
+        let cs: CS = cs0
+        let ok = true
+        let arms: ComplexSel[] = []
+        const prelude: string = stripComments(s.substring(start, open))
+        let pEnd: int = open
+        while (pEnd > start && isSpace(charAt(s, pEnd - 1))) { pEnd = pEnd - 1 }
+        if (prelude.indexOf("&") >= 0) {
+            cs = withErr(cs, unsupported("`&` (CSS nesting) is not in the bootstrap — write the full selector", start, pEnd))
+            ok = false
+        } else if (prelude.indexOf("$" + LB()) >= 0) {
+            cs = withErr(cs, syntax("`$" + LB() + "…" + RB() + "` is never allowed inside a `#" + LB() + RB() + "` block (§9.1, ruled S469) — a selector is static CSS", start, pEnd))
+            ok = false
+        } else if (prelude.indexOf("@") >= 0) {
+            cs = withErr(cs, syntax("`@` cannot appear in a selector — `@name` is a value reference (§65.3.2)", start, pEnd))
+            ok = false
+        } else {
+            const sr: SelR = parseSelector(prelude)
+            if (sr.err.length > 0) {
+                cs = withErr(cs, syntax("the selector `" + prelude.trim() + "` does not parse: " + sr.err + " (§65.2.5: an unparseable selector is a compile error, never a silent drop)", start, pEnd))
+                ok = false
+            }
+            arms = sr.arms
+        }
+        // the body: declarations separated by `;`
+        let decls: ACssDecl[] = []
+        let j: int = open + 1
+        let going = true
+        while (going) {
+            const t: At = skipTrivia(cs, j, close)
+            cs = t.cs
+            j = t.pos
+            if (j >= close) {
+                going = false
+            } else if (charAt(s, j) == ";") {
+                j = j + 1
+            } else if (charAt(s, j) == "@") {
+                const n: string = readName(s, j + 1)
+                const st: Stop = nextStop(s, j, close)
+                let skipTo: int = st.pos + 1
+                if (st.ch == LB()) {
+                    const k: int = closeBrace(s, st.pos, close)
+                    skipTo = k < 0 ? close : k + 1
+                }
+                if (n == "apply") {
+                    cs = withErr(cs, unsupported("`@apply` (§26.8) is not in the bootstrap — the Tailwind utility table is not; write the declarations", j, j + 6))
+                } else {
+                    cs = withErr(cs, unsupported("the at-rule `@" + n + "` inside a rule is not in the bootstrap", j, j + 1 + n.length))
+                }
+                ok = false
+                j = skipTo
+            } else {
+                const st: Stop = nextStop(s, j, close)
+                if (st.ch == LB()) {
+                    const k: int = closeBrace(s, st.pos, close)
+                    let pe: int = st.pos
+                    while (pe > j && isSpace(charAt(s, pe - 1))) { pe = pe - 1 }
+                    cs = withErr(cs, unsupported("a rule nested inside a rule (CSS nesting) is not in the bootstrap — write it as its own rule with the full selector", j, pe))
+                    ok = false
+                    j = k < 0 ? close : k + 1
+                } else {
+                    const dr: DeclR = parseDecl(cs, j, st.pos, true)
+                    cs = dr.cs
+                    const d: ACssDecl | not = dr.d
+                    if (d is given) {
+                        decls = decls.concat([d])
+                    } else {
+                        ok = false
+                    }
+                    j = st.pos + 1
+                }
+            }
+        }
+        if (!ok) return { r: not, cs: cs }
+        const r: ACssRule = { nid: cs.nid, span: mkSpan(start, close + 1), sel: arms, decls: decls }
+        return { r: r, cs: bump(cs) }
+    }
+
+    // =========================================================================
+    // Top-level statements: `@charset` / `@import`.
+    // =========================================================================
+    type ItemR:struct = { items: ACssItem[], cs: CS }
+
+    fn charsetOf(cs: CS, start: int, semi: int) -> ItemR {
+        const s: string = cs.src
+        const rest: string = stripComments(s.substring(start + 8, semi)).trim()
+        if (rest.length >= 2 && charAt(rest, 0) == "\"" && skipString(rest, 0, rest.length) == rest.length) {
+            return { items: [ACssItem.CssCharset(mkSpan(start, semi + 1), rest.substring(1, rest.length - 1))], cs: cs }
+        }
+        return { items: [], cs: withErr(cs, syntax("`@charset` takes one double-quoted encoding name: `@charset \"utf-8\";`", start, semi)) }
+    }
+
+    fn importOf(cs: CS, start: int, semi: int) -> ItemR {
+        const s: string = cs.src
+        const rest: string = stripComments(s.substring(start + 7, semi)).trim()
+        const bad: ItemR = { items: [], cs: withErr(cs, syntax("`@import` needs a url, quoted or in `url(…)` — `@import \"theme.css\";` or `@import url(theme.css) screen;` — optionally followed by media conditions", start, semi)) }
+        let url = ""
+        let after = 0
+        if (rest.substring(0, 4).toLowerCase() == "url(") {
+            const k: int = closeOf(rest, 3, "(", ")")
+            if (k < 0) return bad
+            const inner: string = rest.substring(4, k).trim()
+            url = inner
+            if (inner.length >= 2 && isQuote(charAt(inner, 0))) {
+                if (skipString(inner, 0, inner.length) != inner.length) return bad
+                url = inner.substring(1, inner.length - 1)
+            }
+            after = k + 1
+        } else if (rest.length >= 2 && isQuote(charAt(rest, 0))) {
+            const k: int = skipString(rest, 0, rest.length)
+            if (k < 0) return bad
+            url = rest.substring(1, k - 1)
+            after = k
+        } else {
+            return bad
+        }
+        if (url.length == 0 || url.indexOf("\"") >= 0 || url.indexOf("\\") >= 0 || url.indexOf("'") >= 0 || url.indexOf("\n") >= 0) {
+            return { items: [], cs: withErr(cs, syntax("this `@import` url is empty, or holds a quote, a backslash or a line break inside it — the url itself must be plain text", start, semi)) }
+        }
+        return { items: [ACssItem.CssImport(mkSpan(start, semi + 1), url, rest.substring(after, rest.length).trim())], cs: cs }
+    }
+
+    fn atRule(cs0: CS, j: int, stop: int) -> At {
+        const s: string = cs0.src
+        let cs: CS = cs0
+        const n: string = readName(s, j + 1)
+        const st: Stop = nextStop(s, j, stop)
+        let skipTo: int = st.pos + 1
+        if (st.ch == LB()) {
+            const k: int = closeBrace(s, st.pos, stop)
+            skipTo = k < 0 ? stop : k + 1
+        }
+        if (n.length == 0) return { pos: skipTo, cs: withErr(cs, syntax("a stray `@` — an at-rule is `@name …`", j, j + 1)) }
+        if (n == "apply") return { pos: skipTo, cs: withErr(cs, unsupported("`@apply` (§26.8) is not in the bootstrap — the Tailwind utility table is not; write the declarations", j, j + 6)) }
+        return { pos: skipTo, cs: withErr(cs, unsupported("the at-rule `@" + n + "` is not in the bootstrap yet — only `@charset` and `@import` are (§65.8)", j, j + 1 + n.length)) }
+    }
+
+    // =========================================================================
+    // The entry: the `#{…}` at `open` (`#`). `nid0` is the first free NodeId.
+    // =========================================================================
+    export fn parseCssBlock(src0: string, open: int, nid0: int) -> CssParsed {
+        const close0: int = blockEnd(src0, open)
+        let close: int = close0
+        if (close0 < 0) close = blockStop(src0, open)
+        // the block's `//` comments blanked once: every scanner below sees CSS only
+        const src: string = maskLineComments(src0, open + 2, close)
+        let cs: CS = { src: src, nid: nid0, errs: [] }
+        if (close0 < 0) {
+            cs = withErr(cs, syntax("this `#" + LB() + "` is never closed — end the CSS block with `" + RB() + "` before the markup that follows it", open, open + 2))
+        }
+        let items: ACssItem[] = []
+        let j: int = open + 2
+        let going = true
+        const lt: int = firstLt(src0, open + 2, close)
+        if (lt >= 0) {
+            // the block is refused whole at its first `<` (one report; nothing of it is read or printed)
+            cs = withErr(cs, ltErr(lt))
+            going = false
+        }
+        while (going) {
+            const t: At = skipTrivia(cs, j, close)
+            cs = t.cs
+            j = t.pos
+            if (j >= close) {
+                going = false
+            } else if (charAt(src, j) == ";") {
+                j = j + 1
+            } else if (charAt(src, j) == "@") {
+                const low: string = src.substring(j, j + 9).toLowerCase()
+                const st: Stop = nextStop(src, j, close)
+                if (low == "@charset " && st.ch == ";") {
+                    const r: ItemR = charsetOf(cs, j, st.pos)
+                    cs = r.cs
+                    items = items.concat(r.items)
+                    j = st.pos + 1
+                } else if (low.substring(0, 8) == "@import " && st.ch == ";") {
+                    const r: ItemR = importOf(cs, j, st.pos)
+                    cs = r.cs
+                    items = items.concat(r.items)
+                    j = st.pos + 1
+                } else {
+                    const a: At = atRule(cs, j, close)
+                    cs = a.cs
+                    j = a.pos
+                }
+            } else {
+                const st: Stop = nextStop(src, j, close)
+                if (st.ch == LB()) {
+                    const k: int = closeBrace(src, st.pos, close)
+                    if (k < 0) {
+                        cs = withErr(cs, syntax("this rule's `" + LB() + "` is never closed — add `" + RB() + "`", st.pos, st.pos + 1))
+                        j = close
+                    } else {
+                        const rr: RuleR = parseRule(cs, j, st.pos, k)
+                        cs = rr.cs
+                        const r: ACssRule | not = rr.r
+                        if (r is given) items = items.concat([ACssItem.CssRule(r)])
+                        j = k + 1
+                    }
+                } else {
+                    const dr: DeclR = parseDecl(cs, j, st.pos, false)
+                    cs = dr.cs
+                    const d: ACssDecl | not = dr.d
+                    if (d is given) items = items.concat([ACssItem.CssFlat(d)])
+                    j = st.pos + 1
+                }
+            }
+        }
+        let end: int = close0 < 0 ? close : close0 + 1
+        // an extra `}` right after the block (only whitespace between) would be page
+        // text — malformed CSS (ruled S469: any malformed `#{}` is E-CSS-SYNTAX); consumed
+        if (close0 >= 0) {
+            let k: int = end
+            while (k < src0.length && isSpace(charAt(src0, k))) { k = k + 1 }
+            if (charAt(src0, k) == RB()) {
+                cs = withErr(cs, syntax("an extra `" + RB() + "` after this CSS block — it would be shown as page text; remove it (or close a rule inside the block)", k, k + 1))
+                end = k + 1
+            }
+        }
+        const css: ACss = { nid: cs.nid, span: mkSpan(open, end), items: items }
+        return { css: css, end: end, nid: cs.nid + 1, errs: cs.errs }
+    }
+}

@@ -1,0 +1,8 @@
+// `@media` is ruled CSS (§65.2.2 — a deterministic layer); the bootstrap does not carry it yet.
+<program>
+    #{
+        p { color: red; }
+        @media (min-width: 700px) { p { color: blue; } }
+    }
+    <main><p>x</p></main>
+</program>

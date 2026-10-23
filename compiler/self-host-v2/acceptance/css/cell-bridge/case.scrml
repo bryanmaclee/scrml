@@ -1,0 +1,9 @@
+// `@accent` in a value is the §25.7 bridge: var(--scrml-accent), fed from the cell.
+<program>
+    let <accent:string="teal"/>
+    #{ .x { color: @accent; } }
+    <main>
+        <p class="x" id="x">${@accent}</p>
+        <button id="go" onclick=(@accent = "purple")>go</button>
+    </main>
+</program>

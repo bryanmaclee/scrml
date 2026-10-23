@@ -9903,10 +9903,18 @@ Valid inside markup and state contexts, and at program scope (top-level in the p
   >
   > The bootstrap's stylesheet shim refuses both (not-yet) rather than guess. Tracked as `g-impl1-flat-css-block-on-plain-element-emits-dead-css` and `g-impl1-flat-css-block-nested-in-component-dropped` (docs/known-gaps.md).
 - Using `#{}` at top level SHALL NOT be a compile error or warning.
+- **`${…}` is never allowed inside a `#{}` block** — not in a value, a selector, or anywhere else in it; it SHALL be `E-CSS-SYNTAX`. A cell's value reaches CSS only through an `@name` reference (§25.7, §65.3.2), and dynamic raw CSS only through a quoted `style="…"` attribute (§65.4.2).
+- **A malformed `#{}` block is a compile error, `E-CSS-SYNTAX`** (§65.2.5) — never silently dropped CSS.
+  > **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — `#{}` CSS on the bootstrap" (scrml-support `f487d21`) — items 1 (*"Any malformed block errors"*) and 2 (*"Never allowed"*). **Direction of change:** newly-rejecting (a `${…}` in `#{}` and a malformed block were previously unspecified).
 
 **Normative statements (DQ-7 — CSS Scoping):**
 
-- `#{}` inside a **state type constructor** compiles to a native CSS `@scope ([data-scrml="ConstructorName"]) to ([data-scrml]) { ... }` block in the output `.css` file. Class names are NOT mangled.
+- `#{}` inside a **state type constructor** compiles to a native CSS `@scope ([data-scrml="ConstructorName"]) to ([data-scrml]) { ... }` block in the page's stylesheet. Class names are NOT mangled. **Either output shape conforms:** a separate `.css` file the page links, or an inline `<style>` in the page; every `<` in a `#{}` block is `E-CSS-SYNTAX` whatever the shape (§65.2.5), and an inline `<style>` SHALL additionally re-encode any `<` that reaches it as the CSS escape `\3c`, so no text can end the element.
+  > **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — runtime ratchet, scope root, engine in `<empty>`, CSS output" (scrml-support `0908198`) — item 4 (*"Either shape conforms"*). Replaces "in the output `.css` file". **Direction of change:** inert (widening of an output shape; no program's meaning changes).
+- **Where a component's `#{}` goes (§66 dialect):** inside the component's `renders` element, or inside a field's variant body there; it is scoped to that component. A `#{}` written in the §66 declaration body itself (between the opener and its closer, outside `renders`) is not a stylesheet position: it is `E-PARSE-DECL-BODY` (a declaration body holds child declarations and state-children only, §66.4 rule 4).
+  > **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — `#{}` CSS on the bootstrap" (scrml-support `f487d21`) — item 3 (*"Inside `renders`"*).
+- **A component's `#{}` styles its own root as well as its subtree.** A rule's selector matches the constructor's root element (the scope root) as well as the elements below it, inside the donut. Because a selector inside `@scope` matches only DESCENDANTS of the scope root in browsers, the emitter SHALL also emit each scoped selector root-anchored (its leftmost compound matching `:scope`, adding no specificity), and the behaviour SHALL be pinned by a real-browser check.
+  > **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — runtime ratchet, scope root, engine in `<empty>`, CSS output" (scrml-support `0908198`) — item 2 (*"Yes, include the root"*). **Direction of change:** newly-matching (a rule that names the root's own class now applies to the root).
 - The constructor's root element SHALL carry the attribute `data-scrml="ConstructorName"` in the emitted HTML.
 - **Flat-declaration `#{}` blocks** (blocks containing only bare `property: value;` pairs with no selectors) inside a constructor scope compile to inline `style="prop: value; ..."` on the containing element. They do NOT appear in the CSS file.
 - **Donut scope** is implicit. The `@scope` block uses `to ([data-scrml])` as its limit — constructor CSS does not bleed into nested constructors.
@@ -16812,14 +16820,32 @@ The `if=` attribute is a structural conditional. Its value is a condition (§42.
 - `if=` means the same thing wherever the element sits, including inside an `<each>` row template at any
   depth (§17.1.2.3): the element is absent while `expr` is false, and `expr` is re-evaluated whenever
   anything it reads changes, in both directions. *(PA correction S469 — a guard is never fail-open; see
-  §17.1.2.3.)* **Exception, Tier-0 lifted markup (impl#1 today, not the intended semantics):** inside
-  `${ … lift … }` markup only ONE position is a real render gate — the SOLE root of a reconciled
-  `for … lift` row whose condition is not the value-indexed `@cell == expr` shape (lowered to the same
-  element⇄comment swap). Every other `if=` in lifted markup — an element NESTED inside the lifted root, the
-  root of a non-loop `if … lift`, one root of a multi-root lift row, and a value-indexed sole root — is a
-  `display: none` toggle: the element stays in the DOM while `expr` is false. This exception is a defect
-  pending [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]], not a license; it closes when the
-  lift lowering adopts the structural swap.
+  §17.1.2.3.)* The same holds inside Tier-0 lifted markup (`${ … lift … }`, and markup used as a value —
+  a function returning markup, a ternary arm) at every position: the root of a `for … lift` row, one root
+  of a multi-root row, an element nested at any depth, the root of a non-loop `if … lift` or bare `lift`.
+  A quoted condition there is the condition expression, as everywhere; an `if=` value the compiler cannot
+  lower — there or anywhere, a bare `if` with no condition included — is **E-CG-003**, never an ungated
+  render. "Anything it reads" includes a cell read inside a function the condition calls (`if=isAdmin()`).
+  **impl#1 divergence — re-evaluation in lifted markup.** impl#1 re-evaluates a lifted condition only
+  where it re-evaluated the pre-S469 display toggle: in a reconciled row's per-item effect (the sole row
+  root, or a condition reading the row), in an `if … lift` arm's own effect, or else in the render that
+  builds the element plus a subscription to each `@cell` named in the attribute text. A position that
+  placement misses — a cell read only inside a called function outside a row, a value-indexed
+  `@cell == row.field` whose row field changes under the same key, a body local re-read later in a keyed
+  row — is NOT re-evaluated: a guard revoked there stays open. Tracked as
+  [[g-lift-gate-placement-inherits-main-staleness-s469]].
+  *(S469 — until [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]] closed, impl#1 lowered every
+  lifted position except the sole root of a reconciled `for … lift` row to a `display: none` toggle — the
+  element stayed in the DOM, its listeners reachable — and wrote a call or quoted `if=` value as a plain
+  attribute, ungated.)*
+  **impl#1 divergence — lifecycle (not visibility).** Inside an `<each>` row and inside lifted markup
+  (every position above, an `if … lift` arm included), impl#1 builds the element ONCE and swaps it with a
+  placeholder: while `expr` is false the element is absent from the DOM, but on false → true the SAME
+  element returns, with its state (an input's typed value, focus history, child nodes) and its inner
+  bindings, which stayed live while it was detached. That is not §6.7.2's lifecycle scope, which destroys
+  on false and re-mounts memorylessly; a top-level `if=` (the mount/unmount template) does follow §6.7.2.
+  Tracked as [[g-row-and-lift-if-gate-not-memoryless-s469]]; until it closes, only the top-level form may
+  be relied on for re-mount-from-scratch semantics.
 
 **Worked example:**
 ```scrml
@@ -17195,10 +17221,10 @@ element nested at any depth below a root, a nested `<each>`'s row, and an `<each
 > listed position was fail-open (a nested `<each if=>`, a `<match if=>`, a revoked nested / multi-root
 > markup `if=`) or fail-closed (a nested markup `if=` granted after row creation) before; impl#1 honours
 > all of them (emit-each.ts: `lowerRowScopedEachIfGate`, `emitRowGateEffectLines`, `_scrml_ifrow_apply`).
-> **Not covered here:** a markup `if=` inside Tier-0 lifted markup (`${ … lift … }`) — see the exception
-> in §17.1 (only the sole root of a reconciled `for … lift` row with a non-value-indexed condition is a
-> render gate on impl#1; the rest are `display` toggles), tracked as
-> [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]]. **And `<engine>` in a row:** an `<engine>`
+> A markup `if=` inside Tier-0 lifted markup (`${ … lift … }`) is honoured the same way (§17.1; S469,
+> [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]] — emit-lift.js `emitLiftIfGate`, the same
+> `_scrml_ifrow_apply` swap), and an `<each>` that is itself the lifted node is lowered as an `<each>`
+> (it was built as a literal `<each>` element). **And `<engine>` in a row:** an `<engine>`
 > inside an `<each>` row renders NOTHING on impl#1 today — no state body, `if=` or not, no diagnostic —
 > so it fails closed and "honoured" does not yet apply to it; whether an engine may sit in a row at all
 > (§51.0.A singleton) is ruling-gated, tracked as [[g-engine-inside-each-row-renders-nothing]].
@@ -26465,33 +26491,14 @@ Compiles to:
 --variable-name: value;
 ```
 
-### 25.3 Using a Variable
+### 25.3 ~~Using a Variable~~ — RETIRED (S469)
 
-```css
-property: variable-name fallback;
-```
-
-Compiles to:
-
-```css
-property: var(--variable-name, fallback);
-```
+> **Retired.** The bare use-site form ~~`property: variable-name fallback;` → `var(--variable-name, fallback)`~~ is withdrawn. **§65.3.2 governs:** a bare identifier in a CSS value is always a literal CSS value (`color: red`), never a variable reference. A custom property defined with the §25.2 form (`name = value;` → `--name`) is used with CSS's own `var(--name)`, and a cell or theme token with an `@name` reference (§25.7, §65.3.2).
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — `#{}` CSS on the bootstrap" (scrml-support `f487d21`) — item 4 (*"Retire §25.3"*). **Direction of change:** retiring a form neither implementation built (impl#1 and the bootstrap both print a bare identifier literally).
 
 ### 25.4 Hyphenated Names
 
-Both property names and variable names MAY be hyphenated. The parser tokenizes the property name as everything before the `:`, using standard CSS tokenization. The variable name follows the `:` and is delimited by the first whitespace.
-
-```css
-border-color: card-border #e2e8f0;
-```
-
-Compiles to:
-
-```css
-border-color: var(--card-border, #e2e8f0);
-```
-
-This is valid. The property name `border-color` is the full token before `:`. The variable name is `card-border`. The fallback is `#e2e8f0`.
+Both property names and §25.2 variable names MAY be hyphenated (`card-border = #e2e8f0;` defines `--card-border`). The parser tokenizes the property name as everything before the `:`, using standard CSS tokenization. ~~The use-site example `border-color: card-border #e2e8f0;` → `var(--card-border, #e2e8f0)`~~ is retired with §25.3 (S469).
 
 ### 25.5 Scoping
 
@@ -26509,7 +26516,7 @@ scrml compiles constructor-level `#{}` CSS to native CSS `@scope` blocks. Class 
      /* original rules unchanged */
    }
    ```
-   The constructor's root element carries `data-scrml="ConstructorName"` in the emitted HTML.
+   The constructor's root element carries `data-scrml="ConstructorName"` in the emitted HTML. The rules style the root as well as its subtree, so each selector is also emitted root-anchored (§9.1 DQ-7, ruled S469 — scrml-support `0908198`).
 
 2. **Flat-declaration `#{}` blocks** (containing only `property: value;` pairs, no selectors) inside a constructor compile to `style="prop: value;"` on the containing element. They do not appear in the `.css` file.
 
@@ -27993,6 +28000,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | ~~E-STATE-004~~ | §6 | **Retired 2026-07-16 (S263).** Unknown-attr-on-user-state-type never fired (dead `validateMarkupAttributes` — the caller-guard reads `n.name`, always `undefined`) and un-gating would false-fire on valid scrml-special attributes (`capabilities=`, `log=`, `cors=`) by consulting the html-elements registry instead of the authoritative VP-1 surface — reddening a valid-clean conformance case. Not viable 1.0 surface as written (bryan-ruled retire, S261). Whether V1 validates state-type attribute names at all — and if so under which code (folding into the VP-1 / E-ATTR family) — is deferred to v1.next. Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 | E-STATE-005 | §6 | State type name collides with a built-in HTML element name — choose a different name for the state type. (S260 §34-vs-impl audit: pre-fold row = dead V4 field semantics citing folded §11.1 [→ §6]; rewritten to the shipping trigger. Emitted at `compiler/src/type-system.ts`.) | Error |
 | E-STATE-006 | §6 | Duplicate state type definition — a state type with this name is already defined. (S260 §34-vs-impl audit: pre-fold row = dead V4 field semantics citing folded §11.1 [→ §6]; rewritten to the shipping trigger. Emitted at `compiler/src/type-system.ts`.) | Error |
+| E-CSS-SYNTAX | §9.1, §65.2.5 | A malformed `#{…}` CSS block (§65.2.5: *"Any malformed `#{}` block is `E-CSS-SYNTAX`"*). **Any `<` anywhere in the block** — in a selector, a value, a string, a `/* */` or `//` comment, or a `url(…)`: once the block's extent (`#{` to its matching `}`) is found, its RAW source text is scanned for `<` and nothing is skipped; the block is refused at its first `<`, with the span on that `<` (in a string, write the CSS escape `\3c`). And: an unclosed `#{` (it ends at the first `<` after it, where markup resumes), rule `{`, string, `/* */` comment, `(` or `url(`; a declaration with no `:` or no value; a property that is not a property name; a `;` missing between two declarations (the span is the empty span where the `;` goes); an unparseable selector — an unknown pseudo-class / pseudo-element, an unparseable `:is()` / `:where()` / `:not()` / `:has()` argument, an element name that does not start with a letter; a stray `@`; a `}` directly after the block (only whitespace between); a malformed `@charset` / `@import`; a `${…}` anywhere in the block (§9.1: never allowed). **Bootstrap only:** emitted at `compiler/self-host-v2/css-syntax.scrml` (`parseCssBlock`, via `parse.scrml` `parseCssNode`); impl#1 does not emit it — it passes malformed CSS through to its stylesheet (carried, §34.0 S440 #12). (Added s469-boot-css; ruled ruling:user-voice-scrml.md S469 "⭐ RULED — `#{}` CSS on the bootstrap" (scrml-support `f487d21`).) | Error |
 | E-STYLE-001 | §9 | `<style>` element in scrml source. scrml does not admit `<style>` at all — CSS lives in `#{...}` (§9 / §26). The symmetric twin of `<script>` → `E-SCRIPT-001` (§4.17): both are element-level rejections at the **block-splitter** level, both recover by scanning past the matching close tag (case-insensitive) or to EOF so the rejected body does not cascade. Tag-name match is EXACT, not a prefix. Recovery hint: `scrml compile --convert-legacy-css` auto-converts a legacy `<style>` body to `#{}`. **Source-side only:** the check fires only on a `<style>` element in the source; the compiler's downstream CSS emission (`.css` file + `<link>`) is produced after the block splitter and is never subject to it. (Row corrected S279 — the prior "CSS: syntax error in `#{}` style block" text was stale residue that mis-described the diagnostic; `E-STYLE-001` has only ever been emitted for the `<style>` element, at `compiler/src/block-splitter.js`, and the §4 prose + the `E-SCRIPT-001` row both already describe it as the element rejection.) S462: rejected at EVERY position markup is parsed or built, raw content included (§4.17 S462 amendment). | Error |
 | E-TEST-001 | §~ | `~{}` test block: assertion failed | Test |
 | E-TEST-002 | §~ | `~{}` test block: unexpected error during execution | Test |
@@ -47749,6 +47757,8 @@ Flat specificity is *emitted* by wrapping author selectors in `:where()` so ever
 - The compiler SHALL emit `:where()`, **never** `:is()`, for flat wrapping (`:is()` spikes to its most-specific argument — `:is(#id, .c)` → `1-0-0`), and SHALL NOT fold an id-bearing selector into an `:is()` list.
 - Pseudo-element rules (`::before`/`::after`) are emitted **unwrapped** — `:where(::before)` matches nothing, and a bare pseudo-element already carries `(0,0,0)`, so no specificity is added.
 - The compiler SHALL **validate author selectors and fail loud** — it MUST NOT rely on `:where()`/`:is()`'s forgiving-list behavior (they silently drop an unparseable selector). scrml already parses author selectors for the conflict-checker; an unparseable selector is a compile error, never a silent drop.
+- **Any malformed `#{}` block is `E-CSS-SYNTAX`** — not only a selector: a bad declaration (no `:`, no value, a property that is not a name, a missing `;`), an unclosed block, rule, string, comment, `(` or `url(`, a stray `@` or `}`, a malformed `@charset` / `@import`, a `${…}` (§9.1), and any `<` anywhere in the block — in a string, a comment or a `url(…)` too (nothing is skipped: the raw text of the block is what is checked).
+  > **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — `#{}` CSS on the bootstrap" (scrml-support `f487d21`) — item 1 (*"Any malformed block errors"*), extending this section's selector rule. **Direction of change:** newly-rejecting.
 
 #### 65.2.6 The `--explain-style` DX complement (not the resolution rule)
 
@@ -47835,7 +47845,7 @@ The flat-declaration `#{}`→`style=""` emission path runs the **identical §65.
 | `style=[a, b]` | a **list** → ordered composition, last-in-list wins (§65.4.4) |
 | `style=@expr` | a **reactive** binding → the applied style-value re-evaluates on `@expr` change |
 
-`style=<expr>` where `<expr>` is neither a quoted string literal nor a `style`-typed value/list SHALL emit `E-STYLE-VALUE-NOT-STYLE`. Dynamic raw CSS is **only** the quoted-literal form — you cannot apply an arbitrary runtime string as a style-value (that would reopen the injection surface).
+`style=<expr>` where `<expr>` is neither a quoted string literal nor a `style`-typed value/list SHALL emit `E-STYLE-VALUE-NOT-STYLE`. Dynamic raw CSS is **only** the quoted-literal form — you cannot apply an arbitrary runtime string as a style-value (that would reopen the injection surface). For the same reason a `${…}` inside a `#{}` block is never allowed (`E-CSS-SYNTAX`, §9.1; ruled S469).
 
 #### 65.4.3 FLAT-single-element scope; `E-STYLE-VALUE-DESCENDANT`
 
@@ -48063,7 +48073,7 @@ Corpus reality (verified 2026-07-07): **83 of ~1650 `.scrml` files use `#{}` (18
 |---|---|---|
 | §9.1 scoped component `#{}` (`@scope`, donut, no mangling) | **KEPT unchanged** in emission (§A). The conflict-checker (§65.2) is *added on top* — new diagnostics only. | ~0 emission. Some components may trip `E-STYLE-CONFLICT` on genuine unconditional overlaps — those are *today-bugs*; surfacing them is the point. (Wave-1 corpus dry-run quantifies — §65.11.) |
 | §9.1 flat-declaration `#{}` → inline `style=""` | **REFRAMED** as anonymous style-values (§65.4.1). Emission unchanged. | 0 (conceptual only). |
-| §25 CSS vars (`name = value` / `prop: name fb`) | **KEPT** as the raw custom-property layer (§B). `<theme>` tokens are the new blessed named-value channel and lower to §25 custom properties. | 0; `<theme>` is opt-in additive. |
+| §25 CSS vars (`name = value`; the ~~`prop: name fb`~~ use-site form is retired, §25.3 — S469) | **KEPT** as the raw custom-property layer (§B). `<theme>` tokens are the new blessed named-value channel and lower to §25 custom properties. | 0; `<theme>` is opt-in additive. |
 | §26 Tailwind + variants + `prose` (§26.6) + §26.7 composing + §26.8 `@apply` | **KEPT** as the `utilities` bottom layer (§65.8). `@apply` still composes utilities into an author-layer class. | 0. |
 | Program-level global `#{}` selector CSS | **KEPT** (escape hatch) but *discouraged* in favor of `<defaults>` + `<theme>`; gets only the soft `W-STYLE-CONFLICT-POSSIBLE` (unbounded scope — §65.2.4). | 0 forced; nudge only (OQ-8). |
 | Corpus `<theme>` / `<base>` **state-cell** names (verified live — the §65.9 collision) | `<theme>` is RECLAIMED as the structural element (§65.9); the handful of corpus cells migrate to a different cell name. `<base>` cells are unaffected (`<base>` is NOT reclaimed — element-defaults are `<defaults>`). | Small, bounded — a rename of the handful of `<theme>` cells (Rule 2 migration backlog). |

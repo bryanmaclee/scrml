@@ -17,7 +17,16 @@ ${
         // s468 — a `<pre>` / `<code>` raw-content body (SPEC §4.17, Core View.RawText)
         HRawText(text: string),
         HComment(text: string),
+        // s469 — the text of a `<style>` element: a stylesheet (css.scrml), printed
+        // VERBATIM — `<style>` is a raw-text element, where an entity is not
+        // decoded, so `>` / `&` must stay as written. The one character that can
+        // end the element, `<` (`</style`), is re-encoded as the CSS escape
+        // `\3c ` (the bootstrap's CSS reader already refuses every `<`, so this
+        // is the second wall, never the first).
+        HStyle(text: string),
     }
+
+    export fn escStyleText(s: string) -> string { return s.replaceAll("<", "\\3c ") }
 
     export fn escText(s: string) -> string {
         const a: string = s.replaceAll("&", "&amp;")
@@ -90,6 +99,7 @@ ${
             .HText(text: t) :> escText(t)
             .HRawText(text: t) :> escRawText(t)
             .HComment(text: t) :> "<!--" + t + "-->"
+            .HStyle(text: t) :> escStyleText(t)
         }
     }
 

@@ -4,7 +4,7 @@
 
 This tutorial walks you from an empty directory to a small but complete scrml app: a counter that persists to SQLite, a signup form with declarative validation, an engine-driven state machine, and a real-time channel. It teaches **today's ruled scrml**, the language the specification (`compiler/SPEC.md`) defines and the scrml-native **bootstrap** compiler (`compiler/self-host-v2/`) implements. Every complete program in it is a file in `docs/tutorial-snippets/` that CI compiles with the bootstrap on every push, and CI also checks that the copy printed here is identical to that file (the `<!-- snippet: ... -->` line above each one names it). Shorter excerpts are marked as excerpts or fragments in the text.
 
-**Spec-ahead programs.** The bootstrap does not build the whole language yet. A program that uses a feature it cannot compile yet — a `<schema>`, a `<channel>`, a `#{}` style block, the `<match>` element — is still written in the ruled dialect, and is marked **spec-ahead** in this file's source (`<!-- gate: spec-ahead — … -->`, invisible when rendered), naming what is missing. CI still compiles it with the bootstrap, expects it to fail for now, and says so the day it starts compiling. Each section below says which of its programs the bootstrap compiles today. `docs/DIALECT.md` explains the markers.
+**Spec-ahead programs.** The bootstrap does not build the whole language yet. A program that uses a feature it cannot compile yet — a `<schema>`, a `<channel>`, the `<match>` element — is still written in the ruled dialect, and is marked **spec-ahead** in this file's source (`<!-- gate: spec-ahead — … -->`, invisible when rendered), naming what is missing. CI still compiles it with the bootstrap, expects it to fail for now, and says so the day it starts compiling. Each section below says which of its programs the bootstrap compiles today. `docs/DIALECT.md` explains the markers.
 
 **Audience.** You have written some JavaScript or TypeScript and used at least one reactive framework (React, Svelte, Vue, Solid). You have a passing familiarity with HTML and SQL. You do not need to know anything about scrml before reading this.
 
@@ -237,7 +237,6 @@ The one rule that distinguishes server functions from client functions is that *
 
 scrml has two styling tools, used together or apart depending on taste.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap has no #{} style blocks yet -->
 <!-- snippet: docs/tutorial-snippets/02c-styles.scrml -->
 ```scrml
 // 02c-styles.scrml — a #{} style block, placed just before the markup it styles.
@@ -270,6 +269,8 @@ scrml has two styling tools, used together or apart depending on taste.
 </program>
 ```
 
+The bootstrap compiles this program today.
+
 A `#{ ... }` block holds plain CSS. Where it sits decides its reach:
 
 - **At program level** (as above), the CSS is **global** — it applies to the whole page, like an ordinary stylesheet. That is why the example scopes its button rule with `.card button` rather than a bare `button`.
@@ -297,7 +298,7 @@ Pick `#{}` for one-off bespoke styling, Tailwind for shared design-system utilit
 
 The next step beyond a counter is a list. Here is a small todo app — keep the data in memory for now (§10 shows a list backed by SQL):
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-EXPR] — the bootstrap has no #{} style blocks, no class: binding, and no value-form for/lift in markup yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-EXPR] — the bootstrap has no class: binding and no value-form for/lift in markup yet -->
 <!-- snippet: docs/tutorial-snippets/03-todos.scrml -->
 ```scrml
 // 03-todos.scrml — in-memory todos: a tape, a component declaration, for/lift, bind:value.
@@ -1102,7 +1103,7 @@ What this does and does not give you:
 
 By now you have seen every primitive you need to build a working scrml app. Here they are collected in one real program — a small notes app — in the order they usually appear in a non-trivial scrml file:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG, E-SCOPE-001] — the bootstrap has no <schema>, <channel>, #{} style blocks or <match> block element, cannot construct a payload variant, and has no typed ?{} rows yet; ⚑ how untyped .all() rows become Note values is also open -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG, E-SCOPE-001] — the bootstrap has no <schema>, <channel> or <match> block element, cannot construct a payload variant, and has no typed ?{} rows yet; ⚑ how untyped .all() rows become Note values is also open -->
 <!-- snippet: docs/tutorial-snippets/10-all-together.scrml -->
 ```scrml
 // 10-all-together.scrml — the spine of a typical scrml program, in one file.

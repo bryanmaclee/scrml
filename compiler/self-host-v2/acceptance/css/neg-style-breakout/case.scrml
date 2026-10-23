@@ -1,0 +1,5 @@
+// Security: a `</style>` in a CSS string would end the page's <style> element.
+<program>
+    #{ p::before { content: "</style><script>window.pwned = 1</script>"; } }
+    <main><p>x</p></main>
+</program>

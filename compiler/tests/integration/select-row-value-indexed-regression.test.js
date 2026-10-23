@@ -3,8 +3,8 @@
  *
  * S103 Phase 3 select-row chip-away — integration regression. Verifies that
  * the value-indexed predicate-bind dispatch produces CORRECT DOM after a
- * select-row sequence (the OLD row's edit display flips off, the NEW row's
- * edit display flips on). Mirrors TodoMVC's `if=@editingId == todo.id`
+ * select-row sequence (the OLD row's edit span is removed, the NEW row's edit
+ * span is mounted — §17.1 render gate since S469, a display toggle before). Mirrors TodoMVC's `if=@editingId == todo.id`
  * shape.
  *
  * The risk this guards against: a subtle ordering bug in
@@ -82,7 +82,7 @@ describe("select-row value-indexed regression", () => {
     // transitions to/from valueKey regardless of predicate polarity); the
     // bind function recomputes truthiness internally. Both halves of the
     // TodoMVC select-row hot path now narrow to O(2) per write.
-    expect(clientJs).toMatch(/_scrml_cs_reactive_subscribe_when\("editingId",\s*item\.id/);
+    expect(clientJs.match(/_scrml_cs_reactive_subscribe_when\("editingId",\s*item\.id/g)?.length).toBe(2);
     // LEGACY _scrml_reactive_subscribe SHOULD NOT appear for editingId in
     // this fixture anymore — both bind shapes migrate.
     expect(clientJs).not.toMatch(/_scrml_reactive_subscribe\("editingId"/);
@@ -120,50 +120,52 @@ describe("select-row value-indexed regression", () => {
         const view = li.querySelector("span.view");
         const edit = li.querySelector("span.edit");
         out[id] = {
-          view: view ? view.style.display : null,
-          edit: edit ? edit.style.display : null,
+          view: view ? "on" : "off",
+          edit: edit ? "on" : "off",
         };
       }
       return out;
     }
 
     // Initial state: editingId = null. NO row is in edit mode.
-    // Display semantics: "" = visible (default), "none" = hidden.
+    // §17.1 (S469): `if=` is a render gate — "on" = the span is in the row, "off" = it
+    // is NOT in the DOM (a placeholder comment holds its place). It was a display
+    // toggle before S469 (the hidden span stayed in the row).
     let s = spans();
-    expect(s["1"].view).toBe("");      // view visible (1 != null)
-    expect(s["1"].edit).toBe("none");  // edit hidden (1 == null is false)
-    expect(s["2"].view).toBe("");
-    expect(s["2"].edit).toBe("none");
+    expect(s["1"].view).toBe("on");      // view visible (1 != null)
+    expect(s["1"].edit).toBe("off");  // edit hidden (1 == null is false)
+    expect(s["2"].view).toBe("on");
+    expect(s["2"].edit).toBe("off");
 
     // Select row 2 for editing.
     globalThis.__scrml_set__("editingId", 2);
     s = spans();
-    expect(s["1"].view).toBe("");      // row 1 unaffected
-    expect(s["1"].edit).toBe("none");
-    expect(s["2"].view).toBe("none");  // row 2 enters edit mode: view hides
-    expect(s["2"].edit).toBe("");      // row 2 enters edit mode: edit shows
-    expect(s["3"].view).toBe("");      // row 3 unaffected
-    expect(s["3"].edit).toBe("none");
+    expect(s["1"].view).toBe("on");      // row 1 unaffected
+    expect(s["1"].edit).toBe("off");
+    expect(s["2"].view).toBe("off");  // row 2 enters edit mode: view hides
+    expect(s["2"].edit).toBe("on");      // row 2 enters edit mode: edit shows
+    expect(s["3"].view).toBe("on");      // row 3 unaffected
+    expect(s["3"].edit).toBe("off");
 
     // Switch edit to row 3.
     globalThis.__scrml_set__("editingId", 3);
     s = spans();
-    expect(s["1"].view).toBe("");      // row 1 unaffected
-    expect(s["1"].edit).toBe("none");
-    expect(s["2"].view).toBe("");      // row 2 LEAVES edit mode: view back on
-    expect(s["2"].edit).toBe("none");  // row 2 edit hidden again
-    expect(s["3"].view).toBe("none");  // row 3 enters edit mode
-    expect(s["3"].edit).toBe("");
+    expect(s["1"].view).toBe("on");      // row 1 unaffected
+    expect(s["1"].edit).toBe("off");
+    expect(s["2"].view).toBe("on");      // row 2 LEAVES edit mode: view back on
+    expect(s["2"].edit).toBe("off");  // row 2 edit hidden again
+    expect(s["3"].view).toBe("off");  // row 3 enters edit mode
+    expect(s["3"].edit).toBe("on");
 
     // Clear edit (editingId = null).
     globalThis.__scrml_set__("editingId", null);
     s = spans();
-    expect(s["1"].view).toBe("");      // all rows back to view mode
-    expect(s["1"].edit).toBe("none");
-    expect(s["2"].view).toBe("");
-    expect(s["2"].edit).toBe("none");
-    expect(s["3"].view).toBe("");
-    expect(s["3"].edit).toBe("none");
+    expect(s["1"].view).toBe("on");      // all rows back to view mode
+    expect(s["1"].edit).toBe("off");
+    expect(s["2"].view).toBe("on");
+    expect(s["2"].edit).toBe("off");
+    expect(s["3"].view).toBe("on");
+    expect(s["3"].edit).toBe("off");
   });
 
   test("no-op write (editingId = X then = X) is idempotent", () => {
@@ -184,7 +186,7 @@ describe("select-row value-indexed regression", () => {
     globalThis.__scrml_set__("editingId", 2);
     globalThis.__scrml_set__("editingId", 2); // no-op
     const row2 = document.querySelector('li[data-id="2"]');
-    expect(row2.querySelector("span.edit").style.display).toBe("");
-    expect(row2.querySelector("span.view").style.display).toBe("none");
+    expect(row2.querySelector("span.edit")).not.toBeNull();
+    expect(row2.querySelector("span.view")).toBeNull();
   });
 });
