@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 264 | 4 |
-| MED | 668 | 7 |
-| LOW | 456 | 0 |
+| HIGH | 265 | 4 |
+| MED | 669 | 7 |
+| LOW | 462 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -89,6 +89,82 @@ Found in the #1468 r2 review. `let` on a sequence is E-GRANT-LET-ON-SEQUENCE: a 
 <!-- @gap id=g-bootstrap-whole-struct-write-bypasses-tape-field-grants-s469 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(wholeFieldWrite: the owner's `let` grants `replace` of the whole value; a struct-typed value's tape fields are not judged — fieldAtWrite judges only `@b.xs = …`) prov=review:#1468-r2(s469-bootstrap-parse-arms-union);ruling:user-voice-scrml.md(S469 "NO unconstrained sequence behaviour anywhere in the language", point (4), PA reading);empirical:S469(re-executed on 8ca23db90 — `whole()` clean, `part()` E-WRITE-NOT-GRANTED) -->
 
 SPEC §66.12.6 rule 4 (S469, point (4)): *"Spread-rebuild and other whole-value writes are classified as edits or a `replace` (§66.11.2, O37 = certify). They never get around the grants."* A whole-struct write that changes a tape field IS a `replace` of that field, so it must be judged against the field's own grants. Today the owner's `let` alone admits it, and the field-level refusal is bypassed by writing the whole struct. The PA reads the S469 ruling this way and has told bryan. Owed: in `wholeFieldWrite` (and the spread-override path), for a struct-typed target, classify each tape-typed field of the new value. An unchanged field (`xs: @b.xs`) or a spread that keeps it is no write; any other value is a `replace` of the field, refused unless the field's type grants `replace`.
+
+### g-nested-each-if-guard-dropped-s469 — (security) a NESTED `<each if=>` guard is silently dropped: `<each in=@xs as y><each in=@xs as x if=(@pw == "secret")>LOGGED IN</each></each>` renders the inner rows whatever the condition — `NEW S469 (final review of c2f7f9944; pre-existing); HIGH; open`
+
+<!-- @gap id=g-nested-each-if-guard-dropped-s469 sev=HIGH status=open locus=compiler/src/codegen/emit-each.ts(~1930-1990, the nested-each branch never reads innerNode.ifCond) prov=review:S469-c2f7f9944-final -->
+
+The top-level `<each>` lowers its `if=` (and the type system now walks it for failable calls). The nested branch of the each-render emitter builds the inner each without reading `innerNode.ifCond`, so the guard is lost. Any condition is silently true: an access check written as an `if=` renders protected rows. A separate fix is being dispatched.
+
+### g-derived-inline-match-arms-unscoped-s469 — the arm bodies of an inline `derived=match @x { … }` are not scope-checked: an undeclared name compiles, throws a ReferenceError when the arm runs, and leaves the engine state stale — `NEW S469 (final review of c2f7f9944); MED; open`
+
+<!-- @gap id=g-derived-inline-match-arms-unscoped-s469 sev=MED status=open locus=compiler/src/type-system.ts(engine-decl case: derivedExprNode is checked, inlineMatchBody arms are not) prov=review:S469-c2f7f9944-final -->
+
+The S469 round-3 scope check covers the `derived=<expr>` form only (`derivedExprNode`, including `derived=${ … }`). The inline-match form is checked for exhaustiveness (`checkDerivedEngineMatchExhaustiveness`) and for failable calls (the text-slot rule), but its arm bodies never reach `checkLogicExprIdents`.
+
+### g-engine-raw-body-names-unscoped-s469 — names in an engine raw body (a state-child / opener `effect=`, an `<onTransition>` body, a message arm) are not scope-checked: an undeclared `zzz()` in `effect=` compiles and throws at run time — `NEW S469 (final review of c2f7f9944); LOW; open`
+
+<!-- @gap id=g-engine-raw-body-names-unscoped-s469 sev=LOW status=open locus=compiler/src/type-system.ts(checkEngineRawBodies walk keeps only the §19.4.3 codes and E-SCOPE-001 for a late failable alias) prov=review:S469-c2f7f9944-final -->
+
+`checkEngineRawBodies` walks each body with the handler-context walk and keeps only E-ERROR-002 / E-IMPL1-FAILABLE-FN-VALUE (plus its own E-SCOPE-001 for a failable alias declared later). It discards the walk's scope diagnostics, because a body sees bindings the walk does not model: payload bindings, the engine variable, and names declared after the engine that run fine at transition time. Owed: model the body scope (payload bindings, engine vars, hoisted top-level declarations), then keep E-SCOPE-001.
+
+### g-engine-match-raw-body-failable-unwalked-s469 — (security) an engine or `<match>` body the compiler kept as RAW TEXT was never walked for failable calls: `<A rule=.B effect=${ @msg = check("wrong") ? "LOGGED IN" : "rejected" }>` compiled and a WRONG PASSWORD LOGGED IN — also the opener `effect=`, `<onTransition>` bodies and `if=` guards, `(state × message)` arms, `<onTimeout after=${…}>`, `:`-shorthand state / arm bodies, and a `match` on a failable call in a `<match>` arm (render or handler) — `NEW S469 (review); HIGH; RESOLVED S469`
+
+<!-- @gap id=g-engine-match-raw-body-failable-unwalked-s469 sev=HIGH status=resolved locus=compiler/src/engine-statechild-parser.ts(effect= brace counter)+compiler/src/type-system.ts(engine-decl / match-block cases)+compiler/src/codegen/emit-engine.ts(emitHookArm rewriteExpr of bodyRaw)+compiler/src/codegen/emit-match.ts(buildMatchArms re-parse) prov=spec:§19.4.3("Failing to handle the result of a `!` function call in any of these ways SHALL be a compile error: E-ERROR-002");review:S469-engine-effect;dispatch:s469-engine-effect-failable -->
+
+The engine body is kept as raw text (`rulesRaw`) and re-scanned by `engine-statechild-parser.ts`; the opener is scanned in ast-builder.js. Each `${` was bounded by a brace counter blind to strings, comments, templates and regular expressions. The type system never parsed any of these bodies. Codegen emitted them through the single-expression `rewriteExpr`, which also dropped every statement after the first, silently. `<match>` arms were lowered from codegen's own re-parse of the arm text, not from the `armBodyChildren` copy the walk stamped, so a `match` on a failable call in an arm compared the error object as a plain value. Measured on base `b75ad70f7` with the security-failable-pack family `n18` (45 shapes; filed as `n14` before the #1476 merge): 19 logged in on a wrong password. **RESOLVED S469** (branch `s469-engine-effect-failable`):
+- **One extent reader.** `interpolation-extent.ts` (after the #1476 merge, the ONE reader shared with `sliceTemplateText`) bounds a raw-text `${…}` block with acorn, under both the script goal and the module goal. Strings, comments, templates and regular expressions are read as JavaScript reads them. A block whose two readings disagree, or that holds an HTML-like comment, is unreadable. A block holding a markup value falls back to the block splitter's rule. The reader is used for every `${` in an engine opener: state-child `effect=`, `if=`, payload-binding values, opener end, inside-opener `:`, the closer-finders' skips, message-arm block bodies, and the engine opener `effect=`.
+- **One parse, walked and emitted.** `engine-body-reader.ts` parses each engine statement body once and caches it on its owner: state-child and opener `effect=`, `<onTransition>` body and guard, message arm, computed delay. A body the block splitter does not read as exactly one logic block is unreadable. `arm-body-reader.ts` does the same for `<match>` arm bodies (bare and `:`-shorthand) and engine `:`-shorthand state bodies. The type system walks these exact nodes: `checkEngineRawBodies` in the handler context, and `walkCodegenCopy` in render context. Codegen lowers the same nodes, so the walk's stamps reach the emitted code. Hook bodies now lower as statements (`emitLogicBody`).
+- **Fail closed.** An unreadable body is E-ERROR-002 in the type system, and codegen's floor refuses it as well; there is no raw-text fallback. A failable `match` in an expression slot lowered by `rewriteExpr` (a guard, a delay) is refused.
+- **Handled forms.** `check(p) !{…}`, and a `match` on the call, in an effect, an `<onTransition>` or an arm, were refused or silently wrong before. They now compile and discriminate the error.
+- **Text-lowered slots (review of 6e0770356, H1–H5).** These slots are lowered from their source text: the `<onTransition if=>` guard, the computed `<onTimeout>` / `<onIdle>` delay, a `derived=` expression or inline `match`, the structural `if=` on `<engine>` / `<match>`, and the `<match on=>` subject. A text lowering cannot honour a handler. The guard dropped `!{…}`, so `if=${ check(p) !{ _ :> false } }` emitted `if (check(p))` and a wrong password logged in. In such a slot a failable call (or `?{}`) is refused, handled or not (`failableNamedInText`, read lexically by acorn). A quoted guard (`if="false"`, which lowered to an always-true `if ("false")`) is E-COND-NOT-BOOLEAN.
+- **Walked floor.** The type system marks every body parse it walks. During a compile's codegen, a parse it never walked is refused rather than lowered (`bodyWasWalked`, set around the CG stage in api.js): a hook / effect / arm body, a guard, a delay, a `<match>` arm or a `:`-shorthand body.
+- **Live readers.** `native-walker/engine-statechild-walker.ts` is live for engine-decls that the native parser synthesizes. The text rescanner reads every engine of the per-file `buildAST` parse. Either way the body text goes through the one body parse.
+- **Round 3 (review of 5a88c3030).**
+  - **H1 — `<each>`.** The `<each>` opener `if=` is walked like any attribute value (E-ERROR-002). Its `!{}` form lowers correctly; a failable `match` there is refused, because the `if=` is lowered from text. `in=` / `of=` / `key=` are text slots.
+  - **H2 — late aliases.** Alias facts are hoisted file-wide: `hoistedFailableNames` judges every binding in the file with `failableFnValueOf`, to a fixpoint. A slot naming an alias declared after it is refused. An engine body that uses one is E-SCOPE-001 (a use before declaration), because the walk resolves names in document order.
+  - **M1 — unlexable text.** A text slot acorn cannot lex is refused outright.
+  - **L1 — one diagnostic.** A body the type system refused gets no second diagnostic from codegen (`markOwnerReported`).
+  - **L2.** The `derived=<expr>` expression is scope-checked, including `derived=${ … }`: the check reads the expression inside the wrapper and no longer reports "Undeclared identifier '$'". That form still does not lower (E-CODEGEN-INVALID-LOGIC on main and here). The inline `derived=match` arm bodies are NOT scope-checked (`g-derived-inline-match-arms-unscoped-s469`), and neither are names in engine raw bodies (`g-engine-raw-body-names-unscoped-s469`). The timer fix is under `g-ontimeout-after-brace-loses-timer-s469`.
+  - **Over-approximation wording.** A name bound to a failable function anywhere in the file counts in every slot, whatever scope it is bound in. The E-SCOPE-001 / E-ERROR-002 messages now say so ("this file binds a 'g' to a failable function … here or in another scope"). They no longer say "declare it above the engine" when it already is.
+
+Pack: n18 goes from base 3 PASS / 14 PASS-REFUSED / 9 PASS-DENY / **19 FAIL** to 11 / 31 / 3 / **0**. Corpus (`scripts/corpus-emit-differential.ts` over samples / examples / compiler/tests/fixtures / stdlib, base = archive of `b75ad70f7`): 1047 sources on both sides, 0 compile-outcome or diagnostic changes, and no artifact differs except for the embedded project-root path. Browser suite: per-test JUnit identical to main. Pins: `compiler/tests/unit/s469-engine-raw-body-failable.test.js` and the pack.
+
+### g-engine-in-match-arm-emits-nothing-s469 — an `<engine>` written inside a `<match>` arm body compiles clean and emits nothing: no transition table, no variant cell, no rendered arm — `NEW S469 (review of 6e0770356); LOW; open`
+
+<!-- @gap id=g-engine-in-match-arm-emits-nothing-s469 sev=LOW status=open locus=compiler/src/arm-body-reader.ts(native re-parse of the arm)+compiler/src/symbol-table.ts(PASS 10.A never registers an engine-decl from the arm re-parse) prov=review:S469-6e0770356 -->
+
+The arm body is re-parsed by the native parser (arm-body-reader `readBareArmBody`), which synthesizes an engine-decl (`synthEngineDecl`). That engine-decl never reaches SYM's engine registration, so it has no `engineMeta` and no codegen. Its bodies are not run, so this is no failable hole. It is a silent drop: refuse the form or support it.
+
+### g-state-child-duplicate-attr-dropped-s469 — a second `effect=` (or a `class=${…}`) on an engine state-child opener is dropped silently: only the first `effect=` is captured — `NEW S469 (review of 6e0770356); LOW; open`
+
+<!-- @gap id=g-state-child-duplicate-attr-dropped-s469 sev=LOW status=open locus=compiler/src/engine-statechild-parser.ts(effect= capture reads the first match) prov=review:S469-6e0770356 -->
+
+The dropped text is never emitted, so it is not walked-vs-emitted divergence. It should be a refusal (a duplicate reserved attribute) instead of a silent drop.
+
+### g-shorthand-match-in-component-body-dropped-s469 — a `<match>` whose arms use the `:`-shorthand, written inside a component body, renders nothing — `NEW S469 (review of 6e0770356); LOW; open`
+
+<!-- @gap id=g-shorthand-match-in-component-body-dropped-s469 sev=LOW status=open locus=compiler/src/component-expander.ts(+ codegen/emit-match.ts buildMatchArms) prov=review:S469-6e0770356 -->
+
+Silent drop (no output, no diagnostic). It is not a failable hole: the dropped arm body is never emitted.
+
+### g-ontimeout-after-brace-loses-timer-s469 — a `}` or `!{` inside an `<onTimeout after=${…}>` (or `<onIdle>`) delay drops the timer silently: the `after=` value is captured by a regex that stops early, `parseAfterDuration` returns `invalid`, and codegen skips the entry — `NEW S469 (review of 6e0770356); LOW; RESOLVED S469`
+
+<!-- @gap id=g-ontimeout-after-brace-loses-timer-s469 sev=LOW status=resolved locus=compiler/src/engine-statechild-parser.ts(scanForOnTimeoutEntries / scanForOnIdleEntries after= regex) prov=review:S469-6e0770356;pack:n18 "delay handled" (PASS-DENY) -->
+
+The timer never armed, so for failable calls it failed closed. **RESOLVED S469** (review of 5a88c3030, L2). `timerOpeners` (engine-statechild-parser.ts) ends the opener with `findOpenerEnd`, whose `${…}` is bounded by acorn; the old `[^>]*?\/>` regex lost a timer on `=>` / `:>`. `after=` is read by `parseOpenerAttributes`. `parseAfterDuration` bounds the computed form with `logicBlockClose`. An `after=` that is still not a duration is **E-ENGINE-021** (§51.0.M) in the type system; before, codegen skipped it with no diagnostic.
+
+### g-effect-body-brace-in-markup-text-warning-s469 — a `{` inside an engine `effect=${…}` body is reported by the markup-text lint as a stray brace in text (a false warning): the block splitter's markup scan reads the opener's attribute region as text — `NEW S469 (review of 6e0770356); LOW; open`
+
+<!-- @gap id=g-effect-body-brace-in-markup-text-warning-s469 sev=LOW status=open locus=compiler/src/block-splitter.js(engine body attribute region) prov=review:S469-6e0770356 -->
+
+Warning only; no behaviour change.
+
+### g-engine-direct-ontransition-one-sided-dropped-s469 — an engine-direct `<onTransition to=.B>` (no `from=`) is silently dropped by codegen: no hook fires and no diagnostic is reported (`collectEngineHooks` "defensive skip") — `NEW S469 (s469-engine-effect-failable probe); LOW; open`
+
+<!-- @gap id=g-engine-direct-ontransition-one-sided-dropped-s469 sev=LOW status=open locus=compiler/src/codegen/emit-engine.ts(collectEngineHooks — engine-direct entries need both endpoints) prov=empirical:security-failable-pack n14 "onTransition direct to ternary" (PASS-DENY "init" on main) -->
+
+Found while probing `<onTransition>` bodies. Inside a state-child, the enclosing state supplies the missing endpoint. Directly in the engine body nothing does, so the entry is skipped with no E-ONTRANSITION-NO-TARGET-style refusal. The body is still walked for failable calls (it fails closed), but a body without one never runs. The fix is to refuse the one-sided engine-direct form (or define its meaning in §51.0.H).
 
 ### g-bootstrap-int-to-string-conversion-unruled-s469 — the BOOTSTRAP has no way to turn an int (or a number / bool) into a string: `"typed " + @n` is E-OPERATOR-OPERAND-TYPE (correctly, S440 Gotcha Q1), and no conversion spelling is ruled, so bryan's `"typed " + <conversion>(@inputVal.length) + " chars"` cannot be written — `NEW S469; MED; ruling-gated (owner fork)`
 
