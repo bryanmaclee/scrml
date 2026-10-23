@@ -89,11 +89,136 @@ async function clickAndRead(outDir, id, extraFiles = []) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// SIDE "nav" (S469 n23) — a soft navigation across a BUILD boundary.
+//
+// A shape is build A's shell (`shape.src`, written as app.scrml) plus `extra = { a, b, nav }`: build A's
+// other files, build B's files (B's app.scrml + routes), and how the tab navigates (`nav.via`: "call" =
+// `_scrml_navigate_soft`, "link" = a boosted `<a href>` click, "popstate" = back/forward; `nav.strip` =
+// serve B's page with its build identity removed). The two builds are compiled SEPARATELY (ids restart
+// per compile — the collision under test). "wrong": mount A's page, soft-navigate to `nav.to` serving B's
+// page and B's chunks, click `#wrong`, read `#out`. "right": mount A's page, click A's own `#right`.
+// The precondition — B's `#wrong` region carries a delegated id A's page also carries — is asserted, so a
+// fixture that stops colliding reads UNJUDGED rather than a vacuous PASS.
+// ---------------------------------------------------------------------------
+
+function compileBuild(dir, files) {
+  mkdirSync(join(dir, "pages"), { recursive: true });
+  // A project marker keeps the chunk tokens project-relative (two builds, one layout).
+  writeFileSync(join(dir, "scrml.toml"), "");
+  for (const [f, s] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, f)), { recursive: true });
+    writeFileSync(join(dir, f), s);
+  }
+  const out = join(dir, "dist");
+  const res = compileScrml({ inputFiles: Object.keys(files).map((f) => join(dir, f)), write: true, outputDir: out, log: () => {} });
+  const errs = (res.errors ?? []).filter((e) => e.severity !== "warning" && e.severity !== "info" && !/^[WI]-/.test(e.code ?? ""));
+  const read = (rel) => (existsSync(join(out, rel)) ? readFileSync(join(out, rel), "utf8") : null);
+  return { errs, read };
+}
+
+async function navClickAndRead(A, B, nav, id) {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+  GlobalRegistrator.register({
+    url: "http://localhost/",
+    settings: { disableJavaScriptFileLoading: true, disableCSSFileLoading: true, handleDisabledFileLoadingAsSuccess: true },
+  });
+  const realFetch = globalThis.fetch;
+  const oe = console.error;
+  const oi = console.info;
+  try {
+    const page = A.read("app.html");
+    const runtime = A.read((/src="(scrml-runtime\.[^"]+\.js)"/.exec(page) || [])[1] ?? "");
+    // The live document as served: <html> attributes (the build identity) + body markup.
+    const open = /<html\b([^>]*)>/i.exec(page);
+    for (const a of (open ? open[1] : "").matchAll(/([\w:-]+)(?:="([^"]*)")?/g)) document.documentElement.setAttribute(a[1], a[2] ?? "");
+    const m = page.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+    document.body.innerHTML = (m ? m[1] : page).replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
+    document.head.innerHTML = '<script src="app.client.js"></script>';
+    console.error = () => {};
+    console.info = () => {};
+    // Runtime + A's chunk + a loader closure in ONE scope (classic scripts share one global env).
+    (0, eval)(`${runtime}\n${A.read("app.client.js")}\nglobalThis.__scrml_pack_load = function (__src) { eval(__src); };`);
+    const hard = [];
+    globalThis._scrml_navigate = (p) => { hard.push(p); };
+    document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+    await settle();
+    if (id === "wrong") {
+      // Serve B: the page at nav.to and B's chunks for any script the soft nav injects.
+      const routeName = nav.to.replace(/^\//, "") || "app";
+      let bPage = B.read(`${routeName}.html`) ?? "";
+      if (nav.strip) bPage = bPage.replace(/\s+data-scrml-build="[^"]*"/, "");
+      globalThis.fetch = (input) => {
+        const p = typeof input === "string" ? input : input?.url ?? "";
+        return p === nav.to
+          ? Promise.resolve({ ok: true, status: 200, redirected: false, url: p, text: async () => bPage })
+          : Promise.reject(Object.assign(new Error("network"), { name: "TypeError" }));
+      };
+      const head = document.head;
+      const append = head.appendChild.bind(head);
+      head.appendChild = (node) => {
+        const src = node?.getAttribute?.("src");
+        if (String(node?.tagName).toLowerCase() !== "script" || !src) return append(node);
+        setTimeout(() => {
+          const js = B.read(src.split("/").pop());
+          if (js == null) { node.onerror?.(); return; }
+          try { globalThis.__scrml_pack_load(js); node.onload?.(); } catch { node.onerror?.(); }
+        }, 0);
+        return node;
+      };
+      if (nav.via === "link") {
+        document.querySelector(`a[href="${nav.to}"]`)?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+      } else if (nav.via === "popstate") {
+        globalThis._scrml_navigate_soft("#top"); // an in-page nav: wires the popstate handler, no fetch
+        history.pushState({}, "", nav.to);
+        window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+      } else {
+        globalThis._scrml_navigate_soft(nav.to);
+      }
+      await settle();
+      await settle();
+    }
+    const b = document.querySelector("#" + id);
+    if (b) {
+      if (nav.event === "submit") b.closest("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      else b.dispatchEvent(new Event("click", { bubbles: true }));
+      await settle();
+    }
+    return { text: document.querySelector("#out")?.textContent ?? null, swapped: !!document.querySelector("#wrong"), hard };
+  } finally {
+    globalThis.fetch = realFetch;
+    console.error = oe;
+    console.info = oi;
+    delete globalThis.__scrml_pack_load;
+    await GlobalRegistrator.unregister();
+  }
+}
+
+async function runNavShape(shape, dir) {
+  const { a, b, nav } = shape.extra ?? {};
+  const A = compileBuild(join(dir, "a"), { "app.scrml": shape.src, ...(a ?? {}) });
+  const B = compileBuild(join(dir, "b"), b ?? {});
+  const errs = [...A.errs, ...B.errs];
+  if (errs.length > 0) return { cls: "PASS-REFUSED", detail: [...new Set(errs.map((e) => e.code))].join(",") };
+  // Precondition: B's #wrong carries a delegated id that A's page also carries.
+  const ev = nav.event ?? "click";
+  const idsOf = (html) => new Set([...String(html ?? "").matchAll(new RegExp(`data-scrml-bind-on${ev}="([^"]+)"`, "g"))].map((x) => x[1]));
+  const aIds = idsOf(A.read("app.html"));
+  const bIds = [...idsOf(B.read(`${nav.to.replace(/^\//, "")}.html`))];
+  if (!bIds.some((x) => aIds.has(x))) return { cls: "UNJUDGED", detail: `no ${ev} id collision between the builds` };
+  const wrong = await navClickAndRead(A, B, nav, "wrong");
+  const right = await navClickAndRead(A, B, nav, "right");
+  const detail = `wrong->${JSON.stringify(wrong.text)} (${wrong.swapped ? "swapped" : "not swapped"}, hard-nav ${JSON.stringify(wrong.hard)}) right->${JSON.stringify(right.text)}`;
+  if (wrong.text === "LOGGED IN") return { cls: "FAIL", detail };
+  return { cls: right.text === "LOGGED IN" ? "PASS" : "PASS-DENY", detail };
+}
+
 /**
  * Compile one shape into `dir` and classify it.
  * @returns {{ cls: string, detail: string }}
  */
 export async function runShape(shape, side, dir) {
+  if (side === "nav") return runNavShape(shape, dir);
   mkdirSync(dir, { recursive: true });
   const input = resolve(dir, "app.scrml");
   writeFileSync(input, shape.src);
