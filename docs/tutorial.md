@@ -107,7 +107,7 @@ Three things are happening here, and they are the load-bearing rules of the lang
 
 2. **`@count` reads or writes the cell.** The `@` sigil marks every state touch in an expression — read in `${@count}`, read on the right of `=`, write on the left. Bare `count` (no `<>` or `@`) is a LOCAL identifier, never reactive state.
 
-3. **`onclick=inc()` is a bare call expression.** The handler is a function call, not a string. Parentheses are mandatory; arguments work as you would expect (`onclick=remove(item.id)`). A handler that does more than one thing can be written inline in braces — `onclick={ @count = 0; @step = 1; }` (§3.4).
+3. **`onclick=inc()` is a bare call expression.** The handler is a function call, not a string: `inc` is called with no arguments each time the event fires, and arguments work as you would expect (`onclick=remove(item.id)`). Without parentheses, `onclick=inc` makes `inc` itself the listener, called with the event object. A handler that does more than one thing can be written inline in braces — `onclick={ @count = 0; @step = 1; }` (§3.4).
 
 The asymmetry between `<count>` for declaration and `@count` for expression access is deliberate. It makes every state touch visually distinguishable from local-variable touch — you can scan a function body and count "how many state cells does this function read or mutate" at a glance. This is load-bearing for both human readability and the compiler's static analysis.
 
@@ -157,7 +157,7 @@ The bootstrap compiles this program today.
 
 A counter in memory is gone the moment you refresh the page. Let's persist it. scrml has a built-in database layer — no `npm install better-sqlite3`, no Prisma, no schema files in a separate directory. You name the database file with `db=` on `<program>`, declare its shape in a `<schema>` block (a direct child of `<program>`), and write parameterized SQL with `?{}`:
 
-<!-- gate: spec-ahead — the bootstrap has no <schema>, no pending cells ((not to T), §13.9) and no typed ?{} rows yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-ATTR, E-PARSE-ITEM, E-PARSE-SHORTHAND, E-PARSE-TAG, E-PARSE-TYPE, E-TYPE-UNKNOWN] — the bootstrap has no <schema>, no pending cells ((not to T) in an opener, §13.9) and no typed ?{} rows yet -->
 <!-- snippet: docs/tutorial-snippets/02b-counter-persisted.scrml -->
 ```scrml
 // 02b-counter-persisted.scrml — counter that survives a refresh.
@@ -237,7 +237,7 @@ The one rule that distinguishes server functions from client functions is that *
 
 scrml has two styling tools, used together or apart depending on taste.
 
-<!-- gate: spec-ahead — the bootstrap has no #{} style blocks yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap has no #{} style blocks yet -->
 <!-- snippet: docs/tutorial-snippets/02c-styles.scrml -->
 ```scrml
 // 02c-styles.scrml — a #{} style block, placed just before the markup it styles.
@@ -297,7 +297,7 @@ Pick `#{}` for one-off bespoke styling, Tailwind for shared design-system utilit
 
 The next step beyond a counter is a list. Here is a small todo app — keep the data in memory for now (§10 shows a list backed by SQL):
 
-<!-- gate: spec-ahead — the bootstrap has no #{} style blocks, no class: binding, and no value-form for/lift in markup yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-EXPR] — the bootstrap has no #{} style blocks, no class: binding, and no value-form for/lift in markup yet -->
 <!-- snippet: docs/tutorial-snippets/03-todos.scrml -->
 ```scrml
 // 03-todos.scrml — in-memory todos: a tape, a component declaration, for/lift, bind:value.
@@ -375,7 +375,7 @@ type Todo:struct = { id: int, body: string, done: bool }
 <items:Todo[free, append, remove, writable]=[]/>
 ```
 
-A tape's type says what may change about it, in brackets after the element type: `Todo[free, append, remove, writable]` reads "free length; may grow at the end; may shrink anywhere; positions may be rewritten". Nothing else is allowed — a tape with no grants is immutable. The methods are named after the grants: `.append(x)` / `.pop()` at the end, `.prepend(x)` / `.shift()` at the front, `.insert(i, x)` / `.remove(i)` anywhere. JavaScript's `push`, `unshift` and `splice` are refused (`E-TAPE-JS-METHOD`, whose fix-it names the scrml method). Whole-value writes are checked the same way: `@items = @items.filter(…)` is a shrink (granted by `remove`) and `@items = @items.map(…)` rewrites positions (granted by `writable`); a write the type does not grant is `E-WRITE-NOT-GRANTED`.
+A tape's type says what may change about it, in brackets after the element type (the grant names `append` / `pop` / `prepend` / `shift` / `insert` / `remove` are ruled; the bracket form and the `free` / `writable` / `replace` tokens are **provisional**, SPEC ⚑ O10): `Todo[free, append, remove, writable]` reads "free length; may grow at the end; may shrink anywhere; positions may be rewritten". Nothing else is allowed — a tape with no grants is immutable. The methods are named after the grants: `.append(x)` / `.pop()` at the end, `.prepend(x)` / `.shift()` at the front, `.insert(i, x)` / `.remove(i)` anywhere. JavaScript's `push`, `unshift` and `splice` are refused (`E-TAPE-JS-METHOD`, whose fix-it names the scrml method). Whole-value writes are checked the same way: `@items = @items.filter(…)` is a shrink (granted by `remove`) and `@items = @items.map(…)` rewrites positions (granted by `writable`); a write the type does not grant is `E-WRITE-NOT-GRANTED`.
 
 Function parameters are always typed — `function toggle(id: int)` — and a lambda's parameter (`t => …`) takes its type from the tape it is called on. `flipped(t)` builds the new record in a typed local (`let out: Todo = { … };`) so the object literal has a struct type to check against.
 
@@ -485,7 +485,7 @@ This is correct scrml. It is also a candidate for promotion: as soon as you reac
 
 The first commitment step is to name the screen's phases as an enum and dispatch on it with `match`:
 
-<!-- gate: spec-ahead — the bootstrap has no <match> block element and cannot construct a payload variant (LoadPhase.Loaded(42)) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG] — the bootstrap has no <match> block element and cannot construct a payload variant (LoadPhase.Loaded(42)) yet -->
 <!-- snippet: docs/tutorial-snippets/04a-tier1-match.scrml -->
 ```scrml
 // 04a-tier1-match.scrml — Tier 1: an enum, and <match> to dispatch on it.
@@ -553,7 +553,7 @@ Three things are new:
 
 The full engine surface adds two concepts to the Tier-1 shape: a `rule=` attribute on each state-child declaring legal transitions out, and `<onTransition>` blocks for cross-state effects. An engine is a **`single` declaration** of the enum type — one shared instance, whose state-children carry the transition graph — declared at program level like any other declaration. State-children may hold markup directly (it renders wherever the engine is rendered, `<*loadPhase/>`); for the introductory shape below they have no bodies and the variants are rendered by a `<match>` block, since that carries forward verbatim from Tier 1.
 
-<!-- gate: spec-ahead — the bootstrap has no <match> block element and cannot construct a payload variant (LoadPhase.Loaded(42)) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG] — the bootstrap has no <match> block element and cannot construct a payload variant (LoadPhase.Loaded(42)) yet -->
 <!-- snippet: docs/tutorial-snippets/04b-tier2-engine.scrml -->
 ```scrml
 // 04b-tier2-engine.scrml — Tier 2: an engine — a `single` declaration with rule= contracts.
@@ -676,7 +676,7 @@ Validation in scrml is **declarative**, not imperative. You don't write a `valid
 
 Here is a signup form that exercises the full surface:
 
-<!-- gate: spec-ahead — the bootstrap has no <match> block element, and its validity surface does not evaluate eq(…), req on a bool, or this pattern(…) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-IMPORT-NOT-EXPORTED, E-SCOPE-001] — the bootstrap has no <match> block element and no scrml:auth stdlib, and its validity surface does not evaluate eq(…) or this pattern(…) yet -->
 <!-- snippet: docs/tutorial-snippets/05-signup-form.scrml -->
 ```scrml
 // 05-signup-form.scrml — declarative form with auto-synth validity surface.
@@ -691,6 +691,8 @@ Here is a signup form that exercises the full surface:
 //
 // `db=` is required because persistSignup() runs a `?{}` write (E-SQL-004,
 // §44.7): a `?{}` with no db= in any ancestor <program> has no connection.
+
+${ import { hashPassword } from "scrml:auth" }
 
 <program db="users.db">
 
@@ -711,7 +713,7 @@ Here is a signup form that exercises the full surface:
     renders <input type="password" bind:value=@password/>
     let <confirm:string="" req eq(@signup.password)/>
     renders <input type="password" bind:value=@confirm/>
-    let <agree:bool=false req/>
+    let <agree:bool=false eq(true)/>
     renders <input type="checkbox" bind:checked=@agree/>
   </>
   renders <form onsubmit=submit()>
@@ -724,7 +726,7 @@ Here is a signup form that exercises the full surface:
       <*agree/> I agree to the terms
       <errors of=@signup.agree/>
     </label>
-    <button type="submit" disabled=!@signup.isValid>Create account</button>
+    <button type="submit">Create account</button>
   </form>
 
   function submit() {
@@ -736,9 +738,11 @@ Here is a signup form that exercises the full surface:
     @signupPhase = .Done;
   }
 
-  // Runs on the server: the body touches a `?{}` SQL block.
+  // Runs on the server: the body touches a `?{}` SQL block. Only a hash of the
+  // password is stored — hashPassword (scrml:auth) is server-only.
   function persistSignup(name: string, email: string, password: string)! -> SqlError {
-    ?{`INSERT INTO users (name, email, password_hash) VALUES (${name}, ${email}, ${password})`}.run();
+    let hash = hashPassword(password);
+    ?{`INSERT INTO users (name, email, password_hash) VALUES (${name}, ${email}, ${hash})`}.run();
     return email;
   }
 
@@ -785,6 +789,8 @@ The compound has a `renders` too — the `<form>` — and the program shows the 
 
 The 14 universal-core validators are: `req`, `is given`, `length(rel)`, `pattern(regex)`, `min(n)`, `max(n)`, `gt(expr)`, `lt(expr)`, `gte(expr)`, `lte(expr)`, `eq(expr)`, `neq(expr)`, `oneOf([...])`, `notIn([...])`.
 
+`let <agree:bool=false eq(true)/>` is how a checkbox says "must be ticked": `req` on a `bool` only asks that the value is present, and `false` is present (§55.1), so it would never reject an unticked box.
+
 Cross-field validation falls out automatically. `let <confirm:string="" req eq(@signup.password)/>` reads as "confirm must equal password" — the compiler tracks the dependency and re-evaluates the validator whenever either cell changes. There is no special "cross-field" vocabulary.
 
 ### 5.4 The auto-synthesized validity surface
@@ -814,15 +820,15 @@ Error messages resolve through a four-level chain: inline override on the decl (
 
 The signup form is one state of a three-state engine (`Editing` → `Submitting` → `Done`). The engine owns the legal transitions; the `<match>` block renders the right markup for the current phase. This is the canonical Tier-2 idiom: the form's lifecycle (you can submit it, then you can't, then you're done) is a state machine, and the engine makes that explicit. When the save fails, `submit()`'s `!{}` handler moves the engine back to `.Editing` — an edge its `rule=(.Done | .Editing)` allows. The `Sign up another` button's inline block handler, `onclick={ @signupPhase = .Editing; }`, is the transition back.
 
-The `disabled=!@signup.isValid` on the submit button uses the `!` boolean-negation operator (§7) — same spelling as JavaScript's `!x`. (`not` is the absence value, not a negation operator.) Combined with the auto-synth surface, the button is automatically enabled or disabled based on whether every field passes its validators.
+The submit button needs no `disabled=` wiring: the compiler already blocks the form's submit while any validated field is invalid, before `onsubmit` runs (§55.17.3; `I-FORM-SUBMIT-GATED` names the fields), so `submit()`'s own `if (!@signup.isValid) { return; }` is a second line of defence, not the gate. The password is stored only as a hash: `hashPassword` comes from the `scrml:auth` standard module, and the server function calls it before the `INSERT`.
 
 ### 5.7 `reset(@cell)` — clearing form state
 
-To clear a form, call `reset(@signup)` — `reset` is a language keyword (no import needed). It re-evaluates each field's initializer, restoring the form to its initial state. Per-field reset works too: `reset(@signup.name)`. A `reset` is a whole-value write, so the field must be `let` (or its type must grant `replace`). Fragment:
+To clear a field, call `reset(@signup.name)` — `reset` is a language keyword (no import needed). It re-evaluates the field's initializer, restoring its initial value. A `reset` is a whole-value write — a `replace` — so it needs a `let` field (or a type that grants `replace`). The signup's fields are `let`, so each can be reset; the compound `<signup:struct>` itself is not, so `reset(@signup)` is `E-WRITE-NOT-GRANTED`. Fragment — a Clear button:
 
 <!-- gate: skip — fragment: @signup comes from the signup form above -->
 ```scrml
-<button type="button" onclick=reset(@signup)>Clear</button>
+<button type="button" onclick={ reset(@signup.name); reset(@signup.email); reset(@signup.password); reset(@signup.confirm); reset(@signup.agree); }>Clear</button>
 ```
 
 > **`reset` is a reserved identifier.** You cannot define `function reset() { ... }` — pick another name like `clearForm` or `restart` for local helpers.
@@ -833,7 +839,7 @@ To clear a form, call `reset(@signup)` — `reset` is a language keyword (no imp
 
 Some operations can fail: a network call, a database query, a parsing pass. scrml models errors as **enum variants** rather than thrown exceptions. A function that can fail is declared with `!` after its parameter list and an error type after the arrow. Callers handle each variant with a `!{ ... }` block.
 
-<!-- gate: spec-ahead — the bootstrap has no <schema> and no <match> block element, cannot construct a payload variant (Phase.Errored(…)), and does not evaluate this pattern(…) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG] — the bootstrap has no <schema> and no <match> block element, cannot construct a payload variant (Phase.Errored(…)), and does not evaluate this pattern(…) yet -->
 <!-- snippet: docs/tutorial-snippets/06-failable.scrml -->
 ```scrml
 // 06-failable.scrml — failable function with a typed error enum.
@@ -877,7 +883,7 @@ Some operations can fail: a network call, a database query, a parsing pass. scrm
   renders <form onsubmit=save()>
     <label>Name  <*name/>  <errors of=@newUser.name/></label>
     <label>Email <*email/> <errors of=@newUser.email/></label>
-    <button type="submit" disabled=!@newUser.isValid>Save</button>
+    <button type="submit">Save</button>
   </form>
 
   // Failable + server-escalated. The `!` after the param list marks the
@@ -994,7 +1000,7 @@ The bootstrap compiles this program today.
 
 Real-time sync over a WebSocket connection is built into the language as a `<channel>` element. In an entry file (a file that declares `<program>`), the channel lives **inside** `<program>` as a sibling of `<page>` and the rest of the program body. State declared inside the channel body is auto-synced to every connected client:
 
-<!-- gate: spec-ahead — the bootstrap has no <channel> yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001] — the bootstrap has no <channel> yet -->
 <!-- snippet: docs/tutorial-snippets/07-channel-chat.scrml -->
 ```scrml
 // 07-channel-chat.scrml — chat room with shared state.
@@ -1052,7 +1058,7 @@ The compiler emits the WebSocket endpoint (`/_scrml_ws/chat` for this channel), 
 
 `auth="required"` on `<program>` puts every request behind a session check at the server: a request without a signed-in session is redirected to `/login`, and the compiler adds the same check to each server function the program exposes. Anything that must stay private to some users is decided **in a server function**, where the compiler provides a `session` object:
 
-<!-- gate: spec-ahead — the bootstrap has no auth= and no session yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-ERROR-013, E-SCOPE-001] — the bootstrap has no auth= and no session yet -->
 <!-- snippet: docs/tutorial-snippets/09-auth.scrml -->
 ```scrml
 // 09-auth.scrml — sign-in required; admin-only data decided on the server.
@@ -1096,7 +1102,7 @@ What this does and does not give you:
 
 By now you have seen every primitive you need to build a working scrml app. Here they are collected in one real program — a small notes app — in the order they usually appear in a non-trivial scrml file:
 
-<!-- gate: spec-ahead — the bootstrap has no <schema>, <channel>, #{} style blocks or <match> block element, cannot construct a payload variant, and has no typed ?{} rows yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG, E-SCOPE-001] — the bootstrap has no <schema>, <channel>, #{} style blocks or <match> block element, cannot construct a payload variant, and has no typed ?{} rows yet; ⚑ how untyped .all() rows become Note values is also open -->
 <!-- snippet: docs/tutorial-snippets/10-all-together.scrml -->
 ```scrml
 // 10-all-together.scrml — the spine of a typical scrml program, in one file.
@@ -1139,11 +1145,14 @@ By now you have seen every primitive you need to build a working scrml app. Here
   </>
   renders <form onsubmit=submit()>
     <*note/> <errors of=@draft.note/>
-    <button type="submit" disabled=!@draft.isValid>Save</button>
+    <button type="submit">Save</button>
   </form>
 
   // Server functions — they touch ?{}, so they run on the server.
   // They return data; they do not write @state.
+  // ⚑ OPEN: `.all()` returns untyped rows, and a `!` function cannot annotate its
+  // success type (§19.4.1) — how these rows become `Note` values (nominal structs) is
+  // not ruled yet. The shape below is the intent, not a settled rule.
   function loadNotes()! -> SqlError {
     return ?{`SELECT id, body FROM notes ORDER BY id`}.all();
   }
@@ -1163,7 +1172,7 @@ By now you have seen every primitive you need to build a working scrml app. Here
   // Client functions — call the server and own the @state writes
   function load() {
     @phase = .Loading;
-    @notes = loadNotes() !{
+    @notes = loadNotes() !{   // ⚑ OPEN: untyped rows into a Note[…] cell (see loadNotes)
       _ :> { @phase = Phase.Failed("Could not load notes."); return; },
     };
     @phase = .Loaded;
@@ -1264,7 +1273,7 @@ A fast reference for the keywords and sigils in this tutorial. Each line links b
 - **`<name attr:T/> renders <markup>`** — a component: a declaration with typed attributes and its markup. §3.3.
 - **`<signup:struct> let <field:T=… validators/> renders <input …/> </>`** — a compound with validated fields. §5.
 - **`<*name/>`** — render the existing instance (a field of this compound, or a `single` engine). §5.2, §4.3.
-- **`@form.isValid` / `@form.errors` / `@form.touched`** — auto-synth validity surface (read-only). §5.4.
+- **`@form.isValid` / `@form.errors` / `@form.touched`** — auto-synth validity surface (read-only); the compiler gates the form's submit on it. §5.4.
 - **`<errors of=expr/>`** — first-class error-rendering element. §5.5.
 - **`bind:value=@var`** — two-way binding on a form control. §3.4.
 - **`class:active=expr`** — conditional class attachment. §3.4.

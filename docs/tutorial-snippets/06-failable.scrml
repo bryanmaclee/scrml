@@ -39,7 +39,7 @@
   renders <form onsubmit=save()>
     <label>Name  <*name/>  <errors of=@newUser.name/></label>
     <label>Email <*email/> <errors of=@newUser.email/></label>
-    <button type="submit" disabled=!@newUser.isValid>Save</button>
+    <button type="submit">Save</button>
   </form>
 
   // Failable + server-escalated. The `!` after the param list marks the

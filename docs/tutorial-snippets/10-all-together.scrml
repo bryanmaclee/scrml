@@ -38,11 +38,14 @@
   </>
   renders <form onsubmit=submit()>
     <*note/> <errors of=@draft.note/>
-    <button type="submit" disabled=!@draft.isValid>Save</button>
+    <button type="submit">Save</button>
   </form>
 
   // Server functions — they touch ?{}, so they run on the server.
   // They return data; they do not write @state.
+  // ⚑ OPEN: `.all()` returns untyped rows, and a `!` function cannot annotate its
+  // success type (§19.4.1) — how these rows become `Note` values (nominal structs) is
+  // not ruled yet. The shape below is the intent, not a settled rule.
   function loadNotes()! -> SqlError {
     return ?{`SELECT id, body FROM notes ORDER BY id`}.all();
   }
@@ -62,7 +65,7 @@
   // Client functions — call the server and own the @state writes
   function load() {
     @phase = .Loading;
-    @notes = loadNotes() !{
+    @notes = loadNotes() !{   // ⚑ OPEN: untyped rows into a Note[…] cell (see loadNotes)
       _ :> { @phase = Phase.Failed("Could not load notes."); return; },
     };
     @phase = .Loaded;
