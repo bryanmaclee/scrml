@@ -16524,14 +16524,14 @@ The `if=` attribute is a structural conditional. Its value is a condition (§42.
 - `if=` means the same thing wherever the element sits, including inside an `<each>` row template at any
   depth (§17.1.2.3): the element is absent while `expr` is false, and `expr` is re-evaluated whenever
   anything it reads changes, in both directions. *(PA correction S469 — a guard is never fail-open; see
-  §17.1.2.3.)* **Exception, Tier-0 lifted markup (impl#1 today, not the intended semantics):** inside
-  `${ … lift … }` markup only ONE position is a real render gate — the SOLE root of a reconciled
-  `for … lift` row whose condition is not the value-indexed `@cell == expr` shape (lowered to the same
-  element⇄comment swap). Every other `if=` in lifted markup — an element NESTED inside the lifted root, the
-  root of a non-loop `if … lift`, one root of a multi-root lift row, and a value-indexed sole root — is a
-  `display: none` toggle: the element stays in the DOM while `expr` is false. This exception is a defect
-  pending [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]], not a license; it closes when the
-  lift lowering adopts the structural swap.
+  §17.1.2.3.)* The same holds inside Tier-0 lifted markup (`${ … lift … }`, and markup used as a value —
+  a function returning markup, a ternary arm) at every position: the root of a `for … lift` row, one root
+  of a multi-root row, an element nested at any depth, the root of a non-loop `if … lift` or bare `lift`.
+  A quoted condition there is the condition expression, as everywhere; an `if=` value the compiler cannot
+  lower there is **E-CG-003**, never an ungated render. *(S469 — until
+  [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]] closed, impl#1 lowered every lifted position
+  except the sole root of a reconciled `for … lift` row to a `display: none` toggle — the element stayed in
+  the DOM, its listeners reachable — and wrote a call or quoted `if=` value as a plain attribute, ungated.)*
 
 **Worked example:**
 ```scrml
@@ -16907,10 +16907,10 @@ element nested at any depth below a root, a nested `<each>`'s row, and an `<each
 > listed position was fail-open (a nested `<each if=>`, a `<match if=>`, a revoked nested / multi-root
 > markup `if=`) or fail-closed (a nested markup `if=` granted after row creation) before; impl#1 honours
 > all of them (emit-each.ts: `lowerRowScopedEachIfGate`, `emitRowGateEffectLines`, `_scrml_ifrow_apply`).
-> **Not covered here:** a markup `if=` inside Tier-0 lifted markup (`${ … lift … }`) — see the exception
-> in §17.1 (only the sole root of a reconciled `for … lift` row with a non-value-indexed condition is a
-> render gate on impl#1; the rest are `display` toggles), tracked as
-> [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]]. **And `<engine>` in a row:** an `<engine>`
+> A markup `if=` inside Tier-0 lifted markup (`${ … lift … }`) is honoured the same way (§17.1; S469,
+> [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]] — emit-lift.js `emitLiftIfGate`, the same
+> `_scrml_ifrow_apply` swap), and an `<each>` that is itself the lifted node is lowered as an `<each>`
+> (it was built as a literal `<each>` element). **And `<engine>` in a row:** an `<engine>`
 > inside an `<each>` row renders NOTHING on impl#1 today — no state body, `if=` or not, no diagnostic —
 > so it fails closed and "honoured" does not yet apply to it; whether an engine may sit in a row at all
 > (§51.0.A singleton) is ruling-gated, tracked as [[g-engine-inside-each-row-renders-nothing]].
