@@ -1615,6 +1615,214 @@ function _scrml_mount_track(dispose) {
 }
 
 // ---------------------------------------------------------------------------
+// §6.7.2 owner-scope tree (chunk: 'owner') — S469 g-row-and-arm-effect-scopes-never-disposed.
+//
+// Shipped with the 'reconciliation' chunk (CHUNK_DEPENDENCIES) and whenever the client
+// names one of its helpers (every <match> / <engine> dispatcher calls _scrml_arm_scope).
+// The always-included 'scope' chunk is untouched: _scrml_effect, _scrml_create_scope and
+// _scrml_unmount_scope reach this chunk through a typeof guard on _scrml_scope_recs. The
+// guard reads the CONST, not a function name: a sibling runtime evaluated into the same
+// global (test harnesses do this) leaks its function declarations, never its consts.
+//
+// A scope OWNS what is created while it is active: the disposers _scrml_mount_track /
+// _scrml_region_track register into it, and every effect remembers it (see
+// _scrml_effect). Three kinds of scope are tracked here: an if= mount (if_N,
+// _scrml_create_scope), an <each> ROW (rs_N, opened by _scrml_reconcile_list around
+// createFn) and a dispatched <match> / <engine> ARM (as_N, _scrml_arm_scope).
+//
+// Scopes form a TREE: a row's parent is the scope that owns its list, an arm's parent
+// the scope that owns its mount. Destroying a scope destroys its children first
+// (depth-first), so removing a row tears down the arm mounted in it, which tears down
+// the rows of the <each> inside that arm, and so on — nothing a removed row or a
+// torn-down arm created stays subscribed.
+//
+// _scrml_scope_recs holds one record per LIVE tracked scope. An effect keeps the record
+// of the scope it was created in; once that record is \`dead\` the effect never runs
+// again, even if nothing else disposed it.
+// ---------------------------------------------------------------------------
+const _scrml_scope_recs = new Map();   // live scope id -> { dead, used }
+const _scrml_scope_kids = new Map();   // parent scope id -> Set<child scope id>
+const _scrml_scope_up = new Map();     // child scope id -> parent scope id
+let _scrml_owner_seq = 0;
+
+/** Track a new scope \`id\` as a child of \`parent\` (null: a root). */
+function _scrml_scope_track(id, parent) {
+  _scrml_scope_recs.set(id, { dead: false, used: false });
+  if (parent) {
+    let kids = _scrml_scope_kids.get(parent);
+    if (!kids) { kids = new Set(); _scrml_scope_kids.set(parent, kids); }
+    kids.add(id);
+    _scrml_scope_up.set(id, parent);
+  }
+  return id;
+}
+
+/**
+ * Destroy a tracked scope: mark it dead FIRST (an effect it owns that a cleanup below
+ * happens to trigger must not run), destroy its children depth-first, last-created
+ * first, detach it from its parent, then run its own teardown (_scrml_destroy_scope:
+ * cleanups LIFO, timers, animation frames). Idempotent.
+ */
+function _scrml_owner_destroy(scopeId) {
+  const rec = _scrml_scope_recs.get(scopeId);
+  if (rec) { rec.dead = true; _scrml_scope_recs.delete(scopeId); }
+  const kids = _scrml_scope_kids.get(scopeId);
+  if (kids) {
+    _scrml_scope_kids.delete(scopeId);
+    const order = [...kids];
+    for (let i = order.length - 1; i >= 0; i--) _scrml_owner_destroy(order[i]);
+  }
+  const up = _scrml_scope_up.get(scopeId);
+  if (up !== undefined) {
+    _scrml_scope_up.delete(scopeId);
+    const sib = _scrml_scope_kids.get(up);
+    if (sib) { sib.delete(scopeId); if (sib.size === 0) _scrml_scope_kids.delete(up); }
+  }
+  _scrml_destroy_scope(scopeId);
+}
+
+/** Open a row ("rs") or arm ("as") scope under \`parent\`. */
+function _scrml_scope_open(kind, parent) {
+  return _scrml_scope_track(kind + "_" + (++_scrml_owner_seq), parent || null);
+}
+
+/** True for a tracked scope id (if_N / rs_N / as_N) that has been destroyed. */
+function _scrml_scope_gone(id) {
+  return typeof id === "string" && !_scrml_scope_recs.has(id) && /^(?:if|rs|as)_\\d+$/.test(id);
+}
+
+/**
+ * Run \`fn\` with \`scopeId\` as the active owner, restoring the previous owner after —
+ * even when \`fn\` throws.
+ */
+function _scrml_in_scope(scopeId, fn) {
+  const prev = _scrml_active_mount_scope;
+  _scrml_active_mount_scope = scopeId;
+  try { return fn(); } finally { _scrml_active_mount_scope = prev; }
+}
+
+/**
+ * The owner of a list / arm mount node, decided by WHERE THE MOUNT LIVES — never by
+ * whoever happens to render into it first. Recorded on the node the first time the
+ * runtime renders into it, so every later pass files its rows / arm under the same owner.
+ *
+ *   - A mount still being BUILT (not yet in the document: a row factory's createFn is
+ *     assembling it) belongs to the scope building it — the active scope, which is the
+ *     row's own scope there.
+ *   - A mount already IN the document belongs to its nearest structural owner
+ *     (_scrml_structural_owner): the arm, if= mount or row that contains it, else no
+ *     one (a root). The active scope is ignored: a write made while some row is being
+ *     built (a row template calling a function that sets a top-level <match>'s
+ *     scrutinee) must not hand that row the top-level arm — removing the row would
+ *     then tear down every arm the mount ever dispatched (S469 round 2, F1).
+ */
+function _scrml_mount_owner(node) {
+  if (node._scrml_owner === undefined) {
+    node._scrml_owner = node.isConnected === true ? _scrml_structural_owner(node) : _scrml_active_mount_scope;
+    _scrml_scope_use(node._scrml_owner);
+  }
+  return node._scrml_owner;
+}
+
+/**
+ * The nearest owner scope that CONTAINS the node in the document: an if= mount (its
+ * top-level nodes carry _scrml_if_sid, set by _scrml_mount_wire), a dispatched arm (its
+ * mount element carries _scrml_arm_sid while the arm is up — the node's OWN arm marker is
+ * skipped: a mount is not inside its own arm), or a list row (the group head carries
+ * _scrml_row_scope; a non-head root reaches it through _scrml_group_of). null: a root.
+ */
+function _scrml_structural_owner(node) {
+  for (let n = node; n; n = n.parentNode) {
+    if (n._scrml_if_sid) return n._scrml_if_sid;
+    if (n !== node && n._scrml_arm_sid) return n._scrml_arm_sid;
+    if (n._scrml_row_scope) return n._scrml_row_scope;
+    const g = n._scrml_group_of;
+    if (g && g[0] && g[0]._scrml_row_scope) return g[0]._scrml_row_scope;
+  }
+  return null;
+}
+
+/** Note that something holds a reference to scope \`id\` (it must not be dropped). */
+function _scrml_scope_use(id) {
+  const rec = id ? _scrml_scope_recs.get(id) : undefined;
+  if (rec) rec.used = true;
+}
+
+/**
+ * True when nothing references the just-built scope \`id\`: no disposer registered in
+ * it, no child scope, no effect or mount recorded it as owner. Such a scope (a row
+ * with no reactive content) is dropped instead of kept for the row's lifetime.
+ */
+function _scrml_scope_unused(id) {
+  const rec = _scrml_scope_recs.get(id);
+  return !!rec && !rec.used && !_scrml_cleanup_registry.has(id) && !_scrml_scope_kids.has(id);
+}
+
+/** Forget an UNUSED scope (see _scrml_scope_unused) — nothing to run, only unlink. */
+function _scrml_scope_drop(id) {
+  _scrml_scope_recs.delete(id);
+  const up = _scrml_scope_up.get(id);
+  if (up === undefined) return;
+  _scrml_scope_up.delete(id);
+  const sib = _scrml_scope_kids.get(up);
+  if (sib) { sib.delete(id); if (sib.size === 0) _scrml_scope_kids.delete(up); }
+}
+
+/**
+ * A dispatched mount's content is about to be replaced (an arm switch's innerHTML
+ * write, a row-scoped if= teardown): destroy the owner scope of every list row in it.
+ * Rows an earlier arm rendered are already gone with that arm's scope (a no-op here);
+ * this reaches the rows rendered into the INITIAL arm's static HTML at boot, which no
+ * arm scope owns.
+ */
+function _scrml_release_rows(root) {
+  if (!root || typeof document === "undefined" || typeof document.createTreeWalker !== "function") return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ALL);
+  let n;
+  while ((n = walker.nextNode())) _scrml_row_dispose(n);
+}
+
+/** A list row node is being removed: destroy the owner scope it carries, if any. */
+function _scrml_row_dispose(node) {
+  const id = node && node._scrml_row_scope;
+  if (id === undefined || id === null) return;
+  node._scrml_row_scope = undefined;
+  _scrml_owner_destroy(id);
+}
+
+/**
+ * §17.7 / §18 — run a dispatched arm's wiring inside its own scope, a child of the
+ * mount's owner. \`wire\` runs the arm's wire fn (and remounts the <each> fences in the
+ * arm) and returns the wire fn's dispose. Returns the arm's teardown: destroying the
+ * scope runs that dispose and every disposer registered while the arm was wired —
+ * including the scopes of the rows an <each> inside the arm renders, then or later.
+ */
+function _scrml_arm_scope(mount, wire) {
+  const owner = _scrml_mount_owner(mount);
+  const id = _scrml_scope_open("as", owner);
+  // The arm's structural marker: what renders inside this mount while the arm is up is
+  // owned by it (_scrml_structural_owner).
+  mount._scrml_arm_sid = id;
+  const teardown = function () {
+    if (mount._scrml_arm_sid === id) mount._scrml_arm_sid = undefined;
+    _scrml_owner_destroy(id);
+  };
+  let d;
+  try {
+    d = _scrml_in_scope(id, wire);
+  } catch (e) {
+    // A wiring that throws leaves nothing tracked behind: what it did wire is torn down.
+    teardown();
+    throw e;
+  }
+  if (typeof d === "function") _scrml_register_cleanup(d, id);
+  // An owner already destroyed (a stale mount rendered into by a live caller): the arm
+  // is inert — wired once, owned by nothing alive, so torn down at once.
+  if (_scrml_scope_gone(owner)) teardown();
+  return teardown;
+}
+
+// ---------------------------------------------------------------------------
 // §17.1 if= mount/unmount runtime (chunk: 'ifmount')
 //
 // On each false -> true transition of an if= condition a fresh scope is created
@@ -1626,7 +1834,10 @@ function _scrml_mount_track(dispose) {
 let _scrml_scope_counter = 0;
 
 function _scrml_create_scope() {
-  return "if_" + (++_scrml_scope_counter);
+  // Tracked in the owner tree (chunk 'owner', when shipped) as a ROOT: the rows and arms rendered
+  // inside this mount become its children, so _scrml_unmount_scope tears them down.
+  const id = "if_" + (++_scrml_scope_counter);
+  return typeof _scrml_scope_recs !== "undefined" ? _scrml_scope_track(id, null) : id;
 }
 
 /**
@@ -1711,7 +1922,12 @@ function _scrml_mount_template(markerId, templateId, scope) {
  * @param {string} scopeId — scope to destroy
  */
 function _scrml_unmount_scope(root, scopeId) {
-  if (scopeId) _scrml_destroy_scope(scopeId);
+  // Through the owner tree when it shipped, so the rows and arms rendered inside this
+  // mount (its child scopes) are torn down with it.
+  if (scopeId) {
+    if (typeof _scrml_scope_recs !== "undefined") _scrml_owner_destroy(scopeId);
+    else _scrml_destroy_scope(scopeId);
+  }
   if (!root) return;
   // §17.1.2 — a multi-node / comment-fence mount (a gated \`<each>\`) records its
   // inserted range on the handle. Removing only the handle would strand the rest.
@@ -1854,6 +2070,10 @@ function _scrml_mount_wire(root, scopeId, rewire) {
     // TreeWalker excludes its own root), so \`_scrml_remount_each\` cannot see a
     // top-level fence at all. Hence the explicit per-node pass.
     const nodes = root._scrml_if_range || [root];
+    // S469 — the mount's structural owner marker (owner chunk, _scrml_structural_owner):
+    // a list or dispatched arm rendered inside this subtree, now or later, is owned by
+    // this mount's scope whichever scope writes to it first.
+    if (scopeId) for (let i = 0; i < nodes.length; i++) if (nodes[i]) nodes[i]._scrml_if_sid = scopeId;
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i];
       if (!n) continue;
@@ -2136,10 +2356,14 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
     return _out;
   };
   const _clearAll = () => {
-    if (!_isRange) { container.replaceChildren(); return; }
+    if (!_isRange) {
+      for (let n = container.firstChild; n; n = n.nextSibling) _scrml_row_dispose(n);
+      container.replaceChildren();
+      return;
+    }
     if (!_parent) return;
     let n = container.nextSibling;
-    while (n && n !== _endAnchor) { const _nx = n.nextSibling; _parent.removeChild(n); n = _nx; }
+    while (n && n !== _endAnchor) { const _nx = n.nextSibling; _scrml_row_dispose(n); _parent.removeChild(n); n = _nx; }
   };
   const _insert = (node, ref) => {
     // Element mode: insertBefore(node, null) === appendChild(node), so a single
@@ -2191,14 +2415,41 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
     for (let i = 0; i < _ns.length; i++) _insert(_ns[i], ref);
   };
   const _removeGroup = (head) => {
+    // S469 — the row is GONE: destroy its owner scope first, so none of its effects
+    // (nor anything an arm / nested <each> inside it created) runs again.
+    _scrml_row_dispose(head);
     const _ns = head._scrml_group;
     if (!_ns) { _remove(head); return; }
     for (let i = 0; i < _ns.length; i++) { if (_ns[i].parentNode) _remove(_ns[i]); }
   };
   const _replaceGroup = (fresh, old) => {
-    if (!fresh._scrml_group && !old._scrml_group) { _replace(fresh, old); return; }
+    if (!fresh._scrml_group && !old._scrml_group) { _scrml_row_dispose(old); _replace(fresh, old); return; }
     _insertGroup(fresh, old);
     _removeGroup(old);
+  };
+  // S469 — build one row INSIDE its own owner scope, a child of the scope that owns
+  // this list (_scrml_mount_owner: the scope active the first time the list was
+  // rendered, so a later reconcile pass still files its rows under the right owner).
+  // Every disposer the row's wiring registers (_scrml_mount_track) lands in the row
+  // scope, and every effect the row creates remembers it. The scope id rides on the
+  // group HEAD (_scrml_ifrow_apply moves it with the head) and is destroyed by
+  // _removeGroup / _clearAll / _scrml_each_clear. A row that registered nothing and
+  // created no effect keeps no scope (a static row costs nothing past this call).
+  const _rowOwner = _scrml_mount_owner(container);
+  const _create = (item, i, key) => {
+    const _rs = _scrml_scope_open("rs", _rowOwner);
+    let _ret;
+    try {
+      _ret = _scrml_in_scope(_rs, () => createFn(item, i));
+    } catch (_err) {
+      _scrml_owner_destroy(_rs);
+      throw _err;
+    }
+    const _head = _mkGroup(_ret, key);
+    if (!_head || _scrml_scope_gone(_rowOwner)) { _scrml_owner_destroy(_rs); return _head; }
+    if (_scrml_scope_unused(_rs)) { _scrml_scope_drop(_rs); return _head; }
+    _head._scrml_row_scope = _rs;
+    return _head;
   };
   // Defensive: tolerate an undefined / not-yet-initialized collection. The each
   // render fn can run once at module-init BEFORE the source cell's
@@ -2322,7 +2573,7 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
     _clearAll();
     if (__SCRML_PERF) {
       for (let i = 0; i < newItems.length; i++) {
-        const node = _mkGroup(createFn(newItems[i], i), newKeys[i]);
+        const node = _create(newItems[i], i, newKeys[i]);
         if (!node) continue; // createFn returned undefined (filtered item)
         const __t_dw = __SCRML_PERF_NOW();
         _insertGroup(node, null);
@@ -2332,7 +2583,7 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
       return;
     }
     for (let i = 0; i < newItems.length; i++) {
-      const node = _mkGroup(createFn(newItems[i], i), newKeys[i]);
+      const node = _create(newItems[i], i, newKeys[i]);
       if (!node) continue; // createFn returned undefined (filtered item)
       _insertGroup(node, null);
     }
@@ -2395,7 +2646,7 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
     const key = newKeys[i];
     let node = oldNodes.get(key);
     if (!node) {
-      node = _mkGroup(createFn(newItems[i], i), key);
+      node = _create(newItems[i], i, key);
       if (!node) { oldPositions[i] = -2; newNodes[i] = null; continue; } // filtered item
       oldPositions[i] = -1; // new node, no old position
     } else {
@@ -2405,7 +2656,7 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
         // node and swap it into the server node's exact DOM slot — the mount is
         // never emptied, and (identical content) there is no visible flash.
         const _skey = node.getAttribute?.("data-scrml-key");
-        const _fresh = _mkGroup(createFn(newItems[i], i), key);
+        const _fresh = _create(newItems[i], i, key);
         if (!_fresh) { _removeGroup(node); oldPositions[i] = -2; newNodes[i] = null; continue; } // createFn filtered this item
         // Preserve the server-origin key marker so the upgraded row stays a
         // faithful in-place continuation of the server row. Client-only rows
@@ -2514,16 +2765,23 @@ function _scrml_find_each_anchor(root, id) {
 }
 
 // Clear the each mount — comment anchor: remove the fence range; element: replaceChildren.
+// S469 — every row removed here has its owner scope destroyed (_scrml_row_dispose).
 function _scrml_each_clear(mount) {
+  // A list whose first render is a clear (a gated or not-yet-initialised list) records
+  // its owner here, exactly as _scrml_reconcile_list would.
+  if (mount) _scrml_mount_owner(mount);
   if (mount && mount.nodeType === 8) {
     const _end = _scrml_each_end(mount);
     const _parent = mount.parentNode;
     if (!_parent) return;
     let n = mount.nextSibling;
-    while (n && n !== _end) { const _nx = n.nextSibling; _parent.removeChild(n); n = _nx; }
+    while (n && n !== _end) { const _nx = n.nextSibling; _scrml_row_dispose(n); _parent.removeChild(n); n = _nx; }
     return;
   }
-  if (mount && typeof mount.replaceChildren === "function") mount.replaceChildren();
+  if (mount && typeof mount.replaceChildren === "function") {
+    for (let n = mount.firstChild; n; n = n.nextSibling) _scrml_row_dispose(n);
+    mount.replaceChildren();
+  }
 }
 
 // Append into the each mount — comment anchor: insert before end fence; element: appendChild.
@@ -2597,6 +2855,8 @@ function _scrml_ifrow_apply(cur, el, ph, on) {
   if (cur === want) return cur;
   want._scrml_key = cur._scrml_key;
   if (cur._scrml_group_member) want._scrml_group_member = true;
+  // S469 — the row's owner scope rides on the group head: move it with the head.
+  if (cur._scrml_row_scope !== undefined) { want._scrml_row_scope = cur._scrml_row_scope; cur._scrml_row_scope = undefined; }
   // S469 — a root of a MULTI-root item: replace the node in its group's array (and,
   // for the head, move the array itself), so a later reorder / delete / replace of
   // the group acts on the node that is actually in the DOM.
@@ -4920,9 +5180,23 @@ function _scrml_region_track(el, dispose) {
 function _scrml_effect(fn, gate) {
   let disposed = false;
   let cleanupEntries = []; // Array of { target, prop } for subscriber removal
+  // S469 — the owner scope this effect was created in (an <each> row, a dispatched
+  // arm, an if= mount; null at top level). Every run happens INSIDE it, so what a
+  // re-run creates (the rows a list effect reconciles in, the arm a dispatcher
+  // mounts) is owned by the same scope; and once that scope is destroyed the effect
+  // disposes itself instead of running — removed content never acts again.
+  // Only when the 'owner' chunk shipped (a page with lists / dispatched arms): without it no
+  // scope is tracked, a run cannot tell a live owner from a destroyed if= scope, and
+  // re-entering a destroyed one would register cleanups under its dead key — so the
+  // effect then runs in the ambient scope, exactly as before S469.
+  const owned = typeof _scrml_scope_recs !== "undefined";
+  const owner = owned ? _scrml_active_mount_scope : null;
+  const ownerRec = owner ? (_scrml_scope_recs.get(owner) || null) : null;
+  if (ownerRec !== null) ownerRec.used = true;
 
   function effectFn() {
     if (disposed) return;
+    if (ownerRec !== null && ownerRec.dead) { dispose(); return; }
 
     // Remove old subscriptions
     for (const entry of cleanupEntries) {
@@ -4947,9 +5221,12 @@ function _scrml_effect(fn, gate) {
     // registered during reconcile never subscribe and never re-fire.
     const wasPaused = _scrml_tracking_paused;
     _scrml_tracking_paused = false;
+    const prevOwner = _scrml_active_mount_scope;
+    if (owned) _scrml_active_mount_scope = owner;
     try {
       fn();
     } finally {
+      _scrml_active_mount_scope = prevOwner;
       _scrml_tracking_paused = wasPaused;
       _scrml_effect_stack.pop();
     }
@@ -4972,11 +5249,8 @@ function _scrml_effect(fn, gate) {
   if (gate === true) effectFn._scrml_gate = true;
   effectFn._scrml_born = ++_scrml_effect_seq;
 
-  // Initial run
-  effectFn();
-
-  // Return dispose function
-  return function dispose() {
+  // Dispose: stop the effect and remove every subscription it holds.
+  function dispose() {
     disposed = true;
     for (const entry of cleanupEntries) {
       const propMap = _scrml_prop_subscribers.get(entry.target);
@@ -4986,7 +5260,12 @@ function _scrml_effect(fn, gate) {
       }
     }
     cleanupEntries = [];
-  };
+  }
+
+  // Initial run
+  effectFn();
+
+  return dispose;
 }
 
 /**
@@ -4999,12 +5278,24 @@ function _scrml_effect_static(fn, gate) {
   let disposed = false;
   let cleanupEntries = [];
   let hasRun = false;
+  // S469 — owner scope, exactly as _scrml_effect (runs inside it; dead owner → dispose).
+  // Only when the 'owner' chunk shipped (a page with lists / dispatched arms): without it no
+  // scope is tracked, a run cannot tell a live owner from a destroyed if= scope, and
+  // re-entering a destroyed one would register cleanups under its dead key — so the
+  // effect then runs in the ambient scope, exactly as before S469.
+  const owned = typeof _scrml_scope_recs !== "undefined";
+  const owner = owned ? _scrml_active_mount_scope : null;
+  const ownerRec = owner ? (_scrml_scope_recs.get(owner) || null) : null;
+  if (ownerRec !== null) ownerRec.used = true;
 
   function effectFn() {
     if (disposed) return;
+    if (ownerRec !== null && ownerRec.dead) { dispose(); return; }
 
     if (hasRun) {
-      fn();
+      const prevOwner = _scrml_active_mount_scope;
+      if (owned) _scrml_active_mount_scope = owner;
+      try { fn(); } finally { _scrml_active_mount_scope = prevOwner; }
       return;
     }
 
@@ -5015,7 +5306,10 @@ function _scrml_effect_static(fn, gate) {
     // caller does NOT silently swallow this effect's first-run dep tracking.
     const wasPaused = _scrml_tracking_paused;
     _scrml_tracking_paused = false;
+    const prevOwner = _scrml_active_mount_scope;
+    if (owned) _scrml_active_mount_scope = owner;
     try { fn(); } finally {
+      _scrml_active_mount_scope = prevOwner;
       _scrml_tracking_paused = wasPaused;
       _scrml_effect_stack.pop();
     }
@@ -5036,9 +5330,7 @@ function _scrml_effect_static(fn, gate) {
   if (gate === true) effectFn._scrml_gate = true;
   effectFn._scrml_born = ++_scrml_effect_seq;
 
-  effectFn();
-
-  return function dispose() {
+  function dispose() {
     disposed = true;
     for (const entry of cleanupEntries) {
       const propMap = _scrml_prop_subscribers.get(entry.target);
@@ -5048,7 +5340,11 @@ function _scrml_effect_static(fn, gate) {
       }
     }
     cleanupEntries = [];
-  };
+  }
+
+  effectFn();
+
+  return dispose;
 }
 
 /**

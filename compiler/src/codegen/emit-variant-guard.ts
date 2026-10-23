@@ -1616,6 +1616,14 @@ export function emitVariantGuardedRender(
   // hygiene). Idempotent — calling dispose twice is a no-op (the runtime
   // sets `disposed = true` on first call).
   dispatcherLines.push(`  if (${disposeVar}) { ${disposeVar}(); ${disposeVar} = null; }`);
+  // S469 — a module-scope mount can hold the INITIAL arm as static HTML whose `<each>`
+  // rows were rendered at boot, before any dispatch: no arm scope owns them, so the
+  // dispose above does not reach them. Release them before the innerHTML replace. (An
+  // item-scoped mount is created empty by its row factory; every arm it ever holds is
+  // wired inside an arm scope.)
+  if (!itemScoped && hasEachMount) {
+    dispatcherLines.push(`  _scrml_release_rows(${MT});`);
+  }
 
   // Switch on tag, call matching render fn + wire fn.
   //
@@ -1626,6 +1634,37 @@ export function emitVariantGuardedRender(
   // set defaultArmTag (state-children are exhaustive); only the match-block
   // consumer passes it for `<_>` arms. The default arm is filtered out of
   // the if/else-if chain here and emitted below the loop.
+  // S469 (g-row-and-arm-effect-scopes-never-disposed) — the arm is wired INSIDE its own
+  // owner scope (`_scrml_arm_scope`, runtime scope chunk), a child of the scope that
+  // owns the mount (the row, for an item-scoped dispatch). Everything the wiring
+  // creates — the wire fn's effects, the rows an `<each>` in the arm renders now or on
+  // a later pass, an inner engine's arm — is owned by that scope, and the handle stored
+  // in `disposeVar` destroys it: an arm switch, the row-scoped `if=` teardown and the
+  // removal of the enclosing row all tear the WHOLE arm down, not just the wire fn's
+  // own bindings.
+  const pushArmWiring = (wireCall: string, postMountJs: string | undefined): void => {
+    dispatcherLines.push(`    ${disposeVar} = _scrml_arm_scope(${MT}, () => {`);
+    dispatcherLines.push(`      const _scrml_arm_wired = ${wireCall};`);
+    // engine-gated-each-populate (S153) — populate each-mounts in the freshly
+    // mounted arm subtree. See the `hasEachMount` comment above.
+    if (hasEachMount) {
+      dispatcherLines.push(`      _scrml_remount_each(${MT});`);
+    }
+    // A5-7 Wave 2.4 (§51.0.Q.1, Bug #2) — postMountJs injection point.
+    // The engine consumer populates this for composite arms with inner-
+    // engine init / history-restore logic. Branch-uniform skip when arm
+    // is non-composite (postMountJs is undefined or empty). Inside the arm
+    // scope, so the inner engine's arm is owned by this arm.
+    if (typeof postMountJs === "string" && postMountJs.length > 0) {
+      for (const ln of postMountJs.split("\n")) {
+        if (ln.length > 0) dispatcherLines.push(`      ${ln}`);
+        else dispatcherLines.push("");
+      }
+    }
+    dispatcherLines.push(`      return _scrml_arm_wired;`);
+    dispatcherLines.push(`    });`);
+  };
+
   const defaultArmTag = opts.defaultArmTag;
   const switchArms = defaultArmTag
     ? arms.filter((a) => a.tag !== defaultArmTag)
@@ -1672,23 +1711,7 @@ export function emitVariantGuardedRender(
     const wireArgs = [MT, ...(args.length > 0 ? [args] : []), ...armRowScope(arm)].join(", ");
     dispatcherLines.push(`  ${head} (${TG} === ${JSON.stringify(arm.tag)}) {`);
     dispatcherLines.push(`    ${MT}.innerHTML = ${fnName}(${args});`);
-    dispatcherLines.push(`    ${disposeVar} = ${wireFnName}(${wireArgs});`);
-    // engine-gated-each-populate (S153) — populate each-mounts in the freshly
-    // mounted arm subtree. See the `hasEachMount` comment above.
-    if (hasEachMount) {
-      dispatcherLines.push(`    _scrml_remount_each(${MT});`);
-    }
-    // A5-7 Wave 2.4 (§51.0.Q.1, Bug #2) — postMountJs injection point.
-    // The engine consumer populates this for composite arms with inner-
-    // engine init / history-restore logic. Branch-uniform skip when arm
-    // is non-composite (postMountJs is undefined or empty). Indented to
-    // match the if-block body for readability.
-    if (typeof arm.postMountJs === "string" && arm.postMountJs.length > 0) {
-      for (const ln of arm.postMountJs.split("\n")) {
-        if (ln.length > 0) dispatcherLines.push(`    ${ln}`);
-        else dispatcherLines.push("");
-      }
-    }
+    pushArmWiring(`${wireFnName}(${wireArgs})`, arm.postMountJs);
     dispatcherLines.push(`  }`);
   }
   // S109 — wildcard `<_>` default branch. When `opts.defaultArmTag` named an
@@ -1716,12 +1739,8 @@ export function emitVariantGuardedRender(
       dispatcherLines.push(`  {`);
     }
     dispatcherLines.push(`    ${MT}.innerHTML = ${dfnName}();`);
-    dispatcherLines.push(`    ${disposeVar} = ${dwireFnName}(${[MT, ...armRowScope(defaultArm)].join(", ")});`);
-    // engine-gated-each-populate (S153) — populate each-mounts in the wildcard
-    // arm subtree too. See the `hasEachMount` comment above.
-    if (hasEachMount) {
-      dispatcherLines.push(`    _scrml_remount_each(${MT});`);
-    }
+    // The wildcard arm carries no postMountJs (engines never set defaultArmTag).
+    pushArmWiring(`${dwireFnName}(${[MT, ...armRowScope(defaultArm)].join(", ")})`, undefined);
     dispatcherLines.push(`  }`);
   }
   // No default branch when defaultArmTag is unset — when _tag does not match
