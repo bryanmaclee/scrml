@@ -103,6 +103,14 @@ happy-dom. Baseline 41 → 27.
   (`[gap g-soft-nav-rehydrate-seed-apply-unscoped] …`), added to the baseline. NOT security-class.
 - Baseline 17 → 11 (−7 fixed, +1 known-red repro).
 
+## Step 8 — cross-chunk nav (FIXED, class b)
+
+`browser-navigate-cross-chunk.test.js` (3 failing): same harness keying defect, per chunk — `rows`
+lives at the REPORTS chunk's `<token>$rows`, `count` at the SHELL chunk's token, and the engine mount
+attribute is `"<machineToken>_phase"`. Keyed per owning chunk (`cellIn(chunkJs, name)`). 6/6 pass —
+cross-chunk load + swap + rebind + engine transition + shell-cell survival all work in the product.
+Baseline 11 → 8.
+
 ## Classified, NOT fixed — class c, ALREADY FILED
 
 - `g-each-peritem-markup-value-ternary` (3) and `g-emit-lift-markup-text-interp` (4): `ON ${@.label}` /

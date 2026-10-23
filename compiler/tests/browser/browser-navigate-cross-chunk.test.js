@@ -23,6 +23,7 @@ import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { chunkCellKey, chunkNamespaceToken } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -164,6 +165,13 @@ function mountShell(m) {
   document.dispatchEvent(new Event("DOMContentLoaded"));
 }
 
+// S469: since BUG-6 chunk namespacing each chunk's cells live at `<token>$name` (a DIFFERENT token
+// per chunk — that is the point of the arc). The runtime's bare global accessors key `rows` /
+// `count` UN-namespaced, a cell no chunk reads, so a harness read/write must name the owning chunk.
+function cellIn(chunkJs, name) {
+  return chunkCellKey(chunkJs)(name);
+}
+
 async function flush(cycles = 8) {
   for (let i = 0; i < cycles; i++) { await new Promise((r) => setTimeout(r, 1)); await Promise.resolve(); }
 }
@@ -246,7 +254,7 @@ describe("navigate-wave1c — cross-chunk soft navigation loads the chunk + swap
 
     // The route chunk registered its reactive wiring; mutate its cell → re-render.
     expect(document.querySelectorAll("[data-scrml-outlet] li").length).toBe(2);
-    globalThis._scrml_reactive_set("rows", ["x", "y", "z", "w"]);
+    globalThis._scrml_reactive_set(cellIn(m.reportsClientJs, "rows"), ["x", "y", "z", "w"]);
     await flush();
     expect(document.querySelectorAll("[data-scrml-outlet] li").length).toBe(4);
     // The `${@rows.length}` interpolation re-bound too.
@@ -291,7 +299,10 @@ describe("navigate-wave1c — an ENGINE route loaded cross-chunk renders + trans
 
     const outlet = document.querySelector("[data-scrml-outlet]");
     // The engine mount + initial (.Idle) arm are in the swapped-in region.
-    expect(outlet.querySelector('[data-scrml-engine-mount="phase"]')).not.toBeNull();
+    // S469: N4 namespaces the engine mount attribute with the ROUTE chunk's token.
+    const machineTok = chunkNamespaceToken(m.machineClientJs);
+    const mountAttr = (machineTok ? `${machineTok}_` : "") + "phase";
+    expect(outlet.querySelector(`[data-scrml-engine-mount="${mountAttr}"]`)).not.toBeNull();
     expect(outlet.textContent).toContain("idle-arm");
     expect(outlet.textContent).not.toContain("running-arm");
     // The shell survived (no reload / re-boot).
@@ -315,12 +326,12 @@ describe("navigate-wave1c — finding #5: a MUTATED reactive shell cell survives
     const m = M;
     mountShell(m);
     // The shell cell starts at 0; mutate it via the shell button (outside the outlet).
-    expect(globalThis._scrml_reactive_get("count")).toBe(0);
+    expect(globalThis._scrml_reactive_get(cellIn(m.shellClientJs, "count"))).toBe(0);
     const shellBtn = document.querySelector("#shellinc");
     expect(shellBtn).not.toBeNull();
     shellBtn.dispatchEvent(new Event("click", { bubbles: true }));
     shellBtn.dispatchEvent(new Event("click", { bubbles: true }));
-    expect(globalThis._scrml_reactive_get("count")).toBe(2);
+    expect(globalThis._scrml_reactive_get(cellIn(m.shellClientJs, "count"))).toBe(2);
     // The shell display (outside the outlet) reflects the mutation.
     expect(document.querySelector("#shellcount").textContent).toContain("2");
 
@@ -335,7 +346,7 @@ describe("navigate-wave1c — finding #5: a MUTATED reactive shell cell survives
     // The route swapped in (proves the cross-chunk nav happened, not a no-op).
     expect(document.querySelector("[data-scrml-outlet] h2").textContent).toBe("Reports");
     // The mutated shell cell KEPT its value; the shell display still shows it.
-    expect(globalThis._scrml_reactive_get("count")).toBe(2);
+    expect(globalThis._scrml_reactive_get(cellIn(m.shellClientJs, "count"))).toBe(2);
     expect(document.querySelector("#shellcount").textContent).toContain("2");
   });
 });
