@@ -32,7 +32,7 @@ ${
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldMode, FieldRole,
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
-             LoopHead, EachHead, RangeHead,
+             LoopHead, EachHead, RangeHead, HostCall,
              block, litStr, mkSym, typeDefSym } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
@@ -296,6 +296,63 @@ ${
     // =========================================================================
     // Expressions.
     // =========================================================================
+    // s469 — a logic backtick template (SPEC §14.13.3) is a `string` built left
+    // to right: its static text, and for each slot the slot's text — a
+    // `string` slot as it is, any other primitive through Core Text (its one
+    // honest text, §20.7.2). Concat joins two strings only. An empty static run
+    // is left out; a template with no slots is its text.
+    fn templateExpr(c: LC, e: AExpr, qs: string[], ss: AExpr[]) -> Expr {
+        const text: boolean[] = templateText(valueFact(c.t.values, e.nid), ss.length)
+        let acc: Expr | not = not
+        if (qs[0] != "") acc = Expr.Lit(Literal.Str(qs[0]))
+        let i: int = 0
+        while (i < ss.length) {
+            let part: Expr = lowerExpr(c, ss[i])
+            if (text[i]) part = Expr.Prim(PrimOp.Text, [part])
+            acc = catOnto(acc, part)
+            if (qs[i + 1] != "") acc = catOnto(acc, Expr.Lit(Literal.Str(qs[i + 1])))
+            i = i + 1
+        }
+        if (acc is not) return Expr.Lit(Literal.Str(""))
+        return acc
+    }
+
+    fn catOnto(a: Expr | not, b: Expr) -> Expr {
+        if (a is not) return b
+        return Expr.Prim(PrimOp.Concat, [a, b])
+    }
+
+    // Which slots lower converts to their text (the binder's VTemplate fact);
+    // with no fact (never expected), every slot — the conversion of a `string`
+    // is the string itself, so this only costs readability, never meaning.
+    fn templateText(f: ValueFact | not, n: int) -> boolean[] {
+        return match f {
+            .VTemplate(text: tx) :> tx
+            .VLit(lit: l) :> allText(n)
+            .VVariant(enumSym: x) :> allText(n)
+            .VOp(op: x) :> allText(n)
+            .VStructOf(ty: x) :> allText(n)
+            .VHost(call: x) :> allText(n)
+            .VSeqCall(op: x) :> allText(n)
+            .VLambda(params: x) :> allText(n)
+            .VToEnum(enumSym: x) :> allText(n)
+            .VMethod(op: x) :> allText(n)
+            .VIndex(loc: x) :> allText(n)
+            .VAt :> allText(n)
+            not :> allText(n)
+        }
+    }
+
+    fn allText(n: int) -> boolean[] {
+        let out: boolean[] = []
+        let i: int = 0
+        while (i < n) {
+            out = out.concat([true])
+            i = i + 1
+        }
+        return out
+    }
+
     fn lowerExprs(c: LC, es: AExpr[]) -> Expr[] {
         let out: Expr[] = []
         for (const e of es) { out = out.concat([lowerExpr(c, e)]) }
@@ -370,7 +427,7 @@ ${
             .Str(v: s) :> valueExpr(c, valueFact(c.t.values, e.nid), [])
             .Bool(v: b) :> valueExpr(c, valueFact(c.t.values, e.nid), [])
             .NotLit :> valueExpr(c, valueFact(c.t.values, e.nid), [])
-            .Recovered :> Expr.Lit(Literal.Absent)
+            .Recovered :> Expr.Host(HostCall.Unreadable)   // s469 r3 F1: never a silent `not` — checkCore C-R1 refuses it
             .Variant(name: n) :> valueExpr(c, valueFact(c.t.values, e.nid), [])
             .Member(obj: o, name: n) :> memberOrVariant(c, e, o)
 
@@ -386,6 +443,7 @@ ${
             .Lambda(params: lp, body: lb) :> lambdaExpr(c, valueFact(c.t.values, e.nid), lb)
             .Sql(q: q) :> handledRead(c, e)        // s451 (Ue): a query is an Attempt's call; its value, the Attempt's result
             .Handled(h: h) :> handledRead(c, e)
+            .Template(quasis: qs, slots: ss) :> templateExpr(c, e, qs, ss)   // s469 (§14.13.3)
         }
     }
 
@@ -403,6 +461,7 @@ ${
             .VLambda(params: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VIndex(loc: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VAt :> atExpr(c, cal, args)
+            .VTemplate(text: tx) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VToEnum(enumSym: es) :> toEnumExpr(c, es, args)
             .VMethod(op: o) :> methodExpr(c, o, cal, args)
             not :> callExpr(c, nameFact(c.t.names, cal.nid), args)
@@ -453,6 +512,7 @@ ${
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -461,6 +521,7 @@ ${
             .VLambda(params: ps) :> Expr.Lambda(ps, lowerExpr(c, body))
             .VIndex(loc: x) :> missing()
             .VAt :> missing()
+            .VTemplate(text: tx) :> missing()
             .VToEnum(enumSym: x) :> missing()
             .VMethod(op: x) :> missing()
             .VLit(lit: l) :> missing()
@@ -501,6 +562,7 @@ ${
             .VLambda(params: x) :> missing()
             .VIndex(loc: x) :> missing()
             .VAt :> missing()
+            .VTemplate(text: tx) :> missing()
             .VToEnum(enumSym: x) :> missing()
             .VMethod(op: x) :> missing()
             not :> missing()
@@ -518,6 +580,7 @@ ${
             .VLambda(params: x) :> PrimOp.Not
             .VIndex(loc: x) :> PrimOp.Not
             .VAt :> PrimOp.Not
+            .VTemplate(text: tx) :> PrimOp.Not
             .VToEnum(enumSym: x) :> PrimOp.Not
             .VMethod(op: x) :> PrimOp.Not
             not :> PrimOp.Not
@@ -537,6 +600,7 @@ ${
             .VLambda(params: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VIndex(loc: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VAt :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VTemplate(text: tx) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VToEnum(enumSym: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VMethod(op: m) :> Expr.Prim(m, [lowerExpr(c, o)])        // s469: a string's `.length` (StrLength)
             not :> memberExpr(c, nameFact(c.t.names, e.nid), o)
@@ -763,6 +827,7 @@ ${
         return match f {
             .VIndex(loc: l) :> l
             .VAt :> ""
+            .VTemplate(text: tx) :> ""
             .VLit(lit: x) :> ""
             .VVariant(enumSym: x) :> ""
             .VStructOf(ty: x) :> ""
@@ -875,6 +940,7 @@ ${
             .Lambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -1049,6 +1115,7 @@ ${
             .Lambda(params: lp) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
+            .Template(quasis: qs) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -1982,6 +2049,7 @@ ${
             .VLambda(params: ps) :> not
             .VIndex(loc: x) :> not
             .VAt :> not
+            .VTemplate(text: tx) :> not
             .VToEnum(enumSym: s) :> not
             .VMethod(op: o) :> not
             not :> not
@@ -2232,6 +2300,7 @@ ${
             .Lambda(params: ps) :> noCall()
             .Sql(q: x) :> noCall()
             .Handled(h: x) :> noCall()
+            .Template(quasis: qs) :> noCall()
         }
     }
 
@@ -2466,12 +2535,14 @@ ${
             .Lambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
     fn handledOfK(k: AExprK) -> AHandled | not {
         return match k {
             .Handled(h: h) :> h
+            .Template(quasis: qs) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -2500,6 +2571,7 @@ ${
         return match k {
             .Sql(q: q) :> q
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -2696,6 +2768,7 @@ ${
             .Ternary(test: t) :> [t]
             .Lambda(params: lp) :> []
             .Handled(h: h) :> [h.subject]
+            .Template(quasis: qs, slots: ss) :> ss
             .Member(obj: o) :> [o]
             .Call(callee: x, args: a) :> a
             .Unary(op: o, e: x) :> [x]
@@ -2755,6 +2828,7 @@ ${
             .Lambda(params: lp) :> []
             .Sql(q: q) :> distinctSqlParams(q.params)     // s468 (U1c): a query's distinct values (§8.2), evaluated before it waits
             .Handled(h: x) :> []
+            .Template(quasis: qs) :> []
         }
     }
 

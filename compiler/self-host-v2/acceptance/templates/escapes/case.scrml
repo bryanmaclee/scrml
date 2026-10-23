@@ -1,0 +1,10 @@
+// §14.13.3: `\``, `\${` and `${"${"}` spell a backtick and the characters `${`.
+<program>
+    let <n:int=1/>
+    fn text(k: int) -> string {
+        return `a\`b \${x} ${"${"}y} $ {z} $${k} \u{1F600}`
+    }
+    <main>
+        <p id="out">${text(@n)}</p>
+    </main>
+</program>

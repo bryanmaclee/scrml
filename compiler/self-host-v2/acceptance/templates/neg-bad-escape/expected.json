@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-templates-neg-bad-escape",
+  "description": "E-PARSE-TEMPLATE: a legacy octal escape in a template's text (no JavaScript template reads it).",
+  "language-version": "1.0",
+  "spec": "§14.13.3",
+  "rationale": "A template's escapes are a JavaScript template's: `\\1` is refused there.",
+  "expect": {
+    "codes": [
+      "E-PARSE-TEMPLATE"
+    ],
+    "codeCounts": {
+      "E-PARSE-TEMPLATE": 1
+    }
+  }
+}

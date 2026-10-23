@@ -1,0 +1,9 @@
+// §14.13.1: `+` is strict; a template converts.
+<program>
+    fn show(n: int) -> string {
+        return "typed " + n
+    }
+    <main>
+        <p>${show(1)}</p>
+    </main>
+</program>

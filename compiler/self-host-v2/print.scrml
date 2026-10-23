@@ -387,6 +387,9 @@ ${
     fn hostJs(c: HostCall) -> JsExpr {
         return match c {
             .DateNow :> jcall(jmember(jid("Date"), "now"), [])
+            // unreachable (checkCore C-R1 refuses it before printing); if ever printed
+            // it fails loudly (a ReferenceError), never as a silent value
+            .Unreadable :> jcall(jid("scrml$unreadableExpression"), [])
         }
     }
 
@@ -484,6 +487,9 @@ ${
             .ParseInt :> rtCall(ctx, "parseIntText", a)
             .ParseNum :> rtCall(ctx, "parseNumText", a)
             .ParseBool :> rtCall(ctx, "parseBoolText", a)
+            // s469: a primitive's text (§20.7.2) — JavaScript's String() of an
+            // int / number (Number::toString), a bool, a unit variant's tag
+            .Text :> rtCall(ctx, "textOf", a)
         }
     }
 

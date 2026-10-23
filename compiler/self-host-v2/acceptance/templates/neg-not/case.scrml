@@ -1,0 +1,9 @@
+// §14.13.2: `not` in a slot is refused.
+<program>
+    fn show() -> string {
+        return `v=${not}`
+    }
+    <main>
+        <p>${show()}</p>
+    </main>
+</program>
