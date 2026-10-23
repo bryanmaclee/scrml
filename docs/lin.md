@@ -40,7 +40,7 @@ The binding is immutable — you cannot reassign it — and the compiler begins 
 
 A function parameter can be `lin` too, by prefixing it. Like every parameter, it carries a type:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001] — the bootstrap has no `lin` (neither `lin` parameters nor `lin` declarations) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001, E-STMT-MISSING-SEMICOLON] — the bootstrap has no `lin` (neither `lin` parameters nor `lin` declarations) yet -->
 ```scrml
 <program>
 
@@ -369,7 +369,7 @@ Fix: declare the `lin` inside the body so it is produced fresh each run — or r
 
 **Pattern 1 — auth token into a single request.** The canonical use case.
 
-<!-- gate: spec-ahead [E-SCOPE-001] — the bootstrap has no `lin` declarations yet -->
+<!-- gate: spec-ahead [E-SCOPE-001, E-STMT-MISSING-SEMICOLON] — the bootstrap has no `lin` declarations yet -->
 ```scrml
 <program>
 
@@ -419,7 +419,7 @@ The compiler enforces that the transaction is always committed (or aborted via a
 
 **Pattern 4 — conditional consume.** If the consumption site is conditional, move the decision to a helper function so the compiler sees the paths clearly.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001] — the bootstrap has no `lin` (neither `lin` parameters nor `lin` declarations) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001, E-STMT-MISSING-SEMICOLON] — the bootstrap has no `lin` (neither `lin` parameters nor `lin` declarations) yet -->
 ```scrml
 <program>
 
