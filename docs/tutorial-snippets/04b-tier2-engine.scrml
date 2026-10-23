@@ -1,28 +1,28 @@
-// 04b-tier2-engine.scrml — Tier 2: an <engine> with rule= contracts.
+// 04b-tier2-engine.scrml — Tier 2: an engine — a `single` declaration with rule= contracts.
 //
-// The engine is a direct child of <program>, alongside the type and the
+// The engine is a program-level declaration, alongside the type and the
 // function. Each state-child's rule= lists the legal transitions out of it.
-// The bodies are empty here; the <match> below renders each phase.
+// The state-children have no bodies here; the <match> below renders each phase.
 
 <program>
 
   type LoadPhase:enum = {
-    Idle
-    Loading
-    Loaded(rows: number)
-    Failed(msg: string)
+    Idle,
+    Loading,
+    Loaded(rows: int),
+    Failed(msg: string),
   }
 
   function load() {
-    @loadPhase = .Loading
-    @loadPhase = LoadPhase.Loaded(42)        // fake result for the demo
+    @loadPhase = .Loading;
+    @loadPhase = LoadPhase.Loaded(42);        // fake result for the demo
   }
 
-  <engine for=LoadPhase initial=.Idle>
-    <Idle    rule=.Loading></>
-    <Loading rule=(.Loaded | .Failed)></>
-    <Loaded  rule=.Idle></>
-    <Failed  rule=.Idle></>
+  <loadPhase:LoadPhase=.Idle single>
+    <Idle    rule=.Loading/>
+    <Loading rule=(.Loaded | .Failed)/>
+    <Loaded  rule=.Idle/>
+    <Failed  rule=.Idle/>
   </>
 
   <match for=LoadPhase on=@loadPhase>
@@ -34,11 +34,11 @@
     </Loading>
     <Loaded(n)>
       <p>Got ${n} rows.</p>
-      <button onclick={ @loadPhase = .Idle }>Reset</button>
+      <button onclick={ @loadPhase = .Idle; }>Reset</button>
     </Loaded>
     <Failed(msg)>
       <p class="err">Failed: ${msg}</p>
-      <button onclick={ @loadPhase = .Idle }>Try again</button>
+      <button onclick={ @loadPhase = .Idle; }>Try again</button>
     </Failed>
   </match>
 

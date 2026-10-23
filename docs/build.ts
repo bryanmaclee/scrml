@@ -12,6 +12,8 @@
  *   bun run docs/build.ts
  *
  * Inputs:  docs/articles/*-devto-*.md (the canonical-on-scrml.dev articles)
+ *          — NONE since S469: those drafts moved to docs/articles/archive/
+ *          (superseded dialect, "do not paste"); the site is docs/website/.
  * Outputs: docs/articles/<slug>/index.html
  *          docs/articles/index.html
  *
@@ -144,6 +146,10 @@ async function main() {
 
   if (articles.length === 0) {
     console.error("no articles matched", DEVTO_PATTERN);
+    console.error(
+      "S469: the April–May devto drafts moved to docs/articles/archive/ (superseded dialect, " +
+        "do not publish). scrml.dev is built from docs/website/ now; this interim script has no inputs.",
+    );
     process.exit(1);
   }
 

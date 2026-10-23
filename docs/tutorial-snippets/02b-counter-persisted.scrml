@@ -9,40 +9,49 @@
     }
   </>
 
-  <db src="counter.db" tables="counters">
+  // A pending cell: `(not to int)` says it starts absent and becomes an int
+  // when loadCount() answers (§13.9). Only a cell declared this way may wait.
+  let <count:(not to int)=(loadCount() !{ _ :> not })/>
+  let <saveError:string=""/>
 
-    ${
-      <count> = loadCount()
+  // No `server` keyword — these two functions run on the server because
+  // their bodies touch a `?{}` SQL block. The `!` makes them failable (§6):
+  // a failed query propagates to the caller instead of being ignored.
+  function loadCount()! -> SqlError {
+    let row = ?{`SELECT value FROM counters WHERE id = 1`}.get();
+    return row is given ? row.value : 0;
+  }
 
-      // No `server` keyword — these two functions run on the server because
-      // their bodies touch a `?{}` SQL block.
-      function loadCount() {
-        const row = ?{`SELECT value FROM counters WHERE id = 1`}.get()
-        return row is given ? row.value : 0
-      }
+  function persistCount(n: int)! -> SqlError {
+    ?{`INSERT INTO counters (id, value) VALUES (1, ${n})
+       ON CONFLICT(id) DO UPDATE SET value = ${n}`}.run();
+    return n;
+  }
 
-      function persistCount(n) {
-        ?{`INSERT INTO counters (id, value) VALUES (1, ${n})
-           ON CONFLICT(id) DO UPDATE SET value = ${n}`}.run()
-      }
+  function save(n: int) {
+    persistCount(n) !{ _ :> { @saveError = "Could not save — try again."; } };
+  }
 
-      function inc() {
-        @count = @count + 1
-        persistCount(@count)
-      }
-
-      function dec() {
-        @count = @count - 1
-        persistCount(@count)
-      }
+  function inc() {
+    if (@count is given) {
+      @count = @count + 1;
+      save(@count);
     }
+  }
 
-    <div>
-      <h1>Persistent counter: ${@count}</h1>
-      <button onclick=dec()>−</button>
-      <button onclick=inc()>+</button>
-    </div>
+  function dec() {
+    if (@count is given) {
+      @count = @count - 1;
+      save(@count);
+    }
+  }
 
-  </>
+  <div if=@count>
+    <h1>Persistent counter: ${@count}</h1>
+    <button onclick=dec()>−</button>
+    <button onclick=inc()>+</button>
+    <p if=(@saveError != "")>${@saveError}</p>
+  </div>
+  <p else>Loading…</p>
 
 </program>
