@@ -13,6 +13,49 @@ if [ "$BRANCH" = "main" ]; then
   echo "   If you are the PA making an intentional main commit, this is fine." >&2
 fi
 
+# S469 (s469-hook-slices) — the native bootstrap's own slice suite (compiler/self-host-v2/slice-m1..m4 +
+# slice-codec, incl. slice-m4's acceptance cases, + slice-m1 again on the LOWERED programs, + the no-default-arm
+# lint): exactly CI's `slices` bootstrap step. It runs HERE only when the staged diff touches something the
+# slices read. The list below is the set of tracked files a full slice run OPENS (measured with inotify, S469),
+# by prefix, plus the gate's own code:
+#   compiler/self-host-v2/   the bootstrap + its tests + compiler/self-host-v2/acceptance
+#   compiler/SPEC.md         §34 severity table, §66.19 drift tables, parse/typer tables
+#   compiler/src/ compiler/runtime/ compiler/native-parser/   impl#1 COMPILES the bootstrap (harness.js -> api.js)
+#   conformance/             the adapter, run.ts / driver / normalize, and the case corpus the gate tests grade
+#   docs/known-gaps.md       conformance/run.ts's carried-gap ledger (xfail status)
+#   scripts/{scrml-boot,gen-bootstrap-severity,s34-catalog,bootstrap-conformance,hybrid,state}.ts,
+#   scripts/lint-no-default-arm.js, compiler/tests/integration/security-await-pack/,
+#   compiler/tests/helpers/tmp-root-preload.js, bunfig.toml, package.json, bun.lock, scrml.toml
+#   scripts/test-sharded.ts, scripts/git-hooks/pre-commit   (the runner / this hook: a change to either must
+#                            exercise the step it would otherwise skip)
+# SCRML_HOOK_SLICES=1 forces the step on (there is deliberately no off switch). See README.md.
+RUN_SLICES=0
+if [ "${SCRML_HOOK_SLICES:-}" = "1" ]; then
+  RUN_SLICES=1
+elif [ -d compiler/self-host-v2 ]; then
+  while IFS= read -r path; do
+    case "$path" in
+      compiler/self-host-v2/*|compiler/SPEC.md|compiler/src/*|compiler/runtime/*|compiler/native-parser/*|conformance/*|\
+      docs/known-gaps.md|scripts/scrml-boot.ts|scripts/gen-bootstrap-severity.ts|scripts/s34-catalog.ts|\
+      scripts/bootstrap-conformance.ts|scripts/hybrid.ts|scripts/state.ts|scripts/lint-no-default-arm.js|\
+      compiler/tests/integration/security-await-pack/*|compiler/tests/helpers/tmp-root-preload.js|\
+      bunfig.toml|package.json|bun.lock|scrml.toml|scripts/test-sharded.ts|scripts/git-hooks/pre-commit)
+        RUN_SLICES=1; SLICE_TRIGGER="$path"; break ;;
+    esac
+  # --no-renames: a rename lists BOTH paths, so moving a file out of (or into) a watched prefix counts.
+  done < <(git diff --cached --name-only --no-renames)
+fi
+SLICE_DIRS="./compiler/self-host-v2/slice-m1 ./compiler/self-host-v2/slice-m2 ./compiler/self-host-v2/slice-m3 ./compiler/self-host-v2/slice-m4 ./compiler/self-host-v2/slice-codec"
+if [ "$RUN_SLICES" = "1" ]; then
+  echo "Bootstrap slices: ON (staged: ${SLICE_TRIGGER:-SCRML_HOOK_SLICES=1}) — no-default-arm lint..."
+  if ! bun scripts/lint-no-default-arm.js 2>&1; then
+    echo "✗ no-default-arm lint failed (compiler/self-host-v2). Fix before committing." >&2
+    exit 1
+  fi
+else
+  echo "Bootstrap slices: skipped (the staged diff touches nothing they read)."
+fi
+
 echo "Running tests (unit + integration + conformance, excluding browser)..."
 # S468 (s468-hook-sharding): the SAME file set, split across parallel `bun test` processes by
 # scripts/test-sharded.ts (balanced by measured per-file time; --bail stops every shard on the first
@@ -29,13 +72,27 @@ echo "Running tests (unit + integration + conformance, excluding browser)..."
 # otherwise the shard waits, bounded by SCRML_HOOK_SLOT_WAIT_S (1800), then FAILS. Ten agents committing at once
 # cannot oversubscribe the box. S469 (s469-hook-shard-tuning): 32-core box -> 16 slots (was 8), 12 per hook (was 8).
 # A branch cut before the runner existed has no scripts/test-sharded.ts and runs single-process.
+#   Bootstrap slices (when RUN_SLICES=1, above): the SAME runner, as two more PATH GROUPS (--group): their shards
+#   never share a process with compiler/tests files (CI runs them in a job of its own too), and the second group
+#   re-runs slice-m1 with SLICE_CORE=lowered. Slots, memory admission, timeouts, --bail and the fail-loud report
+#   all apply to them unchanged. Single-process mode runs them as two more `bun test` commands.
 if [ "${SCRML_HOOK_SHARDS:-}" = "1" ] || [ ! -f scripts/test-sharded.ts ]; then
   if ! bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance compiler/tests/*.test.js --bail 2>&1; then
     echo "✗ Tests failed. Fix before committing." >&2
     exit 1
   fi
+  # shellcheck disable=SC2086  # SLICE_DIRS is a fixed, space-free word list
+  if [ "$RUN_SLICES" = "1" ] && ! { bun test $SLICE_DIRS --bail 2>&1 && SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1 --bail 2>&1; }; then
+    echo "✗ Bootstrap slice tests failed. Fix before committing." >&2
+    exit 1
+  fi
 else
-  if ! bun scripts/test-sharded.ts --bail compiler/tests/unit compiler/tests/integration compiler/tests/conformance compiler/tests/*.test.js 2>&1; then
+  SLICE_ARGS=""
+  if [ "$RUN_SLICES" = "1" ]; then
+    SLICE_ARGS="--group $SLICE_DIRS --group=SLICE_CORE=lowered ./compiler/self-host-v2/slice-m1"
+  fi
+  # shellcheck disable=SC2086  # SLICE_ARGS is a fixed, space-free word list
+  if ! bun scripts/test-sharded.ts --bail compiler/tests/unit compiler/tests/integration compiler/tests/conformance compiler/tests/*.test.js $SLICE_ARGS 2>&1; then
     echo "✗ Tests failed. Fix before committing. (SCRML_HOOK_SHARDS=1 reruns single-process.)" >&2
     exit 1
   fi
