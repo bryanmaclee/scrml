@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 265 | 4 |
+| HIGH | 264 | 4 |
 | MED | 680 | 8 |
 | LOW | 470 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -120,9 +120,11 @@ RESOLVED S469 (s469-impl1-arm-commas): impl#1 ACCEPTS `,` between arms, the trai
 
 Found by the public-docs lane (PR #1485). Reproduced S469 (s469-spec-catchup): `match @k { "a" :> 1, else :> 2 }` → `E-MATCH-ARM-SEPARATOR` ("Match arms are separated by newlines, not commas (§18.2)"). This is NOT a stays-a-gap bug: it is an owed impl#1 change, ruled under the S435 exception because the migration route needs it — impl#1 must accept arm commas (match, `!{}` and engine message arms, trailing comma optional) so the `scrml fix` codemod can insert them and verify by emit diff (dpa-073 F5 steps 1–2). impl#1 does not ENFORCE commas (newline-separated arms stay accepted, a carried divergence). SPEC §18.2 / §19.4.5 state the comma list (s469-spec-catchup).
 
-### g-impl1-expr-match-literal-alternation-first-alternate-dropped-s469 — in an expression-position `match` (`@cell = match …`) written as a NEWLINE list, a literal alternation arm followed by another literal arm loses its first alternate (`1 | 2 :> "low"` matches only `2`), silently — `NEW S469; HIGH; open (silent miscompile)`
+### g-impl1-expr-match-literal-alternation-first-alternate-dropped-s469 — in an expression-position `match` (`@cell = match …`) written as a NEWLINE list, a literal alternation arm followed by another literal arm loses its first alternate (`1 | 2 :> "low"` matches only `2`), silently — `NEW S469; HIGH; RESOLVED S469 (s469-impl1-arm-commas r3)`
 
-<!-- @gap id=g-impl1-expr-match-literal-alternation-first-alternate-dropped-s469 sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts(splitMultiArmString — a number / string arm head preceded by `|` is registered as an arm start, and the text before the first registered start is dropped) prov=dispatch:s469-impl1-arm-commas(r2, review of 2f9176de0 F3 — repro sent);review:s469-impl1-arm-commas(F3) -->
+<!-- @gap id=g-impl1-expr-match-literal-alternation-first-alternate-dropped-s469 sev=HIGH status=resolved locus=compiler/src/codegen/emit-control-flow.ts(splitMultiArmString — a number / string arm head preceded by `|` is registered as an arm start, and the text before the first registered start is dropped) prov=dispatch:s469-impl1-arm-commas(r2, review of 2f9176de0 F3 — repro sent);review:s469-impl1-arm-commas(F3) -->
+
+RESOLVED S469 (s469-impl1-arm-commas r3, the S435 security limb — a silent miscompile that decides an auth outcome): `splitMultiArmString` reads a string / number head through its `| literal` alternate chain to the arm arrow, and an alternate (the previous non-space character a lone `|`) is never an arm start — the guard its variant branch already had. Pinned by `compiler/tests/unit/match-literal-alternation-s469.test.js` (number / string / mixed alternations of 2 and 3 alternates × `@cell = match`, `return match`, `const v = match`, derived cell, derived `const` cell, call argument, markup `${}` × newline / comma / mixed spellings, byte-identical; before the fix the `@cell`, derived-cell and call-argument rows failed) and security-failable-pack n24 (27 deny-list shapes; on c4233fa33 every newline-spelled `@cell` / call-argument shape logged the wrong password in). Corpus emit differential c4233fa33 → fix: no artifact changed (no corpus program used the shape). Original entry:
 
 Reproduced S469 (s469-impl1-arm-commas r2) on the batch-5 base `aa341cda0` and on this branch, exit 0, no diagnostic:
 

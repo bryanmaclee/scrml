@@ -50,3 +50,14 @@ already ending in `,` is skipped); an arm ending in `;` is NOT rewritten and is 
       division (`"x" + /a,b/` → `/ a , b /`, silent, any position).
 - [x] Merged origin/land/s469-batch-5 (c86790d6c) then origin/main after #1501 landed (6c6ac6165).
 - [x] impl#1 conformance after the merge: 1728 + 80 xfail.
+
+## Round 3 (PA: fix F3 here, S435 security limb)
+- [x] `splitMultiArmString`: string / number heads read through their `| literal` chain; an alternate is never an
+      arm start. Unit matrix `match-literal-alternation-s469.test.js` (48: 7 positions × 6 alternation kinds × 3
+      spellings, byte-identical; bites on the pre-fix tree in the `@cell`, derived-cell, call-argument rows).
+- [x] Pack n24 +27 deny-list shapes (498 total): on c4233fa33 every newline `@cell` / call-argument shape is FAIL.
+- [x] Corpus emit diff c4233fa33 → fix: 171 content diffs, all `_scrml_project_root` only (base captured from a
+      scratch copy; verified by normalizing that line in every pair) — no program changed.
+- [x] Gap resolved; state.ts --write.
+- Note: a `number` / `string` / `int`-typed cell as a match subject is E-TYPE-025 ("asIs") in the const / derived /
+  markup positions (a separate typer limitation; the matrix uses `number | string`).
