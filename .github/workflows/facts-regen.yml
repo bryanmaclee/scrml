@@ -1,0 +1,116 @@
+# facts-regen — regenerate docs/FACTS.md on main AFTER merge (S469).
+#
+# OWNER RULING (scrml-support user-voice, S469): "Regenerate on main after merge." PRs no longer fail on
+#   stale FACTS counts; this job keeps main's public numbers current within minutes, and the PR-side
+#   `facts.ts --check` in ci.yml is a WARNING. See .github/README.md for the whole flow.
+#
+# WHY: FACTS.md holds repo-wide totals (compiler/src lines, test files, SPEC lines, conformance cases …).
+#   48 of the 78 landings 2026-10-10..22 changed it, so each landing staled — and textually conflicted
+#   with — every other in-flight PR's FACTS.md, and the merge queue kicked them.
+#
+# HOW: on every push to main, `facts.ts --write` on main's tip. No drift → nothing (and a leftover bot
+#   PR is closed). Drift → one commit on top of main's tip, force-pushed to the FIXED branch
+#   `bot/facts-regen`, one PR from it, auto-merge enabled → it goes through the merge queue and the
+#   required `gate` like any other PR. NO direct push to main: ruleset 25356240 (no bypass actors)
+#   requires a PR + `gate` + the queue, and this job uses that front door.
+#
+# TOKEN: MAPS_PAT (the fine-grained PAT cloud-maps.yml already uses — Contents R/W + Pull-requests R/W).
+#   A PR opened with the default GITHUB_TOKEN does not trigger other workflows, so `gate` would never
+#   run on it and the queue would never take it. NB fine-grained PATs expire — when MAPS_PAT lapses this
+#   job (and cloud-maps) go red at checkout; harmless to merges (neither is a required check) but FACTS
+#   then drifts until it is renewed.
+#
+# NO LOOP: FACTS.md is not an input of any figure in it (every fact is derived from compiler/src,
+#   compiler/tests, SPEC.md, conformance/cases, stdlib/, lsp/, editors, deploy targets, the snippet
+#   corpus). So when the bot PR lands, the push it produces re-runs this job, `--write` finds main
+#   already current (a fixpoint), and the job exits without a PR. Termination is by idempotence, not by
+#   a path filter — deliberately: a path filter would also skip the run that must catch a bot PR that
+#   landed numbers computed on an older tip.
+#
+# NO RACE: (1) `concurrency: facts-regen` with cancel-in-progress — a burst of merges leaves only the
+#   newest run alive, and it computes from main's CURRENT tip; (2) one fixed branch, force-updated, so
+#   there is never more than one bot PR; (3) if the open bot PR already carries exactly the figures the
+#   current tip needs and is not conflicting, it is left alone (no force-push → no needless dequeue and
+#   no re-run of `gate`); (4) a bot PR that main has caught up with on its own is closed, so a stale
+#   regen cannot land later and roll numbers back.
+
+name: facts-regen
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}            # manual re-fire (e.g. after renewing MAPS_PAT)
+
+concurrency:
+  group: facts-regen
+  cancel-in-progress: true
+
+permissions:
+  contents: read                   # every write goes through MAPS_PAT, not GITHUB_TOKEN
+
+jobs:
+  regen:
+    if: ${{ github.repository == 'scrml-lang/scrml' }}   # forks have no MAPS_PAT
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BR: bot/facts-regen
+      GH_TOKEN: ${{ secrets.MAPS_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main                          # the CURRENT tip, not the SHA that triggered this run
+          token: ${{ secrets.MAPS_PAT }}     # identity whose push/PR fires `gate` (GITHUB_TOKEN's wouldn't)
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"   # PINNED — same as ci.yml (see its header note on bun)
+      - name: Install deps
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+        run: bun install --frozen-lockfile
+
+      # Exit 2 (degenerate zero measurement) / 1 (missing anchor on --write) fail the job loudly: a
+      # broken instrument must not be committed as a fact.
+      - name: Regenerate docs/FACTS.md from main's tip
+        run: bun scripts/facts.ts --write
+
+      - name: Land the regen through the merge queue (only if drift)
+        run: |
+          set -euo pipefail
+          PR=$(gh pr list --head "$BR" --base main --state open --json number --jq '.[0].number // empty')
+
+          if git diff --quiet -- docs/FACTS.md; then
+            echo "docs/FACTS.md is current on main — nothing to land."
+            if [ -n "$PR" ]; then
+              gh pr close "$PR" --delete-branch \
+                --comment "main's FACTS.md is already current at $(git rev-parse --short HEAD); this regen is no longer needed."
+            fi
+            exit 0
+          fi
+          git diff --stat -- docs/FACTS.md
+
+          # An open bot PR that already carries exactly these figures, and still merges cleanly, is left
+          # untouched: force-pushing it would dequeue it and re-run `gate` for no change.
+          if [ -n "$PR" ] && git fetch -q --depth=1 origin "$BR" \
+             && git show FETCH_HEAD:docs/FACTS.md | cmp -s - docs/FACTS.md \
+             && [ "$(gh pr view "$PR" --json mergeable --jq .mergeable)" != "CONFLICTING" ]; then
+            echo "bot PR #$PR already carries these figures — leaving it as is."
+          else
+            git config user.name  "scrml-facts-ci"
+            git config user.email "scrml-facts-ci@users.noreply.github.com"
+            git checkout -B "$BR"
+            git add docs/FACTS.md
+            git commit -q -m "chore(facts): regenerate docs/FACTS.md after merge of $(git rev-parse --short HEAD)"
+            git push --force origin "HEAD:refs/heads/$BR"
+            if [ -z "$PR" ]; then
+              gh pr create --base main --head "$BR" \
+                --title "chore(facts): post-merge FACTS.md regen" \
+                --body "Automated \`bun scripts/facts.ts --write\` on main's tip by \`.github/workflows/facts-regen.yml\` (owner ruling S469: regenerate on main after merge). Only \`docs/FACTS.md\` changes. The branch \`$BR\` is force-updated by every merge to main, so this PR always carries the newest figures; it goes through \`gate\` and the merge queue like any other PR."
+              PR=$(gh pr list --head "$BR" --base main --state open --json number --jq '.[0].number')
+            fi
+          fi
+
+          # Idempotent. With the merge queue required, --auto enqueues once checks pass and the
+          # strategy flag is ignored (the queue's MERGE method applies); it matters only if the queue
+          # is ever switched off.
+          gh pr merge "$PR" --auto --merge
