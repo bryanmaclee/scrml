@@ -1400,6 +1400,7 @@ ${
             .ParseInt :> "ParseInt"
             .ParseNum :> "ParseNum"
             .ParseBool :> "ParseBool"
+            .Text :> "Text"
         }
     }
 }

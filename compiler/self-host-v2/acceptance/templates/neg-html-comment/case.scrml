@@ -1,0 +1,10 @@
+// an HTML-like comment in a slot is refused: two readings, two meanings.
+<program>
+    fn show(n: int) -> string {
+        return `v=${ n
+--> 1 }`
+    }
+    <main>
+        <p>${show(1)}</p>
+    </main>
+</program>

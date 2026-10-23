@@ -1,0 +1,20 @@
+{
+  "id": "acceptance-templates-narrowed",
+  "description": "a `T | not` slot narrowed first is text.",
+  "language-version": "1.0",
+  "spec": "§14.13.3 · §14.13.2",
+  "rationale": "§14.13.2: \"a `T | not` value in a template slot SHALL be narrowed first\" — narrowed, it is its `T`.",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#some",
+        "text": "got 4"
+      },
+      {
+        "selector": "#none",
+        "text": "none"
+      }
+    ]
+  }
+}

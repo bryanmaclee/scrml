@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-templates-neg-tape",
+  "description": "E-TEXT-NON-PRIMITIVE: a tape in a template slot.",
+  "language-version": "1.0",
+  "spec": "§14.13.3 · §14.13.2 · §34",
+  "rationale": "§14.13.2: a tape has no one honest text (join it, `xs.join(\", \")`, for a string tape).",
+  "expect": {
+    "codes": [
+      "E-TEXT-NON-PRIMITIVE"
+    ],
+    "codeCounts": {
+      "E-TEXT-NON-PRIMITIVE": 1
+    }
+  }
+}

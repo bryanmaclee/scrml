@@ -1,0 +1,22 @@
+// component.scrml — README "What changed", item 3: a component is a declaration with a `renders`.
+// SPEC §66.19.4. The older dialect wrote it as `const Swatch = <span props={…}>`.
+<program>
+
+<brand="#338967"/>
+
+<swatch:struct>
+    let <label:string="Brand"/>
+    let <hex:string=@brand/>
+</>
+renders <span class="chip"><i style="background:${hex}"></i> ${label}</span>
+
+<accent:swatch label="Accent" hex=@brand/>
+<warn:swatch label="Warn" hex="#FF6600"/>
+
+<main>
+    <*accent/>
+    <*warn/>
+    <swatch label="Danger" hex="#dc2626"/>
+</main>
+
+</program>

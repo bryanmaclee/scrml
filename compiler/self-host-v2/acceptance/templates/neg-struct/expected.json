@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-templates-neg-struct",
+  "description": "E-TEXT-NON-PRIMITIVE: a struct in a template slot.",
+  "language-version": "1.0",
+  "spec": "§14.13.3 · §14.13.2 · §34",
+  "rationale": "§14.13.2: a struct has no one honest text — interpolate a field, a `scrml:format` call, or `log()`.",
+  "expect": {
+    "codes": [
+      "E-TEXT-NON-PRIMITIVE"
+    ],
+    "codeCounts": {
+      "E-TEXT-NON-PRIMITIVE": 1
+    }
+  }
+}

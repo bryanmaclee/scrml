@@ -1,11 +1,8 @@
-// tasks.scrml — the README flagship, as one compiling program.
+// tasks.scrml — the README flagship, as one program in the ruled dialect.
 // A SQLite-backed task list, live-synced across browser tabs, whose status
-// line is a state machine. CI compiles this file on every push
-// (scripts/snippet-gate.js); README.md shows it in pieces, each piece linked here.
-//
-// Run it:
-//   scrml db-migrate tasks.scrml --db tasks.db   # create the table from <schema>
-//   scrml dev tasks.scrml                        # then open http://localhost:3000 in two tabs
+// line is a state machine. CI compiles this file with the bootstrap on every
+// push (scripts/snippet-gate.js); README.md shows it in pieces, each linked here.
+// The bootstrap cannot build all of it yet (README.md names what is missing).
 
 <program db="tasks.db">
 
@@ -17,111 +14,103 @@
     }
 </>
 
-type Task:struct = {
-    id: number,
-    text: string,
-    completed_at: number | not
+type Task:struct = { id: int, text: string, completed_at: number | not }
+
+type TaskError:enum = { Duplicate, Storage }
+
+fn isActive(t: Task) -> bool {
+    return t.completed_at is not;
 }
 
-type TaskError:enum = { Duplicate }
-
-fn isActive(t: Task) -> boolean {
-    return t.completed_at is not
-}
-
-function loadTasks() {
-    return ?{`SELECT id, text, completed_at FROM tasks ORDER BY id`}.all() !{ _ :> [] }
+// ⚑ OPEN: `?{}` rows are untyped; how a row becomes a `Task` value is not ruled yet.
+function loadTasks()! -> TaskError {
+    let rows: Task[] = ?{`SELECT id, text, completed_at FROM tasks ORDER BY id`}.all() !{
+        _ :> { fail TaskError.Storage; },
+    };
+    return rows;
 }
 
 function insertTask(text: string)! -> TaskError {
-    const same = ?{`SELECT id FROM tasks WHERE text = ${text}`}.get()
-    if (same is given) fail .Duplicate
-    return ?{`INSERT INTO tasks (text, completed_at) VALUES (${text}, ${not})
-              RETURNING id, text, completed_at`}.get()
+    let same = ?{`SELECT id FROM tasks WHERE text = ${text}`}.get() !{
+        _ :> { fail TaskError.Storage; },
+    };
+    if (same is given) { fail TaskError.Duplicate; }
+    let row: Task = ?{`INSERT INTO tasks (text, completed_at) VALUES (${text}, ${not})
+                       RETURNING id, text, completed_at`}.get() !{
+        _ :> { fail TaskError.Storage; },
+    };
+    return row;
 }
 
-function flipTask(id: number) {
-    return ?{`UPDATE tasks SET completed_at =
-                CASE WHEN completed_at IS NULL THEN ${Date.now()} ELSE NULL END
-              WHERE id = ${id}
-              RETURNING id, text, completed_at`}.get()
+function flipTask(id: int)! -> TaskError {
+    let row: Task = ?{`UPDATE tasks SET completed_at =
+                         CASE WHEN completed_at IS NULL THEN ${Date.now()} ELSE NULL END
+                       WHERE id = ${id}
+                       RETURNING id, text, completed_at`}.get() !{
+        _ :> { fail TaskError.Storage; },
+    };
+    return row;
 }
 
 <channel name="tasks">
-    <tasks>: Task[] = []
+    <tasks:Task[free, append, write, replace]=[]/>
 
-    function addRow(row: Task) { @tasks = [...@tasks, row] }
-    function replaceRow(row: Task) { @tasks = @tasks.map(t => t.id == row.id ? row : t) }
+    function addRow(row: Task) { @tasks.append(row); }
+    function replaceRow(row: Task) { @tasks = @tasks.map(t => t.id == row.id ? row : t); }
 </>
 
 type Filter:enum = { All, Active, Done }
 
-<filter>: Filter = .All
-<newTask req length(>=1)> = <input placeholder="What needs doing?"/>
+let <filter:Filter=.All/>
 
-const <visible> = match @filter {
-    .All    :> @tasks
-    .Active :> @tasks.filter(isActive)
-    .Done   :> @tasks.filter(t => !isActive(t))
-}
-const <left> = @tasks.filter(isActive).length
+<entry:struct>
+    let <text:string="" req length(>=1)/>
+    renders <input placeholder="What needs doing?" bind:value=@text/>
+</>
+renders <form onsubmit=submit()>
+    <*text/>
+    <button>Add</button>
+</form>
+
+<active:Task[]=(@tasks.filter(t => isActive(t)))/>
+<visible:Task[]=(match @filter {
+    .All    :> @tasks,
+    .Active :> @active,
+    .Done   :> @tasks.filter(t => !isActive(t)),
+})/>
+<left:int=(@active.length)/>
 
 type Phase:enum = { Loading, Editing, Saving, Saved, Rejected(msg: string) }
 
 function load() {
-    @tasks = loadTasks() !{ .Transport(_) :> return }
-    @phase = .Editing
+    @tasks = loadTasks() !{ _ :> { @phase = Phase.Rejected("Could not load the list."); return; }, };
+    @phase = .Editing;
 }
 
 function submit() {
-    @phase = .Saving
-    const row: Task = insertTask(@newTask) !{
-        ::Duplicate :> { @phase = .Rejected("That task is already on the list."); return }
-    }
-    addRow(row)
-    @newTask = ""
-    @phase = .Saved
+    @phase = .Saving;
+    let row: Task = insertTask(@entry.text) !{
+        .Duplicate :> { @phase = Phase.Rejected("That task is already on the list."); return; },
+        _          :> { @phase = Phase.Rejected("Could not save the task."); return; },
+    };
+    addRow(row);
+    reset(@entry.text);
+    @phase = .Saved;
 }
 
-function toggle(id: number) {
-    replaceRow(flipTask(id))
+function toggle(id: int) {
+    let row: Task = flipTask(id) !{ _ :> { return; }, };
+    replaceRow(row);
 }
 
-<form onsubmit=submit()>
-    <newTask/>
-    <button>Add</button>
-</form>
-
-<nav>
-    <button onclick=${@filter = .All}    class:on=${@filter == .All}>All</button>
-    <button onclick=${@filter = .Active} class:on=${@filter == .Active}>Active</button>
-    <button onclick=${@filter = .Done}   class:on=${@filter == .Done}>Done</button>
-</nav>
-
-<ul>
-    <each in=@visible key=@.id>
-        <li class:done=${!isActive(@.)} onclick=${toggle(@.id)}>${@.text}</li>
-        <empty><li>Nothing here.</li></empty>
-    </each>
-</ul>
-
-<engine for=Phase initial=.Loading effect=${ load() }>
-    <Loading rule=.Editing>
-        <p>Loading…</p>
-    </>
-    <Editing rule=.Saving>
-        <p>${@left} left</p>
-    </>
-    <Saving rule=(.Saved | .Rejected)>
-        <p>Saving…</p>
-    </>
-    <Saved rule=(.Editing | .Saving)>
-        <p>Saved.</p>
+<phase:Phase=.Loading single effect=${ load(); }>
+    <Loading  rule=(.Editing | .Rejected)/>
+    <Editing  rule=.Saving/>
+    <Saving   rule=(.Saved | .Rejected)/>
+    <Saved    rule=(.Editing | .Saving)>
         <onTimeout after=1.5s to=.Editing/>
     </>
-    <Rejected msg rule=.Saving>
-        <p class="err">${msg}</p>
-    </>
+    <Rejected rule=.Saving/>
 </>
 
 #{
@@ -129,5 +118,27 @@ function toggle(id: number) {
     .on   { font-weight: bold; }
     .err  { color: #b91c1c; }
 }
+<*entry/>
+
+<nav>
+    <button onclick={ @filter = .All; }    class:on=(@filter == .All)>All</button>
+    <button onclick={ @filter = .Active; } class:on=(@filter == .Active)>Active</button>
+    <button onclick={ @filter = .Done; }   class:on=(@filter == .Done)>Done</button>
+</nav>
+
+<ul>
+    <each in=@visible as t key=t.id>
+        <li class:done=(!isActive(t)) onclick=toggle(t.id)>${t.text}</li>
+        <empty><li>Nothing here.</li></empty>
+    </each>
+</ul>
+
+<match for=Phase on=@phase>
+    <Loading><p>Loading…</p></Loading>
+    <Editing><p>${@left} left</p></Editing>
+    <Saving><p>Saving…</p></Saving>
+    <Saved><p>Saved.</p></Saved>
+    <Rejected(msg)><p class="err">${msg}</p></Rejected>
+</match>
 
 </program>

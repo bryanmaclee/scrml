@@ -1,0 +1,11 @@
+// §14.13.3: templates nest; a slot's strings and comments may hold `}` and backticks.
+<program>
+    let <n:int=7/>
+    fn wrap(k: int) -> string {
+        return `<${`(${k})`}|${ "}" }|${ /* } ` */ k + 1 }>`
+    }
+    <main>
+        <p id="out">${wrap(@n)}</p>
+        <p id="markup">${`n=${@n}, twice=${`${@n * 2}`}`}</p>
+    </main>
+</program>

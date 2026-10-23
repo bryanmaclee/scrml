@@ -1,0 +1,9 @@
+// a malformed escape in a template's text is refused.
+<program>
+    fn show() -> string {
+        return `a\1b`
+    }
+    <main>
+        <p>${show()}</p>
+    </main>
+</program>
