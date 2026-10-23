@@ -158,6 +158,55 @@ describe("E-IMPL1-RULED-FORM-UNSUPPORTED — round 2 positions", () => {
   }
 });
 
+// Round 3 (final review of cb043b5e3).
+const REFUSED_R3 = {
+  "F1 tagged template: int.parse in an interpolation": [prog("${ const s = String.raw`${int.parse(\"3\")}` }"), "§14.13.4", "`int.parse(s)`"],
+  "F1 tagged template: tape append in an interpolation": [prog("${ const ys = [1]\n const s = String.raw`${ys.append(2)}` }"), "§66.12.6", "`.append(…)`"],
+  "F1 regex with a quote does not hide a later call": [prog("${ const g = (s) => { const ok = /it's/.test(s); return int.parse(s) }\n @n = 1 }"), "§14.13.4", "`int.parse(s)`"],
+  "F2 namespace read as a value: const p = int.parse": [prog("${ const p = int.parse\n @n = 1 }"), "§14.13.4", "`int` used as a value"],
+  "F2 namespace destructured: const { parse } = int": [prog("${ const { parse } = int\n @n = 1 }"), "§14.13.4", "`int` used as a value"],
+  "F2 template-literal key: int[`parse`]": [prog("${ const p = int[`parse`]\n @n = 1 }"), "§14.13.4", "`int` used as a value"],
+  "F2 computed key: int[\"pa\" + \"rse\"]": [prog("${ const p = int[\"pa\" + \"rse\"]\n @n = 1 }"), "§14.13.4", "`int` used as a value"],
+  "F2 boolean namespace alias: const P = bool": [prog("${ const P = bool\n @n = 1 }"), "§14.13.4", "`bool` used as a value"],
+  "F3 unicode escape in a handler arrow body": [prog("<button onclick=${() => { @n = \\u0069nt.parse(\"3\") }}>g</button>"), "§14.13.4", "`int.parse(s)`"],
+};
+const ACCEPTED_R3 = {
+  "F1 a ruled spelling inside a comment": prog("${ const g = () => { /* int.parse( */ return 1 }\n @n = g() }"),
+  "F1 a ruled spelling inside a string in a hatch body": prog("${ const g = () => { return \"int.parse(x)\" }\n @n = g().length }"),
+  "F1 a ruled spelling inside template TEXT": prog("${ const s = String.raw`int.parse(3)` }"),
+  "F4 a hatch-body local named bool shadows the namespace": prog("${ const g = (x) => { const bool = f(); return bool.parse(x) }\n @n = 1 }"),
+  "F2 type names in annotations are not values": prog("function g(k: int, b: bool) -> number { return k }\n${ @n = g(1, true) }"),
+  "F2 a local named number is a value": prog("${ const number = 3\n @n = number }"),
+};
+
+describe("E-IMPL1-RULED-FORM-UNSUPPORTED — round 3", () => {
+  for (const [name, [src, section, formText]] of Object.entries(REFUSED_R3)) {
+    test(name, () => {
+      const r = compile(src);
+      expect(r.ruled.length).toBe(1);
+      expect(r.messages[0]).toContain(section);
+      expect(r.messages[0]).toContain(formText);
+    });
+  }
+  for (const [name, src] of Object.entries(ACCEPTED_R3)) {
+    test(`clean: ${name}`, () => {
+      expect(compile(src).codes).not.toContain(CODE);
+    });
+  }
+});
+
+describe("codeOnly", () => {
+  test("keeps template interpolations, blanks text, strings, comments and regexes", async () => {
+    const { codeOnly } = await import("../../src/impl1-ruled-form-refusal.ts");
+    expect(codeOnly("String.raw`a${int.parse(\"3\")}b`")).toContain("int.parse");
+    expect(codeOnly("a /* int.parse( */ + b")).not.toContain("int.parse");
+    expect(codeOnly("a // int.parse(\nb")).not.toContain("int.parse");
+    expect(codeOnly("x = /it's/.test(s); int.parse(s)")).toContain("int.parse");
+    expect(codeOnly("\"int.parse(\" + 'x'")).not.toContain("int.parse");
+    expect(codeOnly("`int.parse(`")).not.toContain("int.parse");
+  });
+});
+
 describe("E-IMPL1-RULED-FORM-UNSUPPORTED — the message", () => {
   test("names the bootstrap command and says it is an impl#1 limit", () => {
     const r = compile(REFUSED["int.parse"][0]);

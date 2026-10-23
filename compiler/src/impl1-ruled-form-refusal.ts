@@ -74,6 +74,20 @@ const TAPE_GRANT_METHODS: ReadonlyMap<string, string> = new Map([
   ["remove", "shrink anywhere"],
 ]);
 
+/**
+ * Round 3 (F2): a primitive type name is a namespace for `parse` and nothing else (§14.13.4), and
+ * impl#1 binds no such name, so ANY other read of it — `const p = int.parse`, `const { parse } =
+ * int`, `int[\`parse\`]`, `int["pa" + "rse"]` — is the same unimplemented ruled form.
+ */
+export function namespaceValueFinding(name: string): RuledFormFinding {
+  const prim = PARSE_PRIMITIVES.get(name) ?? name;
+  return {
+    form: `\`${name}\` used as a value`,
+    section: "§14.13.4",
+    detail: `a primitive type name is a namespace for \`parse\` only; call \`${prim}.parse(s)\` directly`,
+  };
+}
+
 export interface CallFormContext {
   /** Scope lookup for a bare name (no `@`). Returns the binding kind, or null when unbound. */
   lookupKind(name: string): string | null;
@@ -100,8 +114,8 @@ export function ruledFormOfCall(call: unknown, ctx: CallFormContext): RuledFormF
   if (typeof method !== "string") return null;
   const obj = c.callee.object as { kind?: string; name?: string } | undefined;
 
-  if (method === "parse" && obj && obj.kind === "ident" && typeof obj.name === "string") {
-    const name = obj.name;
+  if (decodeIdentEscapes(method) === "parse" && obj && obj.kind === "ident" && typeof obj.name === "string") {
+    const name = decodeIdentEscapes(obj.name);
     // A local / parameter / cell of that name shadows the type namespace; a type binding or an
     // imported name (an imported enum, resolved through the seeded registry) does not.
     const bound = ctx.lookupKind(name);
@@ -126,13 +140,13 @@ export function ruledFormOfCall(call: unknown, ctx: CallFormContext): RuledFormF
     return null;
   }
 
-  const grant = TAPE_GRANT_METHODS.get(method);
+  const grant = TAPE_GRANT_METHODS.get(decodeIdentEscapes(method));
   if (grant && obj) {
     // Only a receiver PROVEN to be a tape: on a map (`insert` / `remove`, §59), a DOM element
     // (`el.remove()`, `el.append(…)`), FormData, classList … the name is a different method.
     if (ctx.receiverKind(obj) !== "array") return null;
     return {
-      form: `the tape method \`.${method}(…)\``,
+      form: `the tape method \`.${decodeIdentEscapes(method)}(…)\``,
       section: "§66.12.6",
       detail: `\`.${method}\` is a ${grant} write, and impl#1 tapes are JavaScript arrays without it`,
     };
@@ -196,7 +210,9 @@ export function forEachRuledCallForm(
   const walkBody = (stmts: unknown[], params: Set<string>): void => {
     const tapes = new Set<string>();
     for (const nm of collectLiteralTapeNames(stmts)) if (!nm.startsWith("@") && !params.has(nm)) tapes.add(nm);
-    shadowStack.push(params);
+    // Round 3 (F4): a local declared in the body shadows like a parameter, as in a function body.
+    const scope = new Set<string>([...params, ...declaredLocalNames(stmts)]);
+    shadowStack.push(scope);
     tapeStack.push(tapes);
     for (const f of collectRuledStatementForms(stmts)) cb(f);
     walk(stmts);
@@ -211,7 +227,20 @@ export function forEachRuledCallForm(
     const n = node as Record<string, unknown>;
     if (n.kind === "call") {
       const f = ruledFormOfCall(n, scopedCtx);
-      if (f) cb({ ...f, node: n });
+      if (f) {
+        cb({ ...f, node: n });
+        // The namespace this call reads is reported once, as the call form.
+        const callee = n.callee as { object?: unknown } | undefined;
+        if (callee && callee.object && typeof callee.object === "object") seen.add(callee.object as object);
+      }
+    }
+    if (n.kind === "ident" && typeof n.name === "string") {
+      const nm = decodeIdentEscapes(n.name);
+      if (PARSE_PRIMITIVES.has(nm)) {
+        const k = scopedCtx.lookupKind(nm);
+        if (k === null || k === "type" || k === "import") cb({ ...namespaceValueFinding(nm), node: n });
+      }
+      return;
     }
     if (n.kind === "lit" && n.litType === "template") {
       for (const sub of templateNodes(n)) walk(sub);
@@ -220,12 +249,18 @@ export function forEachRuledCallForm(
     if (n.kind === "escape-hatch") {
       const text = typeof n.bodyRaw === "string" ? n.bodyRaw : typeof n.raw === "string" ? n.raw : "";
       const isFn = n.nativeKind === "ArrowFunctionExpression" || n.nativeKind === "FunctionExpression";
+      const shadow = paramNames(n.params);
       if (isFn) {
         const stmts = readers.hatchBody ? readers.hatchBody(n) : null;
-        if (Array.isArray(stmts)) { walkBody(stmts, paramNames(n.params)); return; }
+        if (Array.isArray(stmts)) {
+          walkBody(stmts, shadow);
+          for (const nm of declaredLocalNames(stmts)) shadow.add(nm);
+        }
       }
-      // Unreadable (or a hatch the parser could not structure at all): fail closed on the text.
-      for (const f of lexicalRuledForms(text, scopedCtx, readers.enumNames ? readers.enumNames() : [], paramNames(n.params))) cb({ ...f, node: n });
+      // The text is ALSO matched, readable or not (round 3, F3): a re-read can lose an escape
+      // (`\u0069nt` read back as `u0069nt`), and the text keeps it. An unreadable body is matched
+      // only here, so it fails closed. Repeats of a structured finding collapse in runTS.
+      for (const f of lexicalRuledForms(text, scopedCtx, readers.enumNames ? readers.enumNames() : [], shadow)) cb({ ...f, node: n });
       return;
     }
     if (n.kind === "lambda") {
@@ -257,7 +292,7 @@ export function lexicalRuledForms(
   shadow: ReadonlySet<string> = new Set(),
 ): RuledFormFinding[] {
   if (typeof text !== "string" || text.length === 0) return [];
-  const src = stripStrings(text);
+  const src = decodeIdentEscapes(codeOnly(text));
   const out: RuledFormFinding[] = [];
   const seenForms = new Set<string>();
   const add = (f: RuledFormFinding | null) => {
@@ -286,6 +321,14 @@ export function lexicalRuledForms(
     if (!names.has(m[2])) continue;
     add(ruledFormOfCall(fake(m[2], "parse"), lexCtx));
   }
+  // A primitive namespace read as a value (`int.parse` not called, `int[…]`): F2 below, lexically.
+  const nsRe = /(^|[^\w$.@])(int|number|bool|integer|boolean)\s*(\.|\[)/g;
+  while ((m = nsRe.exec(src))) {
+    if (/^\s*\.\s*parse\s*\(/.test(src.slice(m.index + m[0].length - 1))) continue; // the call form, above
+    const k = lexCtx.lookupKind(m[2]);
+    if (k !== null && k !== "type" && k !== "import") continue;
+    add(namespaceValueFinding(m[2]));
+  }
   const tapeRe = /(^|[^\w$.])(@?[A-Za-z_$][\w$]*)\s*\.\s*(append|prepend|insert|remove)\s*\(/g;
   while ((m = tapeRe.exec(src))) add(ruledFormOfCall(fake(m[2], m[3]), lexCtx));
   if (/(^|[^\w$])for\s*\{/.test(src)) add({ form: "the infinite loop `for { … }`", section: "§49.3.6" });
@@ -313,9 +356,96 @@ export function lexicalRuledForms(
 // Statement forms (structural)
 // ---------------------------------------------------------------------------
 
-/** Strip quoted strings / templates so a `..` inside text is not read as a range. */
+/**
+ * The CODE of a JavaScript-like text, with everything that is not code blanked (round 3, F1):
+ * comments go; a quoted string becomes `""`; a regular-expression literal becomes `/ /`; a template
+ * literal keeps its `${ … }` contents (they are code — a tagged template's interpolations run) and
+ * loses only its text. Lengths are not preserved; only the code tokens matter to the matchers.
+ */
+export function codeOnly(raw: string): string {
+  let out = "";
+  let i = 0;
+  const n = raw.length;
+  // A `/` starts a regex when the previous significant character cannot end an operand.
+  const regexCanStart = (): boolean => {
+    let k = out.length - 1;
+    while (k >= 0 && /\s/.test(out[k])) k--;
+    if (k < 0) return true;
+    const ch = out[k];
+    if (/[(,=:[!&|?{};+\-*%<>~^]/.test(ch)) return true;
+    const word = /([A-Za-z_$][\w$]*)$/.exec(out.slice(0, k + 1));
+    return !!word && /^(return|typeof|case|do|else|in|of|new|delete|void|throw|yield|await|lift)$/.test(word[1]);
+  };
+  const template = (): void => {
+    // at raw[i] === "`"
+    i++;
+    out += "``";
+    while (i < n && raw[i] !== "`") {
+      if (raw[i] === "\\") { i += 2; continue; }
+      if (raw[i] === "$" && raw[i + 1] === "{") {
+        i += 2;
+        out += " (";
+        code("}");
+        out += ") ";
+        i++; // the closing }
+        continue;
+      }
+      i++;
+    }
+    i++; // closing backtick
+  };
+  // Scan code until the unmatched `stop` (or the end).
+  const code = (stop: string | null): void => {
+    let depth = 0;
+    while (i < n) {
+      const ch = raw[i];
+      if (stop && ch === stop && depth === 0) return;
+      if (ch === "/" && raw[i + 1] === "/") { while (i < n && raw[i] !== "\n") i++; out += " "; continue; }
+      if (ch === "/" && raw[i + 1] === "*") { const e = raw.indexOf("*/", i + 2); i = e < 0 ? n : e + 2; out += " "; continue; }
+      if (ch === '"' || ch === "'") {
+        i++;
+        while (i < n && raw[i] !== ch && raw[i] !== "\n") { if (raw[i] === "\\") i++; i++; }
+        i++;
+        out += '""';
+        continue;
+      }
+      if (ch === "`") { template(); continue; }
+      if (ch === "/" && regexCanStart()) {
+        let inClass = false;
+        i++;
+        while (i < n && raw[i] !== "\n") {
+          if (raw[i] === "\\") { i += 2; continue; }
+          if (raw[i] === "[") inClass = true;
+          else if (raw[i] === "]") inClass = false;
+          else if (raw[i] === "/" && !inClass) break;
+          i++;
+        }
+        i++;
+        while (i < n && /[a-z]/i.test(raw[i])) i++;
+        out += "/ /";
+        continue;
+      }
+      if (ch === "{" || ch === "(" || ch === "[") depth++;
+      else if (ch === "}" || ch === ")" || ch === "]") depth--;
+      out += ch;
+      i++;
+    }
+  };
+  code(null);
+  return out;
+}
+
+/** `\u0069nt` → `int`: identifier escapes decoded, so an escaped spelling is matched (round 3, F3). */
+export function decodeIdentEscapes(text: string): string {
+  return text.replace(/\\u\{([0-9a-fA-F]+)\}|\\u([0-9a-fA-F]{4})/g, (_m, a, b) => {
+    const cp = parseInt(a ?? b, 16);
+    return Number.isFinite(cp) && cp <= 0x10ffff ? String.fromCodePoint(cp) : _m;
+  });
+}
+
+/** Back-compat name: the code of a text (strings, comments, regexes and template text blanked). */
 function stripStrings(raw: string): string {
-  return raw.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`/g, '""');
+  return codeOnly(raw);
 }
 
 /** True when a for-head iterable is a §49.2.5 range (`a..b` / `a..=b`), not a spread. */
@@ -396,6 +526,34 @@ export function collectRuledStatementForms(topNodes: unknown[]): RuledFormFindin
     }
   };
   walk(topNodes, null);
+  return out;
+}
+
+/** The names a statement list declares (not crossing a function body), destructured ones included. */
+export function declaredLocalNames(stmts: unknown): Set<string> {
+  const out = new Set<string>();
+  const addPat = (pat: unknown): void => {
+    if (typeof pat === "string") { out.add(pat); return; }
+    if (!pat || typeof pat !== "object") return;
+    if (Array.isArray(pat)) { for (const p of pat) addPat(p); return; }
+    const p = pat as Record<string, unknown>;
+    for (const k of ["bindName", "local"]) if (typeof p[k] === "string") out.add(p[k] as string);
+    if (typeof p.name === "string" && p.kind !== "ident") out.add(p.name as string);
+    for (const k of ["properties", "elements", "rest"]) if (p[k]) addPat(p[k]);
+  };
+  const seen = new WeakSet<object>();
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object" || seen.has(node as object)) return;
+    seen.add(node as object);
+    if (Array.isArray(node)) { for (const x of node) walk(x); return; }
+    const n = node as Record<string, unknown>;
+    const k = n.kind as string;
+    if (k === "const-decl" || k === "let-decl" || k === "tilde-decl" || k === "lin-decl") addPat(n.name);
+    if (k === "function-decl" || k === "fn-decl") { if (typeof n.name === "string") out.add(n.name); return; }
+    if (k === "lambda" || k === "escape-hatch") return;
+    for (const key in n) if (key !== "span" && key !== "parent") walk(n[key]);
+  };
+  walk(stmts);
   return out;
 }
 
