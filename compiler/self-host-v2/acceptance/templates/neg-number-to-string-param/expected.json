@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-templates-neg-number-to-string-param",
+  "description": "E-TYPE-031: a number passed to a `string` parameter is refused; write a template.",
+  "language-version": "1.0",
+  "spec": "§14.13.3 · §14.13.1 · §7.3.4",
+  "rationale": "§14.13.1: \"any non-`string` value → a `string` parameter — a parameter is not a text sink — a template, `` label(`${n}`) ``\".",
+  "expect": {
+    "codes": [
+      "E-TYPE-031"
+    ],
+    "codeCounts": {
+      "E-TYPE-031": 1
+    }
+  }
+}

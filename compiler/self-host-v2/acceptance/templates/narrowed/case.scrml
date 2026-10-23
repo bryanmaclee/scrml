@@ -1,0 +1,13 @@
+// §14.13.2: a `T | not` slot is text once narrowed.
+<program>
+    fn show(m: int | not) -> string {
+        if (m is given) {
+            return `got ${m}`
+        }
+        return "none"
+    }
+    <main>
+        <p id="some">${show(4)}</p>
+        <p id="none">${show(not)}</p>
+    </main>
+</program>

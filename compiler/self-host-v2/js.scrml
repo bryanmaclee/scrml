@@ -144,7 +144,7 @@ ${
     fn prec(e: JsExpr) -> int {
         return match e {
             .JId :> 20
-            .JNum :> 20
+            .JNum(text: t) :> numPrec(t)
             .JStr :> 20
             .JBool :> 20
             .JNull :> 20
@@ -225,13 +225,32 @@ ${
             .JArrow(params: ps, body: body) :> arrowBlock(ps, body, ind)
             .JArrowE(params: ps, e: body) :> arrowExpr(ps, body, ind)
             .JBin(op: op, l: l, r: r) :> wrap(l, opPrec(op), ind) + " " + opText(op) + " " + wrap(r, opPrec(op) + 1, ind)
-            .JUn(op: op, e: x) :> unText(op) + wrap(x, 15, ind)
+            .JUn(op: op, e: x) :> unJs(op, x, ind)
             .JCond(test: t, a: a, b: b) :> wrap(t, 4, ind) + " ? " + wrap(a, 3, ind) + " : " + wrap(b, 3, ind)
             .JArray(elems: es) :> "[" + joinExprs(es, 2, ind) + "]"
             .JObject(props: ps) :> objectText(ps, ind)
             .JAnnot(e: x, note: n) :> expr(x, ind) + " /* " + n + " */"
             .JAwait(e: x) :> "await " + wrap(x, 15, ind)
         }
+    }
+
+    // s469 (templates review P1) — a prefix operator whose operand's text begins
+    // with the same sign would MERGE with it: `-` then `-x` printed `--x` (a
+    // decrement) and `-` then `-1` printed `--1` (a SyntaxError). Such an operand
+    // is parenthesized: `-(-x)`, `-(-1)`. (`!` merges with nothing.)
+    fn unJs(op: JsUnOp, x: JsExpr, ind: string) -> string {
+        const o: string = unText(op)
+        const inner: string = wrap(x, 15, ind)
+        const c: string = inner.substring(0, 1)
+        if ((o == "-" || o == "+") && (c == "-" || c == "+")) return o + "(" + inner + ")"
+        return o + inner
+    }
+
+    // A negative numeric literal's text (`-1`) is a unary expression, not a
+    // primary: as a member's object or an operand it is parenthesized.
+    fn numPrec(t: string) -> int {
+        if (t.substring(0, 1) == "-") return 15
+        return 20
     }
 
     fn boolText(b: boolean) -> string {

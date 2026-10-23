@@ -884,3 +884,55 @@ BINDING §13 amendment (S467) — "the server half awaits by construction".
   A field / element write through a local (`p.name = v`, `ys[0] = v`) was lowered as a rebinding of the whole local — now
   refused (E-BOOTSTRAP-UNSUPPORTED; slice-m2 typer R3-H1 pins moved). `slice-m1/load-program.js`'s page-error capture was
   DEAD in a combined slice run (listeners lost, flag kept): re-attached on every use, one shared array. Combined run 2709 pass.
+
+---
+
+# s469 — logic backtick templates (SPEC §14.13.3; bootstrap blocker #5) (branch s469-boot-templates)
+
+`` `typed ${n} chars` `` is a `string`; each `${…}` slot is a text sink (§14.13.1) holding ONE expression.
+
+- **lex — the ONE reader of a slot's extent.** The fold already bounded slots (strings, nested templates, comments,
+  regular expressions and brackets inside a slot). What a JavaScript reader could read the OTHER way (impl#1's
+  interpolation-extent.ts rule: both goals — a classic script and a module) is recorded on the slot's frame
+  (`InterpFrame.why`) and carried by its closing `}` (`TemplateInterpEnd(why)`): a `/` after `}`, after `)` inside
+  braces, after `++` / `--`, after an unknown character, or after a word JavaScript reads differently from this lexer
+  (`of`, `await`, `yield`, `let`, `case`, `match`, `not`, `is`, …; `wordSlashAgrees`) — then read as a division so no
+  regular expression swallows the slot's `}`; a closer with no opener / of the wrong kind; a slot string with a line
+  break, unterminated, or a non-strict escape (`slotStringWhy`); an HTML-like comment anywhere in the slot's text
+  (`htmlCommentWhy`, lexically, as impl#1). A template's own text is held to a JavaScript template's escapes
+  (`escapeWhy` → `TemplateChunk(…, bad)`: legacy octal, short `\x` / `\u`, `\u{…}` past 10FFFF). `\x` / `\u{` read hex
+  digits only (a malformed one never runs past its quote / backtick); `\u{110000}` no longer crashes the lexer (host
+  RangeError). A complete template is a value (`regexAllowedAfter`: `/` after it divides). CR / CR LF read as LF.
+  Inside a slot a string is a logic string (never a display literal).
+- **parse** — `AExprK.Template(quasis, slots)`; E-PARSE-TEMPLATE (fail closed, by name): a slot the lexer could not
+  bound (refused whole, before its tokens are read), a malformed escape, an empty slot, a slot of more than one
+  expression, an unterminated template. A tagged template (`tag` then a template, same line) is E-BOOTSTRAP-UNSUPPORTED
+  by name. Every token text check goes through `tk()`, which never matches a template piece (a chunk `[` or a slot's
+  `}` was being read as punctuation); `armEnd` steps over a whole template; a slot's `}` ends a postfix `?`.
+- **analyze** — `resolveTemplate` (ValueFact `VTemplate(text)`: which slots are not already `string`); `typeTemplate`:
+  `string` / `int` / `number` / `bool` / unit enum accepted; `T | not` → E-OPERAND-NOT-NARROWED; struct, tape, payload
+  enum, instance, `not`, unresolved → E-TEXT-NON-PRIMITIVE (unresolved fails closed; an error already reported inside
+  the slot is not reported again). Every AExprK walker learned the node (reads, kids, suspension plan, SQL dedup key…).
+- **lower / Core / print** — Core `PrimOp.Text` (a primitive's §20.7.2 text); a template lowers to a Concat chain of
+  strings, a non-string slot through Text; printed `"typed " + rt.textOf(n) + " chars"`. `rt.textOf` (client and
+  server runtime) is `String()` of a number / bool / string and THROWS on anything else (a compiler defect, never
+  `[object Object]`).
+- **The fuzz** — `slice-m4/template-slot-fuzz.js` (CLI + 4000 in `templates-s469.test.js`): generated templates judged
+  by acorn (ScrmlParser, both goals; per-slot expression reading + token reading + whole-literal escapes) against the
+  bootstrap's lexer + parser. 8 seeds × 100k → ~537k unique templates: **0 extent disagreements, 0 lexical
+  disagreements**; ~5.3% conservative (acorn reads, the bootstrap refuses — mostly JavaScript the scrml grammar does
+  not have: regex literals, `??`, `typeof`, `===`, `null`, comma sequences, braced lambdas; ~0.1% the lexer's own
+  slot rules); ~4.3% `scrml-content` (acorn's tokens bound it identically, a slot is not one JavaScript expression: a
+  scrml form, or a reserved word read as a name — refused downstream, E-SCOPE-001).
+- **Gates** — `slice-m4/templates-s469.test.js` (61), `acceptance/templates/*` (20: 7 run with exact text, 13 exact
+  codes) in `acceptance.test.js`; slice-m2 typer Rule C pin moved (a template parses now). Conformance PASS 246 → 252.
+- **Review rounds 2–3** — a warning in a slot no longer refuses the template (H1). A parse placeholder (Recovered) is
+  refused on every path: analyze reports E-INTERNAL-RECOVERED-UNREPORTED in a file whose parser reported no error
+  (expression and place paths), and lower makes it Core `Host(Unreadable)`, which checkCore refuses (C-R1) — it never
+  prints as `null`. `\` + U+2028 / U+2029 continues a line; a template on the line after an expression (a tagged
+  template to JavaScript) is E-PARSE-TEMPLATE; the printer never merges `-` with an operand's sign (`-(-x)`). Found
+  by the end-to-end fuzz oracle (clean-compiling templates RUN against JavaScript's own evaluation): a call through a
+  local / parameter lowered to `not` (now refused, in a file the parser read cleanly); `==` across types ran strict —
+  E-EQ-001, RULED (user-voice S469 "Ratify: same type only (Rec)"): same type only, enum vs string, different named
+  types and tapes of different elements included; `int` / `number` one kind; a declaration's type not judged. Gap
+  filed: `g-bootstrap-int-overflow-and-mod-zero-untrapped-s469`.

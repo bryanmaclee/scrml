@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-templates-escapes",
+  "description": "a template's own escapes: `\\``, `\\${`, `${\"${\"}`, `\\n`, `\\u{…}`; `$` alone is text.",
+  "language-version": "1.0",
+  "spec": "§14.13.3",
+  "rationale": "§14.13.3: the static parts are the template's characters, read with a JavaScript template's escapes; `\\${` and `${\"${\"}` spell the characters `${`.",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "a`b ${x} ${y} $ {z} $1 😀"
+      }
+    ]
+  }
+}

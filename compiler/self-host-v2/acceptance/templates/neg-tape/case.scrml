@@ -1,0 +1,9 @@
+// §14.13.2: a tape in a slot is refused.
+<program>
+    fn show(xs: int[]) -> string {
+        return `xs=${xs}`
+    }
+    <main>
+        <p>x</p>
+    </main>
+</program>

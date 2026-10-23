@@ -1,0 +1,21 @@
+{
+  "id": "acceptance-templates-bool-enum-text",
+  "description": "a `bool` slot is `true` / `false`; a unit enum value is its variant name.",
+  "language-version": "1.0",
+  "spec": "§14.13.3 · §20.7.2 · §14.4.3",
+  "rationale": "§20.7.2: \"a `bool`: `true` or `false`; a unit enum value: its variant name as declared\".",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "Blue is true"
+      }
+    ]
+  }
+}
