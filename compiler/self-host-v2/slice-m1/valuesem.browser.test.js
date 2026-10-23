@@ -12,7 +12,7 @@ beforeAll(() => { ({ mods, cores } = loadSuite()); }, { timeout: 120000 });
 
 describe("§66.10 — `let before = @audit` then `@audit.append(\"x\")`", () => {
   let rt;
-  beforeAll(async () => { ({ rt } = await loadProgram(cores.valuesem(), "valuesem")); });
+  beforeAll(async () => { ({ rt } = await loadProgram(cores.valuesem(), "valuesem")); }, { timeout: 60000 }); // each loadProgram compiles via the bootstrap (~4s idle)
 
   const p = () => document.querySelector("main > p").textContent;
 
@@ -48,7 +48,7 @@ describe("§66.10 — `let before = @audit` then `@audit.append(\"x\")`", () => 
 
 describe("§66.10 at the instance level — `@country` is a struct snapshot", () => {
   let rt;
-  beforeAll(async () => { ({ rt } = await loadProgram(cores.dropdown(), "dropdown")); });
+  beforeAll(async () => { ({ rt } = await loadProgram(cores.dropdown(), "dropdown")); }, { timeout: 60000 }); // each loadProgram compiles via the bootstrap (~4s idle)
 
   test("a snapshot of an instance does not change when a field is later written", () => {
     const country = instancesOf(rt, "program")[0].handles[0].peek();
