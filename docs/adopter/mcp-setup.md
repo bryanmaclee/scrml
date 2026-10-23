@@ -12,7 +12,7 @@ Add the `mcp` attribute to your top-level `<program>`:
 
 ```scrml
 <program mcp>
-  ...
+  // … the rest of your app, unchanged …
 </program>
 ```
 

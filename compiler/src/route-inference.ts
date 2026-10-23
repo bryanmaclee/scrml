@@ -93,6 +93,13 @@ import { fileBoundNamesOf } from "./codegen/emit-library-shared.ts";
 import { fileScopeDeclaresSessionCell, fileScopeDeclaresCell, fileNodesOf } from "./codegen/server-session-guard.ts";
 import { rewriteCodeSegments } from "./codegen/code-segments.ts";
 import { liveSqlInterpolations } from "./codegen/sql-lex.ts";
+// S469 — the `${…}` slots of SQL / template text are read by the one extent reader of each
+// (`liveSqlInterpolations` — acorn over a SQL body; `templateInterpolationPayloads` — acorn over
+// template text), never `/\$\{([^}]*)\}/`, which ended a slot at a `}` inside a string
+// (`${ "}" + k }` read as ` "`): the name `k` was missed, a batch that reads `k` was split off
+// without it, and its server half threw a ReferenceError (or read a module-scope `k`).
+import { templateInterpolationPayloads } from "./interpolation-extent.ts";
+const sqlSlotText = (sql: string): string => liveSqlInterpolations(sql).map((s) => s.expr).join(" ");
 import { exprReadsFreeSession, markLocallyBoundSession, identityReadInDefaultDeep, type IdentityNameResolution } from "./free-name.ts";
 import { bindingsOfFile, bindingsOfName, type Binding } from "./binding-provenance.ts";
 import { buildIdentityFlow, type IdentityFlow } from "./identity-flow.ts";
@@ -3688,7 +3695,7 @@ export function analyzeCPSEligibility(
         const v = o[k];
         if (typeof v === "string") {
           if (k === "name" || k === "kind" || k === "op" || k === "property") continue;
-          const t = o.kind === "sql" ? [...v.matchAll(/\$\{([^}]*)\}/g)].map((m) => m[1]).join(" ") : v;
+          const t = o.kind === "sql" ? sqlSlotText(v) : v;
           for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)(?![\w$])/g)) if (isFn(m[1])) out.push(m[1]);
         } else w(v);
       }
@@ -4635,9 +4642,9 @@ function namesMentionedIn(n: unknown): Set<string> {
       if (typeof v === "string") {
         const isSql = o.kind === "sql" || o.kind === "sql-ref";
         if (isSql && (k === "query" || k === "body" || k === "raw")) {
-          for (const m of v.matchAll(/\$\{([^}]*)\}/g)) for (const nm of namesInExprText(m[1])) out.add(nm);
+          for (const nm of namesInExprText(sqlSlotText(v))) out.add(nm);
         } else if (TEXT_KEYS.has(k) || (o.kind === "lit" && k === "raw")) {
-          if (o.kind === "lit") { for (const m of v.matchAll(/\$\{([^}]*)\}/g)) for (const nm of namesInExprText(m[1])) out.add(nm); }
+          if (o.kind === "lit") { for (const p of templateInterpolationPayloads(v)) for (const nm of namesInExprText(p)) out.add(nm); }
           else for (const nm of namesInExprText(v)) out.add(nm);
         }
       } else walk(v);
@@ -5460,7 +5467,7 @@ function statementReadsAnyLocal(stmt: unknown, names: Set<string>): boolean {
         // SQL text: only its `${…}` interpolations are expressions — a column named
         // like a local (`SELECT name …`) is not a read of it.
         const text = o.kind === "sql" && (k === "query" || k === "body")
-          ? [...v.matchAll(/\$\{([^}]*)\}/g)].map((m) => m[1]).join(" ")
+          ? sqlSlotText(v)
           : v;
         if (re.test(text)) return true;
       }

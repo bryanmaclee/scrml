@@ -30,7 +30,7 @@
                 <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
                     Compile-time
                 </span>
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§51"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§51"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §51.0.K (normative)
                 </a>
@@ -199,7 +199,7 @@ component LoadCard &#123;
             <strong>§51.0.Q.1</strong> (nested engines in composite
             state-children — the ONE legal nesting form),
             <strong>§34</strong> catalog row. Spec lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>.

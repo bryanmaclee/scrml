@@ -508,7 +508,7 @@ export type GapStatusIndex = ReadonlyMap<string, string>;
  * can only be reached by editing the live ledger is a gate whose accepting path is never exercised.
  */
 export function gapStatusIndexFromText(text: string): GapStatusIndex {
-  // gapCountsFromTokens dedups one-marker-per-id, THROWS on a conflicting duplicate and on an
+  // gapCountsFromTokens THROWS on any duplicated id (agreeing or conflicting, S469) and on an
   // unclassified status — the same refusals the §0 counts make. A ledger the counts refuse is not a
   // ledger an xfail can be resolved against either.
   const { tokens } = gapCountsFromTokens(parseGapMarkers(text));

@@ -26,7 +26,7 @@
                 protocol, and the reconnect logic.
             </p>
             <div class="flex gap-4 mt-4 text-xs">
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§38"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§38"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §38 (normative)
                 </a>
@@ -308,16 +308,16 @@
         <p class="text-slate-700 leading-relaxed">
             This page summarizes <strong>SPEC &sect;38</strong>
             (WebSocket Channels). The normative text lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>
-            in the scrmlTS repository.
+            in the scrml repository.
         </p>
 
         <p class="text-slate-700 leading-relaxed mt-4 text-sm">
             Quick-lookup anchors:
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC-INDEX.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC-INDEX.md"
                class="text-blue-700 hover:text-blue-900 underline">SPEC-INDEX.md</a>
             entries &mdash; <em>channel file-level placement</em>,
             <em>channel V5-strict body</em>,

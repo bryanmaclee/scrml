@@ -1,0 +1,247 @@
+// S469 (s469-engine-effect-failable, SECURITY) — engine / `<match>` bodies kept as raw text.
+//
+//   1. interpolation-extent (BLOCK mode): a raw-text `${ … }` block ends where acorn (both goals) ends it.
+//   2. E-ERROR-002 over every engine raw-text body (state-child / opener `effect=`,
+//      `<onTransition>` body and `if=` guard, message arm, `<onTimeout after=${…}>`,
+//      `:`-shorthand state body) and `<match>` `:`-shorthand arm; the handled forms compile.
+//   3. LOW-1: `await` in a template interpolation is E-AWAIT-NOT-IN-SCRML (not a codegen defect).
+//
+// The run-time floor (a wrong password never logs in) is the security-failable-pack, family n14.
+
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { compileScrml } from "../../src/api.js";
+import { logicBlockClose, braceBlockClose, soleLogicBlockPayload, interpolationClose, sliceTemplateText } from "../../src/interpolation-extent.ts";
+
+let root;
+let seq = 0;
+beforeAll(() => { root = mkdtempSync(join(tmpdir(), "s469-engine-raw-")); });
+afterAll(() => { if (root) rmSync(root, { recursive: true, force: true }); });
+
+function codes(src) {
+  const dir = join(root, String(seq++));
+  const input = join(dir, "app.scrml");
+  require("node:fs").mkdirSync(dir, { recursive: true });
+  writeFileSync(input, src);
+  const res = compileScrml({ inputFiles: [input], write: false, outputDir: join(dir, "out"), log: () => {} });
+  return [...new Set((res.errors ?? []).filter((e) => e.severity !== "warning" && e.severity !== "info" && !/^[WI]-/.test(e.code ?? "")).map((e) => e.code))];
+}
+
+const HEAD = `type AuthErr:enum = { Denied }
+type S:enum = { A, B }
+type M:enum = { Go }
+<msg> = "init"
+<pw> = ""
+\${
+    function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied
+        return true
+    }
+}
+<button id="go" onclick=\${ @s = .B }>go</button>
+<p>\${@msg}</p>
+`;
+const ENG = (body, opener = "") => HEAD + `<engine for=S initial=.A${opener}>\n${body}\n</engine>\n`;
+const EFF = (e) => ENG(`<A rule=.B effect=\${ ${e} }><p>a</p></A>\n<B rule=.A><p>b</p></B>`);
+const TERN = `@msg = check(@pw) ? "IN" : "OUT"`;
+
+describe("interpolation-extent BLOCK mode — acorn bounds a raw-text ${…} block", () => {
+  const close = (s) => { const i = s.indexOf("${"); const e = logicBlockClose(s, i); return e < 0 ? null : s.slice(i + 2, e); };
+  test("a } in a string, comment, template or regex does not close it", () => {
+    expect(close('x=${ a = "}" + b }>')).toBe(' a = "}" + b ');
+    expect(close("x=${ a = /* } */ b }>")).toBe(" a = /* } */ b ");
+    expect(close("x=${ a = `}${ {k:1}.k }` }>")).toBe(" a = `}${ {k:1}.k }` ");
+    expect(close("x=${ a = /}/.test(b) }>")).toBe(" a = /}/.test(b) ");
+  });
+  test("a statement list in scrml syntax is bounded by its tokens", () => {
+    expect(close('x=${ check(p) !{ .Denied :> @m = "r" }\n @n = 1 }>')).toBe(' check(p) !{ .Denied :> @m = "r" }\n @n = 1 ');
+    expect(close("x=${ m = match y { .A :> 1  _ :> 2 } }>")).toBe(" m = match y { .A :> 1  _ :> 2 } ");
+  });
+  test("unreadable: unterminated, goal-dependent (`await /}/`), or an HTML-like comment", () => {
+    expect(close('x=${ a = "open }>')).toBe(null);
+    expect(close("x=${ await /}/g }>")).toBe(null);
+    expect(close("x=${ a <!-- }\n }>")).toBe(null);
+  });
+  test("a markup value (no JS lexer reads it) is bounded by the block splitter's brace rule", () => {
+    expect(close("x=${ c = <p>x</p> }>")).toBe(" c = <p>x</p> ");
+    expect(close("x=${ c = 'open }>")).toBe(null); // no markup: unreadable stays unreadable
+  });
+  test("braceBlockClose / soleLogicBlockPayload", () => {
+    const s = '{ @a = "}"; .B } rest';
+    expect(s.slice(0, braceBlockClose(s, 0) + 1)).toBe('{ @a = "}"; .B }');
+    expect(soleLogicBlockPayload(' ${ a("}") } ')).toBe(' a("}") ');
+    expect(soleLogicBlockPayload("${ a }${ b }")).toBe(null);
+  });
+});
+
+describe("interpolation-extent — ONE reader for template interpolations and logic blocks", () => {
+  test("EXPRESSION mode (template text) admits one expression only — no token / markup fallback", () => {
+    const s = "${ a\n b }";
+    expect(interpolationClose(s, 2)).toBe(-1);
+    expect(logicBlockClose(s, 0)).toBe(s.length - 1); // a statement list is a logic block
+    expect(sliceTemplateText("x ${ <p>y</p> } z", { bare: true }).unreadable).not.toBe(null);
+  });
+  test("the script goal reads `await` as a name: `${ await /}/ }` is unreadable in both modes", () => {
+    expect(sliceTemplateText("${ await /}/g }", { bare: true }).unreadable).not.toBe(null);
+    expect(logicBlockClose("${ await /}/g }", 0)).toBe(-1);
+  });
+  test("tokenizeTemplateInterpolations is the same slicer (a `}` in a comment does not close)", async () => {
+    const { tokenizeTemplateInterpolations } = await import("../../src/expression-parser.ts");
+    const segs = tokenizeTemplateInterpolations("`a ${ /* } */ x } b`");
+    expect(segs.filter((s) => s.kind === "expr").map((s) => s.text)).toEqual([" /* } */ x "]);
+  });
+});
+
+describe("E-ERROR-002 — an engine body kept as raw text is walked for failable calls", () => {
+  const refused = [
+    ["state-child effect=", EFF(TERN)],
+    ["state-child effect= comma", EFF(`@msg = (1, check(@pw)) ? "IN" : "OUT"`)],
+    ["state-child effect= statement", EFF(`check(@pw)\n    @msg = "IN"`)],
+    ["state-child effect= behind a comment `}`", EFF(`@msg = /* } */ check(@pw) ? "IN" : "OUT"`)],
+    ["opener effect=", HEAD + `<engine for=S initial=.A effect=\${ ${TERN} }>\n<A rule=.B><p>a</p></A>\n<B rule=.A><p>b</p></B>\n</engine>\n`],
+    ["<onTransition> body", ENG(`<A rule=.B>\n<p>a</p>\n<onTransition to=.B>\${ ${TERN} }</>\n</A>\n<B rule=.A><p>b</p></B>`)],
+    ["engine-direct <onTransition>", ENG(`<onTransition from=.A to=.B>\${ ${TERN} }</>\n<A rule=.B><p>a</p></A>\n<B rule=.A><p>b</p></B>`)],
+    ["<onTransition if=> guard", ENG(`<A rule=.B>\n<p>a</p>\n<onTransition to=.B if=check(@pw)>\${ @msg = "IN" }</>\n</A>\n<B rule=.A><p>b</p></B>`)],
+    ["message arm", ENG(`<A rule=.B>\n.Go :> { ${TERN}; .B }\n</A>\n<B rule=.A>\n_ :> @s\n</B>`, " accepts=M")],
+    ["<onTimeout after=${…}>", ENG(`<A rule=.B><p>a</p></A>\n<B rule=.A>\n<p>b</p>\n<onTimeout after=\${ (check(@pw), 1) }ms to=.A/>\n</B>`)],
+    [":-shorthand state body", HEAD + `<div><engine for=S initial=.A><A rule=.B : "x"><B rule=.A : check(@pw) ? "IN" : "OUT"></engine></div>\n`],
+    ["<match> :-shorthand arm", HEAD + `<st> = S.A\n<div><match for=S on=@st><A : "x"><B : check(@pw) ? "IN" : "OUT"></match></div>\n`],
+  ];
+  for (const [name, src] of refused) {
+    test(name, () => { expect(codes(src)).toContain("E-ERROR-002"); });
+  }
+
+  const accepted = [
+    ["effect= handled by !{}", EFF(`check(@pw) !{ .Denied :> @msg = "OUT" }`)],
+    ["effect= match on the call", EFF(`@msg = match check(@pw) { .Denied :> "OUT"  _ :> "IN" }`)],
+    ["<onTransition> handled", ENG(`<A rule=.B>\n<p>a</p>\n<onTransition to=.B>\${ @msg = (check(@pw) !{ _ :> false }) ? "IN" : "OUT" }</>\n</A>\n<B rule=.A><p>b</p></B>`)],
+    ["no failable call", EFF(`@msg = "x" + @pw`)],
+  ];
+  for (const [name, src] of accepted) {
+    test(`accepted: ${name}`, () => { expect(codes(src)).toEqual([]); });
+  }
+});
+
+describe("route-inference — a `}` in a string inside a SQL `${…}` slot hides no name", () => {
+  // `/\$\{([^}]*)\}/` read `${ "}" + k }` as ` "`: `k` was missed, the INSERT batch was split off
+  // without it, and its server half read an unbound `k` (ReferenceError at run time).
+  const page = (decl, slot) => `<program db="sqlite:./ri.db">
+\${
+  function flow(x) {
+    ${decl}
+    @msg = "step"
+    ?{\`INSERT INTO audit (v) VALUES (\${ ${slot} })\`}.run() !{ _ :> not }
+  }
+}
+<msg> = ""
+<button id="go" onclick=\${ flow("a") }>go</button>
+<p>\${@msg}</p>
+</program>
+`;
+  const shape = (src) => {
+    const dir = join(root, String(seq++));
+    require("node:fs").mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "app.scrml"), src);
+    compileScrml({ inputFiles: [join(dir, "app.scrml")], write: true, outputDir: join(dir, "out"), log: () => {} });
+    const fs = require("node:fs");
+    const sj = fs.readFileSync(join(dir, "out", "app.server.js"), "utf8");
+    const reads = [...new Set([...sj.matchAll(/_scrml_body\[\s*"([^"]+)"\s*\]/g)].map((m) => m[1]))].sort();
+    const routes = [...new Set([...sj.matchAll(/export const (__ri_route_[A-Za-z0-9_]+)/g)].map((m) => m[1]))].sort();
+    return { reads, routes };
+  };
+  for (const [name, decl] of [
+    ["a client local", 'const k = x + "!"'],
+    ["a server value", "const k = ?{`SELECT value FROM secrets`}.get() !{ _ :> not }"],
+  ]) {
+    test(name, () => {
+      expect(shape(page(decl, '"}" + k'))).toEqual(shape(page(decl, "k")));
+    });
+  }
+});
+
+describe("review of 6e0770356 — a slot lowered from its TEXT admits no failable call, handled or not", () => {
+  const GUARD = (g) => ENG(`<A rule=.B>\n<p>a</p>\n<onTransition to=.B if=${g}>\${ @msg = "IN" }</>\n</A>\n<B rule=.A><p>b</p></B>`);
+  const cases = [
+    ["H1 handled guard", GUARD("${ check(@pw) !{ _ :> false } }")],
+    ["H2 derived= expression", HEAD + `<engine for=S derived=(check(@pw) ? .B : .A)>\n<A><p>a</p></A>\n<B><p>b</p></B>\n</engine>\n`],
+    ["H3 <engine if=>", ENG(`<A rule=.B><p>a</p></A>\n<B rule=.A><p>b</p></B>`, ` if=\${ @pw != "" && check(@pw) }`)],
+    ["H4 <match if=>", HEAD + `<st> = S.B\n<match for=S on=@st if=(@pw != "" && check(@pw))>\n<A><p>a</p></A>\n<B><p>b</p></B>\n</match>\n`],
+    ["H5 <match on=>", HEAD + `<div><match for=S on=(check(@pw) ? S.B : S.A)><A : "a"><B : "b"></match></div>\n`],
+  ];
+  for (const [name, src] of cases) test(name, () => { expect(codes(src)).toContain("E-ERROR-002"); });
+  test("a name in a string is not a call", () => { expect(codes(GUARD('${ "check" == @pw }'))).toEqual([]); });
+  test("MEDIUM — a quoted guard is E-COND-NOT-BOOLEAN, never `if (\"false\")`", () => {
+    expect(codes(GUARD('"false"'))).toContain("E-COND-NOT-BOOLEAN");
+  });
+});
+
+describe("review of 5a88c3030 — <each> openers, late aliases, unlexable slots, one diagnostic", () => {
+  const EACH = (attrs, inExpr = "@xs", extra = "") => HEAD.replace("    }\n}\n", `    }${extra}\n}\n`).replace(/<button id="go"[^\n]*\n/, "") + `<xs> = [1]\n<div><each in=${inExpr} as x ${attrs}>IN</each></div>\n`;
+  test("H1 <each if=> unhandled call is E-ERROR-002 (interp, paren, bare)", () => {
+    for (const a of ['if=${ @pw != "" && check(@pw) }', 'if=(@pw != "" && check(@pw))', "if=check(@pw)"]) {
+      expect(codes(EACH(a))).toContain("E-ERROR-002");
+    }
+  });
+  test("H1 <each if=> handled by !{} compiles", () => {
+    expect(codes(EACH("if=${ check(@pw) !{ _ :> false } }"))).toEqual([]);
+  });
+  test("H1 <each if=> match on a failable call is refused", () => {
+    expect(codes(EACH("if=${ match check(@pw) { .Denied :> false  _ :> true } }"))).toContain("E-ERROR-002");
+  });
+  test("H1 <each in=> is a text slot", () => {
+    expect(codes(EACH("", '(@pw != "" && check(@pw) ? [1] : [])'))).toContain("E-ERROR-002");
+  });
+  const LATE = (body) => ENG(body) + "${\n    const g = check\n}\n";
+  test("H2 a const alias declared after the engine: guard refused, effect body E-SCOPE-001", () => {
+    expect(codes(LATE(`<A rule=.B>\n<p>a</p>\n<onTransition to=.B if=\${ g(@pw) }>\${ @msg = "IN" }</>\n</A>\n<B rule=.A><p>b</p></B>`))).toContain("E-ERROR-002");
+    expect(codes(LATE(`<A rule=.B effect=\${ @msg = g(@pw) ? "IN" : "OUT" }><p>a</p></A>\n<B rule=.A><p>b</p></B>`))).toContain("E-SCOPE-001");
+  });
+  test("M1 a text slot acorn cannot lex is refused", () => {
+    expect(codes(HEAD + `<div><match for=S on=(S.A \u00a4 S.B)><A : "a"><B : "b"></match></div>\n`)).toContain("E-ERROR-002");
+  });
+  test("L1 a refused guard reports ONE diagnostic", () => {
+    const dir = join(root, String(seq++));
+    require("node:fs").mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "app.scrml"), ENG(`<A rule=.B>\n<p>a</p>\n<onTransition to=.B if=\${ check(@pw) !{ _ :> false } }>\${ @msg = "IN" }</>\n</A>\n<B rule=.A><p>b</p></B>`));
+    const res = compileScrml({ inputFiles: [join(dir, "app.scrml")], write: false, outputDir: join(dir, "out"), log: () => {} });
+    expect((res.errors ?? []).filter((e) => e.code === "E-ERROR-002").length).toBe(1);
+  });
+  test("L2 a `>` in an <onTimeout after=${…}> no longer drops the timer; an invalid after= is E-ENGINE-021", () => {
+    expect(codes(ENG(`<A rule=.B>\n<p>a</p>\n<onTimeout after=\${ [1].map((x) => x)[0] }ms to=.B/>\n</A>\n<B rule=.A><p>b</p></B>`))).toEqual([]);
+    expect(codes(ENG(`<A rule=.B>\n<p>a</p>\n<onTimeout after=soon to=.B/>\n</A>\n<B rule=.A><p>b</p></B>`))).toContain("E-ENGINE-021");
+  });
+  test("L2 derived= is scope-checked", () => {
+    expect(codes(HEAD + `<engine for=S derived=(nosuchname > 0 ? .B : .A)>\n<A><p>a</p></A>\n<B><p>b</p></B>\n</engine>\n`)).toContain("E-SCOPE-001");
+  });
+});
+
+describe("hardening — the codegen floor refuses a body the failable walk never read", () => {
+  test("with the floor on, an unwalked hook body is refused, not emitted", async () => {
+    const { setRawBodyWalkFloor } = await import("../../src/engine-body-reader.ts");
+    const { emitEngineHookFiringFunction } = await import("../../src/codegen/emit-engine.ts");
+    const { drainRefusedLowerings } = await import("../../src/codegen/refused-lowering-errors.ts");
+    const meta = { varName: "m", forType: "S", stateChildren: [{ tag: "A", rule: { kind: "single", target: "B" }, effectRaw: " @msg = 1 " }] };
+    drainRefusedLowerings();
+    setRawBodyWalkFloor(true);
+    let out;
+    try { out = emitEngineHookFiringFunction(meta).join("\n"); } finally { setRawBodyWalkFloor(false); }
+    expect(out).not.toContain("msg");
+    expect(drainRefusedLowerings().map((e) => e.code)).toContain("E-ERROR-002");
+  });
+});
+
+describe("LOW-1 — `await` in a template interpolation is E-AWAIT-NOT-IN-SCRML", () => {
+  test("quoted attribute interpolation", () => {
+    const c = codes(`<p data-v="\${ await /qq,window.__inj = 1,qq/g }">x</p>\n`);
+    expect(c).toContain("E-AWAIT-NOT-IN-SCRML");
+    expect(c).not.toContain("E-CODEGEN-INVALID-LOGIC");
+  });
+  test("template literal interpolation", () => {
+    expect(codes("${ function g() { return 1 }\n   function f() { return `v ${ await g() }` } }\n<p>${f()}</p>\n")).toContain("E-AWAIT-NOT-IN-SCRML");
+  });
+  test("the word in a string is not an await", () => {
+    expect(codes(`<x> = "a"\n<p data-v="\${ 'await' + @x }">x</p>\n`)).toEqual([]);
+  });
+});

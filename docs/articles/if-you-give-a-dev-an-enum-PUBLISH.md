@@ -66,7 +66,7 @@ Once the states are honest, they'll want something to *happen*. Fire the analyti
 
 ```scrml
 <onTransition from=.Loading to=.Success>
-    ${ analytics.track("load.success") }
+    ${ analytics.track("load.success"); }
 </>
 ```
 

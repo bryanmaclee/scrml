@@ -177,7 +177,7 @@ ${
             <li><a href="https://dev.to/bryan_maclee/introducing-scrml-a-single-file-full-stack-reactive-web-language-9dp" class="text-blue-700 hover:text-blue-900 underline">Introducing scrml: a single-file, full-stack reactive web language</a>. The starting-point overview if you haven't seen scrml before.</li>
             <li><a href="https://dev.to/bryan_maclee/null-was-a-billion-dollar-mistake-falsy-was-the-second-3o61" class="text-blue-700 hover:text-blue-900 underline">Null was a billion-dollar mistake. Falsy was the second.</a>. On <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">n&#111;t</code>, presence as a type-system question, and why scrml refuses to inherit JavaScript's truthiness rules.</li>
             <li><a href="https://dev.to/bryan_maclee/scrmls-living-compiler-23f9" class="text-blue-700 hover:text-blue-900 underline">scrml's Living Compiler</a>. The transformation-registry framing.</li>
-            <li><strong>scrml on GitHub:</strong> <a href="https://github.com/bryanmaclee/scrmlTS" class="text-blue-700 hover:text-blue-900 underline">github.com&#47;bryanmaclee&#47;scrmlTS</a>. The working compiler, examples, spec, benchmarks.</li>
+            <li><strong>scrml on GitHub:</strong> <a href="https://github.com/scrml-lang/scrml" class="text-blue-700 hover:text-blue-900 underline">github.com&#47;bryanmaclee&#47;scrmlTS</a>. The working compiler, examples, spec, benchmarks.</li>
         </ul>
         <p class="text-slate-700 leading-relaxed my-4">&lt;!--</p>
 

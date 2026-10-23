@@ -18,7 +18,7 @@
                 <span class="px-2 py-1 bg-rose-50 text-rose-700 rounded font-semibold">
                     Error
                 </span>
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§34"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§34"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §34 (catalogue)
                 </a>
@@ -34,7 +34,7 @@
                 how to fix &middot; related &middot; specification) is being
                 rolled out across every error code the compiler can emit.
                 Until this page lands, the catalogue row in
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§34"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§34"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §34
                 </a>

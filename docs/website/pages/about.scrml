@@ -29,9 +29,9 @@
                 for the browser. The compiler is implemented in
                 TypeScript today and will be self-hosted in scrml after
                 v1.0. MIT-licensed; source at
-                <a href="https://github.com/bryanmaclee/scrmlTS"
+                <a href="https://github.com/scrml-lang/scrml"
                    class="text-blue-700 hover:text-blue-900 underline">
-                    github.com/bryanmaclee/scrmlTS
+                    github.com/scrml-lang/scrml
                 </a>.
             </p>
         </div>

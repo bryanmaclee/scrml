@@ -44,6 +44,8 @@ ${
 </api>
 
 <request id="profile" api="getUser" args=@query></>
+
+</program>
 ```
 
 What the compiler does with this:

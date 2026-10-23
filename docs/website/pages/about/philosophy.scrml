@@ -124,7 +124,7 @@
 
         <p class="text-slate-700 leading-relaxed">
             scrml has a single normative document:
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="font-mono text-blue-700 hover:text-blue-900 underline">compiler/SPEC.md</a>.
             When a design doc, an audit, a planning artifact, or even
             this docs site disagrees with the spec, the spec wins.
