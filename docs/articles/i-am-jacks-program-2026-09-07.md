@@ -1,3 +1,5 @@
+> **Written 2026-09-07, before the S469 language rulings (October 2026).** The code in this piece is in the older dialect (impl#1) and is not checked by the docs gate. For current syntax see [docs/DIALECT.md](../DIALECT.md) and the [tutorial](../tutorial.md).
+
 # I am Jack's `<program>`
 
 > **Working file.** Newest draft at the top.

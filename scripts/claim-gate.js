@@ -92,7 +92,8 @@ const strictMode = args.includes("--strict");
 const explicitPaths = args.filter((a) => !a.startsWith("--"));
 const surface = explicitPaths.length > 0 ? explicitPaths : PUBLIC_SURFACE;
 
-const toRel = (p) => relative(process.cwd(), resolve(p)).split(sep).join("/");
+// Repo-relative (not cwd-relative), so the excludes hold wherever the gate is run from.
+const toRel = (p) => relative(resolve(import.meta.dir, ".."), resolve(p)).split(sep).join("/");
 
 /** Expand the surface into a concrete .md file list (tolerates absent rows). */
 function collectMarkdown(paths) {
@@ -101,15 +102,20 @@ function collectMarkdown(paths) {
   const walk = (p, explicit) => {
     if (!existsSync(p)) return; // a declared-but-absent row is not an error
     const st = statSync(p);
+    // An excluded row may be a directory or a single file (S469 "Banner + exempt": the dated
+    // articles are excused one by one, so a NEW page under docs/articles is still gated).
+    if (!explicit && SURFACE_EXCLUDE.includes(toRel(p))) return;
     if (st.isDirectory()) {
-      if (!explicit && SURFACE_EXCLUDE.includes(toRel(p))) return;
       for (const entry of readdirSync(p)) walk(join(p, entry), false);
       return;
     }
     if (extname(p) !== ".md") return;
-    if (seen.has(p)) return;
-    seen.add(p);
-    out.push(p);
+    // POSIX separators (S469): `join` writes `\` on Windows; every printed path and the
+    // floor's gated set are `/`-separated. Bun's fs accepts `/` on Windows too.
+    const posix = p.split(sep).join("/");
+    if (seen.has(posix)) return;
+    seen.add(posix);
+    out.push(posix);
   };
   for (const p of paths) walk(p, explicitPaths.length > 0);
   return out.sort();
