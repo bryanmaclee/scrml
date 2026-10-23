@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-css-neg-bad-selector",
+  "description": "E-CSS-SYNTAX: an unparseable selector.",
+  "language-version": "1.0",
+  "spec": "§65.2.5",
+  "rationale": "§65.2.5: \"an unparseable selector is a compile error, never a silent drop\".",
+  "expect": {
+    "codes": [
+      "E-CSS-SYNTAX"
+    ],
+    "codeCounts": {
+      "E-CSS-SYNTAX": 1
+    }
+  }
+}

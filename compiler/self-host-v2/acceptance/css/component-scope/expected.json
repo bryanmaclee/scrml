@@ -1,0 +1,22 @@
+{
+  "id": "acceptance-css-component-scope",
+  "description": "a component-scoped `#{}`: the component's root carries `data-scrml=\"card\"`.",
+  "language-version": "1.0",
+  "spec": "§9.1 DQ-7 · §66.15.1",
+  "rationale": "§9.1 DQ-7: \"The constructor's root element SHALL carry the attribute `data-scrml=\\\"ConstructorName\\\"`\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": ".card",
+        "attr": {
+          "data-scrml": "card"
+        }
+      },
+      {
+        "selector": ".card h2",
+        "text": "hello"
+      }
+    ]
+  }
+}

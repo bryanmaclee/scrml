@@ -32,8 +32,9 @@ ${
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldMode, FieldRole,
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
-             LoopHead, EachHead, RangeHead, HostCall,
-             block, litStr, mkSym, typeDefSym } from "./core.scrml"
+             LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar,
+             block, litStr, mkSym, typeDefSym, readField } from "./core.scrml"
+    import { partsText } from "./css.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc,
@@ -45,7 +46,7 @@ ${
              SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK, PlainMatch, PlainArm, plainFactOf,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
              failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName,
-             sqlParamRep, distinctSqlParams } from "./analyze.scrml"
+             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge } from "./analyze.scrml"
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
     // reported an ERROR — a diagnostic whose §34 Severity column reads Error,
@@ -1237,6 +1238,7 @@ ${
             .Text(text: t) :> not
             .Interp(e: e) :> not
             .DeclNode(d: d) :> not
+            .Css(c: c) :> not
             .Effect(w: w) :> not
         }
     }
@@ -1248,6 +1250,7 @@ ${
             .Elem(e: e) :> false
             .Interp(e: e) :> false
             .DeclNode(d: d) :> false
+            .Css(c: c) :> true
             .Effect(w: w) :> false
         }
     }
@@ -1358,6 +1361,7 @@ ${
                 .Elem(e: e) :> lowerElem(c, e)
                 .Interp(e: x) :> lowerNode(c, n)
                 .DeclNode(d: d) :> lowerNode(c, n)
+                .Css(c: c) :> lowerNode(c, n)
                 .Effect(w: w) :> lowerNode(c, n)
             }
             out = out.concat(vs)
@@ -1381,6 +1385,7 @@ ${
             .Interp(e: e) :> [View.Dyn(lowerExpr(c, e))]
             .Elem(e: e) :> lowerElem(c, e)
             .DeclNode(d: d) :> []
+            .Css(c: c) :> []
             .Effect(w: w) :> [effectView(c, w)]
         }
     }
@@ -1865,9 +1870,108 @@ ${
         if (isProgramKind(d.kind)) {
             const rv: View[] | not = renders
             if (rv is given) renders = resetOnViews(c, d).concat(rv)
+        } else {
+            // s469: a component's root carries its CSS scope key and its flat `#{}` (§9.1 DQ-7)
+            const rv: View[] | not = renders
+            if (rv is given) renders = stampViews(rv, cssRootAttrs(t, d), t.css.scopes.length > 0)
         }
         const wiring: WiringAttr[] = []
         return { sym: d.sym, kind: d.kind, single: d.single, fields: fields, renders: renders, wiring: wiring, handles: d.handles }
+    }
+
+    // =========================================================================
+    // s469 — THE STYLESHEET (§9.1, §25.7, §65; s469-boot-css). analyze's
+    // cssPass placed every `#{}` (CssFacts); here they become the Core sheet,
+    // the §25.7 bridges, and each component root's attributes:
+    //   - `data-scrml="<name>"` on EVERY component's root once any component has
+    //     a scoped sheet — the `@scope … to ([data-scrml])` donut needs each
+    //     nested component's root marked, scoped CSS of its own or not ("The
+    //     constructor's root element SHALL carry the attribute
+    //     `data-scrml="ConstructorName"`", §9.1 DQ-7). The compiler owns the
+    //     attribute there: an author-written `data-scrml` on that root is replaced.
+    //   - its flat `#{}` blocks → inline `style="prop: value; …"` (§9.1 DQ-7);
+    //     a `@cell` in it is `var(--scrml-cell)`, fed by the bridge like any sheet.
+    // A root that renders as a chain (`if=`) or an `<each>` takes them on each
+    // element it can render as; a use / `<*x/>` root is another component's root
+    // (stamped by its own declaration).
+    // =========================================================================
+    fn coreCss(t: Tables, reset: boolean) -> CoreCss | not {
+        const f: CssFacts = t.css
+        const empty: boolean = f.charsets.length == 0 && f.imports.length == 0 && f.global.length == 0 && f.scopes.length == 0
+                               && f.inline.length == 0 && f.bridges.length == 0
+        if (empty) return not
+        const sheet: CssUnit = { charsets: f.charsets, imports: f.imports, reset: reset, tokens: [], global: f.global, scopes: f.scopes }
+        let vars: CssVar[] = []
+        for (const b of f.bridges) { vars = vars.concat([{ cell: b.cell, read: readField(t.program, InstRef.Shared(t.program), b.idx) }]) }
+        return { sheet: sheet, vars: vars }
+    }
+
+    fn inlineCssText(ds: CssDecl[]) -> string {
+        let out = ""
+        for (const d of ds) {
+            if (out.length > 0) out = out + " "
+            out = out + d.prop + ": " + partsText(d.value) + ";"
+        }
+        return out
+    }
+
+    fn cssRootAttrs(t: Tables, d: DeclInfo) -> Attr[] {
+        let out: Attr[] = []
+        if (t.css.scopes.length > 0) out = [Attr.Static("data-scrml", d.sym.hint)]
+        for (const x of t.css.inline) {
+            if (x.decl == d.sym.id) out = out.concat([Attr.Static("style", inlineCssText(x.decls))])
+        }
+        return out
+    }
+
+    fn isDataScrml(a: Attr) -> boolean {
+        return match a {
+            .Static(name: n, value: v) :> n == "data-scrml"
+            .Bound(name: n, e: e) :> n == "data-scrml"
+            .Show(test: e) :> false
+            .On(event: e, body: b) :> false
+            .Bind(kind: k) :> false
+            .Gate(values: vs) :> false
+        }
+    }
+
+    fn stampAttrs(own: Attr[], extra: Attr[], keyed: boolean) -> Attr[] {
+        if (!keyed) return own.concat(extra)
+        let out: Attr[] = []
+        for (const a of own) {
+            if (!isDataScrml(a)) out = out.concat([a])
+        }
+        return out.concat(extra)
+    }
+
+    fn stampViews(vs: View[], extra: Attr[], keyed: boolean) -> View[] {
+        if (extra.length == 0) return vs
+        let out: View[] = []
+        for (const v of vs) { out = out.concat([stampView(v, extra, keyed)]) }
+        return out
+    }
+
+    fn stampArms(arms: CondArm[], extra: Attr[], keyed: boolean) -> CondArm[] {
+        let out: CondArm[] = []
+        for (const a of arms) { out = out.concat([{ test: a.test, body: stampViews(a.body, extra, keyed) }]) }
+        return out
+    }
+
+    fn stampView(v: View, extra: Attr[], keyed: boolean) -> View {
+        return match v {
+            .El(tag: tg, attrs: xs, kids: ks) :> View.El(tg, stampAttrs(xs, extra, keyed), ks)
+            .Cond(arms: arms) :> View.Cond(stampArms(arms, extra, keyed))
+            .Each(src: sx, bind: b, key: k, handles: hs, row: r) :> View.Each(sx, b, k, hs, stampViews(r, extra, keyed))
+            .Text(text: x) :> v
+            .RawText(text: x) :> v
+            .Dyn(e: e) :> v
+            .Instance(decl: dd) :> v
+            .Slot :> v
+            .Star(decl: dd) :> v
+            .Effect(deps: ds) :> v
+            .ResetOn(triggers: ds) :> v
+            .Errors(of: o) :> v
+        }
     }
 
     type FnSyntax:struct = { nid: int, f: AFn }
@@ -3102,8 +3206,9 @@ ${
         }
         const dbs: Db[] = t.server.dbs
         const reset: boolean = resetShips(tp.files, t)
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError }
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError }
+        const css: CoreCss | not = coreCss(t, reset)
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css }
         return { core: core, diags: tp.diags }
     }
 

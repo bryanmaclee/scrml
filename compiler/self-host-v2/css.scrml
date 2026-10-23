@@ -51,6 +51,16 @@ ${
     export type OutSel:enum = {
         Plain(sel: ComplexSel),                        // printed as authored
         Flat(sel: ComplexSel),                         // `:where(…)` — §65.2.5
+        // s469-boot-css round 2 — the ROOT-ANCHORED twin of a scoped arm: its
+        // leftmost compound also matches the scope root. Inside `@scope` a
+        // selector is relative to `:scope` as a DESCENDANT, so `.card { … }`
+        // never matches the component's own root (measured in Chromium 152);
+        // ruling user-voice-scrml.md S469 (0908198) "Yes, include the root".
+        // Printed with `:scope` in the leftmost compound (after its type
+        // selector) — as `:where(:scope)` in a conditional arm, so no specificity
+        // is added; the donut limit still applies.
+        PlainAt(sel: ComplexSel),
+        FlatAt(sel: ComplexSel),
         Root,                                          // `:root`
         RootVariant(cell: string, tag: string),        // `:root[data-scrml-theme-<cell>="<tag>"]`
     }
@@ -146,9 +156,17 @@ ${
         return CssStmt.Rule(sels, outDecls(r.decls))
     }
 
+    fn anchoredSel(c: ComplexSel) -> OutSel {
+        if (armIsUnconditional(c)) return OutSel.FlatAt(c)
+        return OutSel.PlainAt(c)
+    }
+
+    // Each scoped arm twice: as written (a descendant of the root) and
+    // root-anchored (the root itself as its leftmost compound) — §9.1 DQ-7 as
+    // ruled S469: a component's `#{}` styles its own root as well as its subtree.
     fn scopedRule(arms: ComplexSel[], ds: CssDecl[]) -> CssStmt {
         let sels: OutSel[] = []
-        for (const c of arms) { sels = sels.concat([scopedSel(c)]) }
+        for (const c of arms) { sels = sels.concat([scopedSel(c), anchoredSel(c)]) }
         return CssStmt.Rule(sels, outDecls(ds))
     }
 
@@ -325,10 +343,55 @@ ${
         return s
     }
 
+    // The leftmost compound with `:where(:scope)` after its type / universal
+    // selector (a type selector must lead a compound).
+    fn anchoredCompoundText(c: Compound, mark: string) -> string {
+        let s = ""
+        let placed = false
+        let i = 0
+        for (const p of c.parts) {
+            if (i == 0 && isTypeLike(p)) {
+                s = s + simpleText(p) + mark
+                placed = true
+            } else {
+                if (!placed) {
+                    s = s + mark
+                    placed = true
+                }
+                s = s + simpleText(p)
+            }
+            i = i + 1
+        }
+        if (!placed) s = s + mark
+        return s
+    }
+
+    fn isTypeLike(p: SimpleSel) -> boolean {
+        return match p {
+            .Universal :> true
+            .TagSel(name: n) :> true
+            .ClassSel(name: n) :> false
+            .IdSel(name: n) :> false
+            .AttrSel(test: t) :> false
+            .PseudoClass(name: n, arg: a) :> false
+            .PseudoElement(name: n) :> false
+        }
+    }
+
+    // `mark`: `:where(:scope)` in a conditional arm (no specificity added);
+    // plain `:scope` inside a `:where(…)`-flat arm (already (0,0,0)).
+    export fn anchoredText(c: ComplexSel, mark: string) -> string {
+        let s: string = anchoredCompoundText(c.head, mark)
+        for (const l of c.links) { s = s + combText(l.comb) + compoundText(l.target) }
+        return s
+    }
+
     fn outSelText(o: OutSel) -> string {
         return match o {
             .Plain(sel: c) :> complexText(c)
             .Flat(sel: c) :> ":where(" + complexText(c) + ")"
+            .PlainAt(sel: c) :> anchoredText(c, ":where(:scope)")
+            .FlatAt(sel: c) :> ":where(" + anchoredText(c, ":scope") + ")"
             .Root :> ":root"
             .RootVariant(cell: c, tag: v) :> ":root[data-scrml-theme-" + c + "=\"" + v + "\"]"
         }
