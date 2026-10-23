@@ -414,6 +414,109 @@ describe("self-attack — a removed row's effect must not act, even within the w
   });
 });
 
+describe("a mount's owner is where it lives, never whoever writes first (round 2, F1)", () => {
+  // A row's template writes the scrutinee of a TOP-LEVEL <match> / <engine> during the
+  // module-init row render, so the top-level mount's FIRST dispatch happens while that row's
+  // scope is active. Round 1 filed the top-level arm under the row: removing the row then
+  // killed every arm the mount ever dispatched (stale content, no reactivity).
+  const POKE = `\${ function poke(x) { if (x == 1) { @ph = .Active } return x } }
+<div id="out"><each in=@rows key=@.id as r><p class="row">\${poke(r.id)}</p></each></div>
+`;
+  async function expectLive(sel) {
+    await set("n", 3);
+    expect(document.querySelector(sel.a).textContent).toBe("3");
+    await set("rows", [{ id: 2 }]);
+    await set("n", 4);
+    expect(document.querySelector(sel.a).textContent).toBe("4");
+    await set("ph", "Idle");
+    await set("n", 5);
+    expect(document.querySelector(sel.i).textContent).toBe("5");
+    await set("ph", "Active");
+    await set("n", 6);
+    expect(document.querySelector(sel.a).textContent).toBe("6");
+  }
+
+  test("THE REPRO — top-level <match> first dispatched from inside a row stays alive after the row goes", async () => {
+    const app = compileAndMount(`${PHASE}<rows> = [{ id: 1 }, { id: 2 }]
+<n> = 0
+${POKE}<div id="top"><match for=Phase on=@ph><Idle><b class="i">\${@n}</b></Idle><Active><s class="a">\${@n}</s></Active></match></div>
+`);
+    expect(app.errors).toEqual([]);
+    await flush();
+    await expectLive({ a: "#top s.a", i: "#top b.i" });
+  });
+
+  test("the same with a top-level <engine>", async () => {
+    const app = compileAndMount(`${PHASE}<rows> = [{ id: 1 }, { id: 2 }]
+<n> = 0
+\${ function poke(x) { if (x == 1) { @phase = .Active } return x } }
+<div id="out"><each in=@rows key=@.id as r><p class="row">\${poke(r.id)}</p></each></div>
+<div id="top"><engine for=Phase initial=.Idle><Idle rule=.Active><b class="i">\${@n}</b></Idle><Active rule=.Idle><s class="a">\${@n}</s></Active></engine></div>
+`);
+    expect(app.errors).toEqual([]);
+    await flush();
+    const setPh = (v) => set("phase", v);
+    await set("n", 3);
+    expect(document.querySelector("#top s.a")?.textContent).toBe("3");
+    await set("rows", [{ id: 2 }]);
+    await set("n", 4);
+    expect(document.querySelector("#top s.a").textContent).toBe("4");
+    await setPh("Idle");
+    await set("n", 5);
+    expect(document.querySelector("#top b.i").textContent).toBe("5");
+  });
+
+  test("a top-level <each> whose render is triggered from inside a row keeps its rows after that row goes", async () => {
+    const app = compileAndMount(`<rows> = [{ id: 1 }, { id: 2 }]
+<xs> = []
+<n> = 0
+\${ function poke(x) { if (x == 1) { @xs = [7, 8] } return x } }
+<div id="out"><each in=@rows key=@.id as r><p class="row">\${poke(r.id)}</p></each></div>
+<div id="top"><each in=@xs as x><i class="x">\${x}:\${@n}</i></each></div>
+`);
+    expect(app.errors).toEqual([]);
+    await flush();
+    await set("rows", [{ id: 2 }]);
+    await set("n", 4);
+    expect([...document.querySelectorAll("#top i.x")].map((e) => e.textContent)).toEqual(["7:4", "8:4"]);
+  });
+
+  test("a top-level if= block first evaluated from a row write stays reactive after that row goes", async () => {
+    const app = compileAndMount(`<rows> = [{ id: 1 }, { id: 2 }]
+<on> = false
+<n> = 0
+\${ function poke(x) { if (x == 1) { @on = true } return x } }
+<div id="out"><each in=@rows key=@.id as r><p class="row">\${poke(r.id)}</p></each></div>
+<div id="top"><b class="g" if=@on>\${@n}</b></div>
+`);
+    expect(app.errors).toEqual([]);
+    await flush();
+    await set("rows", [{ id: 2 }]);
+    await set("n", 4);
+    expect(document.querySelector("#top b.g")?.textContent).toBe("4");
+    await set("on", false);
+    expect(document.querySelector("#top b.g")).toBeNull();
+    await set("on", true);
+    await set("n", 5);
+    expect(document.querySelector("#top b.g")?.textContent).toBe("5");
+  });
+
+  test("a derived cell first read in a row stays live after that row goes", async () => {
+    const app = compileAndMount(`<rows> = [{ id: 1 }, { id: 2 }]
+<n> = 0
+const <twice> = @n * 2
+<div id="out"><each in=@rows key=@.id as r><p class="row">\${r.id}:\${@twice}</p></each></div>
+<div id="top"><b class="d">\${@twice}</b></div>
+`);
+    expect(app.errors).toEqual([]);
+    await flush();
+    await set("rows", [{ id: 2 }]);
+    await set("n", 4);
+    expect(document.querySelector("#top b.d").textContent).toBe("8");
+    expect(document.querySelector("#out p.row").textContent).toBe("2:8");
+  });
+});
+
 describe("randomized add / remove / switch stress — subscriber count returns to baseline", () => {
   // Deterministic PRNG so a failure reproduces.
   function rng(seed) {

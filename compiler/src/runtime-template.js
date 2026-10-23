@@ -1702,17 +1702,44 @@ function _scrml_in_scope(scopeId, fn) {
 }
 
 /**
- * The owner of a list / arm mount node: the scope active the FIRST time the runtime
- * renders into it. Recorded on the node, so a later pass — a list effect re-run, a
- * dispatcher subscriber firing outside any scope — creates its rows / arm in the SAME
- * owner. null (a root) for a mount first rendered outside every scope.
+ * The owner of a list / arm mount node, decided by WHERE THE MOUNT LIVES — never by
+ * whoever happens to render into it first. Recorded on the node the first time the
+ * runtime renders into it, so every later pass files its rows / arm under the same owner.
+ *
+ *   - A mount still being BUILT (not yet in the document: a row factory's createFn is
+ *     assembling it) belongs to the scope building it — the active scope, which is the
+ *     row's own scope there.
+ *   - A mount already IN the document belongs to its nearest structural owner
+ *     (_scrml_structural_owner): the arm, if= mount or row that contains it, else no
+ *     one (a root). The active scope is ignored: a write made while some row is being
+ *     built (a row template calling a function that sets a top-level <match>'s
+ *     scrutinee) must not hand that row the top-level arm — removing the row would
+ *     then tear down every arm the mount ever dispatched (S469 round 2, F1).
  */
 function _scrml_mount_owner(node) {
   if (node._scrml_owner === undefined) {
-    node._scrml_owner = _scrml_active_mount_scope;
+    node._scrml_owner = node.isConnected === true ? _scrml_structural_owner(node) : _scrml_active_mount_scope;
     _scrml_scope_use(node._scrml_owner);
   }
   return node._scrml_owner;
+}
+
+/**
+ * The nearest owner scope that CONTAINS the node in the document: an if= mount (its
+ * top-level nodes carry _scrml_if_sid, set by _scrml_mount_wire), a dispatched arm (its
+ * mount element carries _scrml_arm_sid while the arm is up — the node's OWN arm marker is
+ * skipped: a mount is not inside its own arm), or a list row (the group head carries
+ * _scrml_row_scope; a non-head root reaches it through _scrml_group_of). null: a root.
+ */
+function _scrml_structural_owner(node) {
+  for (let n = node; n; n = n.parentNode) {
+    if (n._scrml_if_sid) return n._scrml_if_sid;
+    if (n !== node && n._scrml_arm_sid) return n._scrml_arm_sid;
+    if (n._scrml_row_scope) return n._scrml_row_scope;
+    const g = n._scrml_group_of;
+    if (g && g[0] && g[0]._scrml_row_scope) return g[0]._scrml_row_scope;
+  }
+  return null;
 }
 
 /** Note that something holds a reference to scope \`id\` (it must not be dropped). */
@@ -1773,12 +1800,26 @@ function _scrml_row_dispose(node) {
 function _scrml_arm_scope(mount, wire) {
   const owner = _scrml_mount_owner(mount);
   const id = _scrml_scope_open("as", owner);
-  const d = _scrml_in_scope(id, wire);
+  // The arm's structural marker: what renders inside this mount while the arm is up is
+  // owned by it (_scrml_structural_owner).
+  mount._scrml_arm_sid = id;
+  const teardown = function () {
+    if (mount._scrml_arm_sid === id) mount._scrml_arm_sid = undefined;
+    _scrml_owner_destroy(id);
+  };
+  let d;
+  try {
+    d = _scrml_in_scope(id, wire);
+  } catch (e) {
+    // A wiring that throws leaves nothing tracked behind: what it did wire is torn down.
+    teardown();
+    throw e;
+  }
   if (typeof d === "function") _scrml_register_cleanup(d, id);
   // An owner already destroyed (a stale mount rendered into by a live caller): the arm
   // is inert — wired once, owned by nothing alive, so torn down at once.
-  if (_scrml_scope_gone(owner)) _scrml_owner_destroy(id);
-  return function () { _scrml_owner_destroy(id); };
+  if (_scrml_scope_gone(owner)) teardown();
+  return teardown;
 }
 
 // ---------------------------------------------------------------------------
@@ -2029,6 +2070,10 @@ function _scrml_mount_wire(root, scopeId, rewire) {
     // TreeWalker excludes its own root), so \`_scrml_remount_each\` cannot see a
     // top-level fence at all. Hence the explicit per-node pass.
     const nodes = root._scrml_if_range || [root];
+    // S469 — the mount's structural owner marker (owner chunk, _scrml_structural_owner):
+    // a list or dispatched arm rendered inside this subtree, now or later, is owned by
+    // this mount's scope whichever scope writes to it first.
+    if (scopeId) for (let i = 0; i < nodes.length; i++) if (nodes[i]) nodes[i]._scrml_if_sid = scopeId;
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i];
       if (!n) continue;
@@ -5140,8 +5185,13 @@ function _scrml_effect(fn, gate) {
   // re-run creates (the rows a list effect reconciles in, the arm a dispatcher
   // mounts) is owned by the same scope; and once that scope is destroyed the effect
   // disposes itself instead of running — removed content never acts again.
-  const owner = _scrml_active_mount_scope;
-  const ownerRec = (owner && typeof _scrml_scope_recs !== "undefined") ? (_scrml_scope_recs.get(owner) || null) : null;
+  // Only when the 'owner' chunk shipped (a page with lists / dispatched arms): without it no
+  // scope is tracked, a run cannot tell a live owner from a destroyed if= scope, and
+  // re-entering a destroyed one would register cleanups under its dead key — so the
+  // effect then runs in the ambient scope, exactly as before S469.
+  const owned = typeof _scrml_scope_recs !== "undefined";
+  const owner = owned ? _scrml_active_mount_scope : null;
+  const ownerRec = owner ? (_scrml_scope_recs.get(owner) || null) : null;
   if (ownerRec !== null) ownerRec.used = true;
 
   function effectFn() {
@@ -5172,7 +5222,7 @@ function _scrml_effect(fn, gate) {
     const wasPaused = _scrml_tracking_paused;
     _scrml_tracking_paused = false;
     const prevOwner = _scrml_active_mount_scope;
-    _scrml_active_mount_scope = owner;
+    if (owned) _scrml_active_mount_scope = owner;
     try {
       fn();
     } finally {
@@ -5229,8 +5279,13 @@ function _scrml_effect_static(fn, gate) {
   let cleanupEntries = [];
   let hasRun = false;
   // S469 — owner scope, exactly as _scrml_effect (runs inside it; dead owner → dispose).
-  const owner = _scrml_active_mount_scope;
-  const ownerRec = (owner && typeof _scrml_scope_recs !== "undefined") ? (_scrml_scope_recs.get(owner) || null) : null;
+  // Only when the 'owner' chunk shipped (a page with lists / dispatched arms): without it no
+  // scope is tracked, a run cannot tell a live owner from a destroyed if= scope, and
+  // re-entering a destroyed one would register cleanups under its dead key — so the
+  // effect then runs in the ambient scope, exactly as before S469.
+  const owned = typeof _scrml_scope_recs !== "undefined";
+  const owner = owned ? _scrml_active_mount_scope : null;
+  const ownerRec = owner ? (_scrml_scope_recs.get(owner) || null) : null;
   if (ownerRec !== null) ownerRec.used = true;
 
   function effectFn() {
@@ -5239,7 +5294,7 @@ function _scrml_effect_static(fn, gate) {
 
     if (hasRun) {
       const prevOwner = _scrml_active_mount_scope;
-      _scrml_active_mount_scope = owner;
+      if (owned) _scrml_active_mount_scope = owner;
       try { fn(); } finally { _scrml_active_mount_scope = prevOwner; }
       return;
     }
@@ -5252,7 +5307,7 @@ function _scrml_effect_static(fn, gate) {
     const wasPaused = _scrml_tracking_paused;
     _scrml_tracking_paused = false;
     const prevOwner = _scrml_active_mount_scope;
-    _scrml_active_mount_scope = owner;
+    if (owned) _scrml_active_mount_scope = owner;
     try { fn(); } finally {
       _scrml_active_mount_scope = prevOwner;
       _scrml_tracking_paused = wasPaused;
