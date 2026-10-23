@@ -5741,10 +5741,35 @@ deps-attr     ::= 'deps=' '[' deps-list ']'
 deps-list     ::= ('@' identifier (',' '@' identifier)*)?
 cache-attr    ::= 'cache'                          (S444 dpa-060 — bare; takes no value, see §6.7.7.2)
 
-request-body  ::= '$' '{' assignment-expression '}'
+request-body  ::= '$' '{' lin-declaration* assignment-expression '}'
+                  (* S469: `lin` declarations (§35.2) may precede the one assignment;
+                     was  request-body ::= '$' '{' assignment-expression '}' *)
 ```
 
-The `id` attribute is required (E-LIFECYCLE-018). The body SHALL contain exactly one assignment expression of the form `@variable = expr`.
+The `id` attribute is required (E-LIFECYCLE-018). ~~The body SHALL contain exactly one assignment expression of the form `@variable = expr`.~~ *(S469)* The body SHALL contain exactly one assignment expression of the form `@variable = expr`, which MAY be preceded by `lin` declarations and by nothing else.
+
+> **Amendment S469 — a `lin` declaration may stand inside a `<request>` body.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — a `lin` declaration may stand inside a `<request>` body" — *"I agree with your rec on the lin Q"* (the ratified rec: *"a `<request>` body may hold a `lin` declaration followed by the one assignment, so a single-use value is declared where it is consumed and never leaks (§35.5's E-LIN-006 fix-it reading). §6.7.7's "exactly one assignment" grammar and its "any `lin` reference is E-LIN-006" rule are amended to match. E-LIN-006 fires on a `lin` declared OUTSIDE the request and referenced inside it."*) · **supersedes:** `request-body ::= '$' '{' assignment-expression '}'`; *"The body SHALL contain exactly one assignment expression of the form `@variable = expr`."*; *"The compiler SHALL emit E-LIN-006 if a `lin` variable is referenced in a `<request>` body."*; the E-LIN-006 row *"`lin` variable in `<request>` body"* (each kept, struck or quoted, where it stood).
+>
+> The body holds the one `@var = expr` assignment, optionally preceded by `lin` declarations. Each run of the body declares those bindings afresh, so a `lin` declared there is consumed once per run, by the assignment, and is never visible outside the request. A `lin` declared OUTSIDE the request and referenced inside it is still E-LIN-006 (§35.5).
+>
+> ```scrml
+> <request id="profile">
+>     ${
+>         lin ticket = mintTicket();
+>         @user = fetchUser(ticket, @userId);
+>     }
+> </>
+> ```
+>
+> **PA readings (S469 — not separately ruled; bryan veto window):**
+> (a) more than one `lin` declaration is admitted: the ruling's "a `lin` declaration" is read as naming the statement kind, not a count;
+> (b) the `lin` declarations come before the assignment, and the ordinary §35 rules apply to each: one the assignment does not consume is E-LIN-001, a second use is E-LIN-002;
+> (c) no other statement joins the body: a `let` / `const`, a call statement or a second assignment is still outside the grammar;
+> (d) an `@variable` read in a `lin` initializer counts toward the inferred dependencies, like a read in the fetch expression, because the initializer runs on every execution of the body;
+> (e) a `lin` declaration is not an assignment for E-LIFECYCLE-020, and a body that holds only `lin` declarations is E-LIFECYCLE-021;
+> (f) the ruling names `<request>` only, so `<poll>` (§6.7.6) is unchanged.
+>
+> **Implementation status:** impl#1 already accepts a body-local `lin` in a `<request>` body without E-LIN-006 (its check compares the declaration's deferred-context depth with the reference's, `compiler/src/type-system.ts`), and it emits neither E-LIFECYCLE-020 nor E-LIFECYCLE-021. The bootstrap has no `lin` yet (`docs/known-gaps.md`).
 
 The `deps` attribute is optional. When absent, the compiler infers reactive dependencies from `@variable` reads within the fetch expression. When present, `deps` overrides inference.
 
@@ -5857,10 +5882,12 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 - The call that is the right-hand side of the body's assignment SHALL be handled by the request, and SHALL NOT be E-ERROR-002: its failure — the callee's declared error, or the transport failure of a call to a server function (§19.9.10) — SHALL set `<#id>.error` and leave `@var` and `<#id>.data` at their previous values (§19.4.3 item 5). *(S451 "your recs on all of them" — item 1 makes every client call of a server function failable; item 3 confirms the #1259 reading that the request handles its body's call.)*
 - The compiler SHALL emit E-LIFECYCLE-018 if `<request>` has no `id` attribute.
 - The compiler SHALL emit E-LIFECYCLE-019 if `<request>` is self-closing (no body).
-- The compiler SHALL emit E-LIFECYCLE-020 if the body contains more than one assignment.
-- The compiler SHALL emit E-LIFECYCLE-021 if the body contains logic but no `@var = expr`.
+- The compiler SHALL emit E-LIFECYCLE-020 if the body contains more than one assignment. *(S469 PA reading: a `lin` declaration is not an assignment for this count.)*
+- The compiler SHALL emit E-LIFECYCLE-021 if the body contains logic but no `@var = expr`. *(S469 PA reading: this includes a body that holds only `lin` declarations.)*
 - The compiler SHALL emit E-LIFECYCLE-022 if a `deps=` entry names an undeclared or non-`@` variable.
-- The compiler SHALL emit E-LIN-006 if a `lin` variable is referenced in a `<request>` body.
+- ~~The compiler SHALL emit E-LIN-006 if a `lin` variable is referenced in a `<request>` body.~~
+- *(S469)* A `<request>` body MAY hold `lin` declarations before its one assignment, and a `lin` declared there and consumed in that body SHALL NOT be E-LIN-006.
+- *(S469)* The compiler SHALL emit E-LIN-006 if a `lin` variable declared outside the `<request>` is referenced in its body (§35.5).
 - The compiler SHALL emit W-LIFECYCLE-011 if the assigned `@variable` is never read in enclosing markup.
 - The compiler SHALL emit W-LIFECYCLE-012 if `<#id>.refetch()` is called inside a `<timer>` or `<poll>` body.
 - The compiler SHALL emit W-LIFECYCLE-013 when no reactive deps and no explicit `deps=[]`.
@@ -5923,10 +5950,10 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 |---|---|---|
 | E-LIFECYCLE-018 | `<request>` has no `id` attribute | Error |
 | E-LIFECYCLE-019 | `<request>` is self-closing (no body) | Error |
-| E-LIFECYCLE-020 | `<request>` body has multiple assignments | Error |
-| E-LIFECYCLE-021 | `<request>` body has logic but no `@var = expr` | Error |
+| E-LIFECYCLE-020 | `<request>` body has multiple assignments *(a `lin` declaration is not one — S469 PA reading)* — **not yet emitted** by impl#1 or the bootstrap | Error |
+| E-LIFECYCLE-021 | `<request>` body has logic but no `@var = expr` *(including a body of only `lin` declarations — S469 PA reading)* — **not yet emitted** by impl#1 or the bootstrap | Error |
 | E-LIFECYCLE-022 | `deps=` entry names undeclared or non-`@` variable | Error |
-| E-LIN-006 | `lin` variable in `<request>` body | Error |
+| E-LIN-006 | ~~`lin` variable in `<request>` body~~ *(S469)* `lin` variable declared outside the `<request>` referenced in its body; a `lin` declared in the body before the assignment is valid (emitted at `compiler/src/type-system.ts`) | Error |
 | W-LIFECYCLE-011 | Assigned `@variable` never read in enclosing markup | Warning |
 | W-LIFECYCLE-012 | `refetch()` called inside `<timer>`/`<poll>` body | Warning |
 | W-LIFECYCLE-013 | No reactive deps, no explicit `deps=[]` | Warning |
@@ -6563,10 +6590,10 @@ reads inside an `animationFrame` callback body.
 
 | E-LIFECYCLE-018 | `<request>` has no `id` attribute | Error |
 | E-LIFECYCLE-019 | `<request>` is self-closing (no body) | Error |
-| E-LIFECYCLE-020 | `<request>` body has multiple assignments | Error |
-| E-LIFECYCLE-021 | `<request>` body has logic but no `@var = expr` | Error |
+| E-LIFECYCLE-020 | `<request>` body has multiple assignments *(a `lin` declaration is not one — S469 PA reading)* — **not yet emitted** by impl#1 or the bootstrap | Error |
+| E-LIFECYCLE-021 | `<request>` body has logic but no `@var = expr` *(including a body of only `lin` declarations — S469 PA reading)* — **not yet emitted** by impl#1 or the bootstrap | Error |
 | E-LIFECYCLE-022 | `deps=` entry names undeclared or non-`@` variable | Error |
-| E-LIN-006 | `lin` variable in `<request>` body | Error |
+| E-LIN-006 | ~~`lin` variable in `<request>` body~~ *(S469)* `lin` variable declared outside the `<request>` referenced in its body; a `lin` declared in the body before the assignment is valid (emitted at `compiler/src/type-system.ts`) | Error |
 | W-LIFECYCLE-011 | Assigned `@variable` never read in enclosing markup | Warning |
 | W-LIFECYCLE-012 | `refetch()` called inside `<timer>`/`<poll>` body | Warning |
 | W-LIFECYCLE-013 | No reactive deps, no explicit `deps=[]` | Warning |
@@ -28034,7 +28061,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | W-LIFECYCLE-002 | §28.1 | `<timer>` has no body (self-closing form). A bodyless timer has no observable effect; the warning surfaces probable dead code. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Warning |
 | W-LIFECYCLE-007 | §28.1 | `running=false` literal boolean on `<timer>` or `<poll>`. The literal-false form is useless — the element can never become un-paused without a reactive variable. Use `running=@flag` or remove the attribute. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Warning |
 | E-LIN-005 | §35.5 | `let` / `const` / `lin` declaration shadows an in-scope `lin` variable of the same name. Shadowing a `lin` variable prevents the compiler from determining which binding a consumption refers to. Resolution: rename the new binding, or consume the outer `lin` variable before this declaration. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts` (`checkLinShadowing`). Supersedes the retired pre-2026-04 E-LIN-005 noted in §6.7.12.) | Error |
-| E-LIN-006 | §35.5 | `lin` variable consumed inside a deferred-execution markup body (`<request>` / `<poll>`) when the variable was declared outside that body. The compiler cannot prove dominance across the scheduling boundary, so the consumption may happen zero or multiple times. Resolution: declare the `lin` variable inside the deferred body, or pass a consumed value into the body. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
+| E-LIN-006 | §35.5, §6.7.7 | `lin` variable consumed inside a deferred-execution markup body (`<request>` / `<poll>`) when the variable was declared outside that body. The compiler cannot prove dominance across the scheduling boundary, so the consumption may happen zero or multiple times. Resolution: declare the `lin` variable inside the deferred body, or pass a consumed value into the body. **(S469)** For `<request>` the resolution is grammar: a `<request>` body MAY hold `lin` declarations before its one assignment (§6.7.7), and a `lin` declared and consumed there is not this code; §6.7.7's former *"E-LIN-006 if a `lin` variable is referenced in a `<request>` body"* is struck. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — a `lin` declaration may stand inside a `<request>` body" — *"I agree with your rec on the lin Q"*. `<poll>` is unchanged by that ruling. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`; impl#1 already treats a body-local `lin` as valid. Not emitted by the bootstrap, which has no `lin` — `docs/known-gaps.md`.) | Error |
 | E-INPUT-001 | §36 | `<keyboard>` element is missing the required `id` attribute. Without an id the keyboard state cannot be addressed and the element has no observable effect. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts:718-719`.) | Error |
 | E-INPUT-002 | §36 | `<mouse>` element is missing the required `id` attribute. Without an id the mouse state cannot be addressed. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts:718-719`.) | Error |
 | E-INPUT-003 | §36 | `<gamepad>` element is missing the required `id` attribute. Without an id the gamepad state cannot be addressed. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts:718-719`.) | Error |
@@ -28125,8 +28152,8 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-LIFECYCLE-014 | §28.5 | `animationFrame()` called inside a server-escalated function. The function is run per-frame on the client; there is no server-side `animationFrame` analogue. (Catalog addition S84 Wave 2 #5; full prose at §28.5 line 4288.) | Error |
 | E-LIFECYCLE-016 | §6.7.4, §6.7.1a | An `<effect>` — or a soft-deprecated keyword `when … changes { }` — appears inside the body of another reactive effect; or (S449 — ruling:user-voice-scrml.md S449 item 2; Nominal) an `<onMount>` — or a soft-deprecated `on mount { }` — appears inside an effect body or another mount body. An effect body is logic, not a markup position, and an effect inside it would have no defined trigger or lifetime. Resolution: declare the inner effect as a sibling `<effect>` with its own `deps=`. (Catalog addition S84 Wave 2 #5.) **Re-expressed S447** for `<effect>`. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* · supersedes: the pre-S447 "`when` block appears syntactically inside another `when` block body" wording. **Nominal / not yet emitted** — impl#1 fails closed on the keyword shape with `E-CODEGEN-INVALID-LOGIC` instead (`g-impl1-when-effect-divergence-s447`); lands with the bootstrap. | Error |
 | E-LIFECYCLE-019 | §28.4 | A `<request>` element is self-closing (no body). A `<request>` body declares the assignment that captures the fetch result; without a body the element has no observable effect. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3880.) | Error |
-| E-LIFECYCLE-020 | §28.4 | A `<request>` body contains more than one assignment. `<request>` is single-assignment-by-design: the lone `@var = expr` form captures the fetch result; multiple assignments would race. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3881.) | Error |
-| E-LIFECYCLE-021 | §28.4 | A `<request>` body contains logic but no `@var = expr` capture. The fetch result is silently discarded. Resolution: add the assignment (`@var = fetchResult(...)`) or remove the logic. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3882.) | Error |
+| E-LIFECYCLE-020 | §28.4 | A `<request>` body contains more than one assignment. `<request>` is single-assignment-by-design: the lone `@var = expr` form captures the fetch result; multiple assignments would race. *(S469 PA reading: a `lin` declaration before the assignment is not an assignment for this count — §6.7.7.)* (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3881.) **Not yet emitted** by impl#1 or the bootstrap (no emitter found, S469). | Error |
+| E-LIFECYCLE-021 | §28.4 | A `<request>` body contains logic but no `@var = expr` capture. The fetch result is silently discarded. Resolution: add the assignment (`@var = fetchResult(...)`) or remove the logic. *(S469 PA reading: a body of only `lin` declarations is this code — §6.7.7.)* (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3882.) **Not yet emitted** by impl#1 or the bootstrap (no emitter found, S469). | Error |
 | E-LIFECYCLE-022 | §28.4 | A `<request>` `deps=` entry names an undeclared variable or a non-`@` variable. The `deps=` list participates in re-fetch invalidation; entries must resolve to declared reactive variables. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3883.) | Error |
 | E-REQUEST-CACHE-NO-READSET | §6.7.7.2 | The bare `cache` attribute is placed on a `<request>` that has no compiler-derivable read-set — a `url=` or `api=` request. `cache` is legal only where the compiler can derive staleness; there is no author-TTL fallback. Resolution: remove `cache`, or fetch through a server function whose SQL the compiler can see. **Provenance:** ruling:user-voice-scrml.md S444 dpa-060 call 2 (+4) — *"(i) and yes"*. **Nominal / spec-ahead — not yet emitted; lands with the impl** (impl#1 carries the divergence; the bootstrap builds it). | Error |
 | W-LIFECYCLE-003 | §6.7.10, §28.1 | A `<timer>` or `<poll>` is declared inside a `for`/`lift` loop body. N loop iterations produce N independent ticking instances; the resulting count and lifetime are usually unintended. Resolution: hoist the element to outside the loop, or confirm via a comment that N instances is intentional. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4323.) | Warning |
@@ -28735,6 +28762,23 @@ A `lin` variable declared outside a `<request>` (§6.7.7) or `<poll>` (§6.7.6) 
 
 > E-LIN-006: `lin` variable `token` is consumed inside a `<request>` body but was declared outside it. The compiler cannot prove dominance across the `<request>` scheduling boundary, so the consumption may happen zero or multiple times. Either declare `token` inside the `<request>` body, or pass a consumed (non-lin) value into the body.
 
+> **Amendment S469 — the fix-it is grammar for `<request>`.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — a `lin` declaration may stand inside a `<request>` body" — *"I agree with your rec on the lin Q"* (*"a `<request>` body may hold a `lin` declaration followed by the one assignment, so a single-use value is declared where it is consumed and never leaks (§35.5's E-LIN-006 fix-it reading). … E-LIN-006 fires on a `lin` declared OUTSIDE the request and referenced inside it."*) · **supersedes:** §6.7.7's *"The compiler SHALL emit E-LIN-006 if a `lin` variable is referenced in a `<request>` body"* and its one-assignment-only `request-body` (struck in §6.7.7). This section's rule was already the narrow one and stands.
+>
+> The fix-it "declare `token` inside the `<request>` body" is now legal under §6.7.7's grammar: `lin` declarations may precede the body's one assignment. Each run of the body declares the binding afresh and the assignment consumes it once, so the count is provable within the body.
+>
+> ```scrml
+> <program>
+>     <request id="profile">
+>         ${
+>             lin token = fetchToken();          // declared inside the <request> body
+>             @user = authenticate(token);       // consumed once per run — valid, not E-LIN-006
+>         }
+>     </>
+> </program>
+> ```
+>
+> The ruling names `<request>`. `<poll>` gets no grammar change, and its body keeps §6.7.6's shape *(PA reading, S469)*.
+
 Closures (arrow / `function` expressions) are NOT deferred-execution contexts for the purposes of E-LIN-006. §35.6 governs them: a closure capture of a `lin` variable is the synchronous consumption event regardless of when or whether the closure runs. The static count is fixed at capture time, so dominance is trivially provable and E-LIN-006 does not apply.
 
 **Normative statements:**
@@ -28744,6 +28788,7 @@ Closures (arrow / `function` expressions) are NOT deferred-execution contexts fo
 - The compiler SHALL emit E-LIN-003 when a `lin` variable is consumed on some execution paths but not others.
 - The compiler SHALL emit E-LIN-005 when a `let`, `const`, or `lin` declaration has the same name as an in-scope `lin` variable declared in a strictly enclosing scope. A same-scope rebinding is not shadowing in the hierarchical sense and is not covered by E-LIN-005.
 - The compiler SHALL emit E-LIN-006 when a `lin` variable is consumed inside a `<request>` or `<poll>` markup body and the `lin` variable was declared outside that body. The scoping check is based on the markup-ctx stack at consumption time; the closure model in §35.6 is unaffected.
+- *(S469)* A `lin` variable declared inside a `<request>` body (before its one assignment, §6.7.7) and consumed in that body SHALL NOT be E-LIN-006. The §35.3 and §35.5 rules apply to it within the body: unconsumed by the body is E-LIN-001, consumed twice is E-LIN-002.
 - When E-LIN-006 fires on a reference, that reference SHALL be treated as having consumed the `lin` variable for scope-exit accounting; E-LIN-001 SHALL NOT cascade on the same variable.
 - `~` is subject to the same rules; E-TILDE-001 and E-TILDE-002 (§32.5) are the `~`-specific forms of E-LIN-001 and E-LIN-002 respectively.
 - All `lin` errors SHALL be reported at the TS stage (Stage 6) as part of the linear type pass, after type resolution and route inference.
