@@ -66,4 +66,73 @@ const shapes = [];
 for (const [rn, re] of REGEXES) {
   for (const [sn, sep] of SPELLINGS) shapes.push([`regex ${rn} in an arm body (${sn} arms)`, PAGE(ARMS(re, sep))]);
 }
+
+// S469 r3 — g-impl1-expr-match-literal-alternation-first-alternate-dropped-s469: a LITERAL
+// alternation arm (`401 | 403 :>`, `"denied" | "locked" :>`) in an expression-position match lost
+// every alternate but the last (the raw-arm splitter took the last one as the arm start), so the
+// dropped status fell through to the default arm — here a default-ALLOW, the way a deny-list is
+// written. Measured on the r2 head c4233fa33 (before the fix): every NEWLINE-spelled shape is FAIL
+// (the wrong password logs in) in the `@cell = match` and call-argument positions, and PASS-REFUSED
+// (E-CODEGEN-INVALID-LOGIC) as a derived `const <msg>`; the comma / mixed spellings happened to pass
+// there because each arm arrived as its own raw arm. All 27 PASS after the fix.
+const STATUS = {
+  number: { deny: "401", ok: "200", alts: "401 | 403", other: "500" },
+  string: { deny: `"denied"`, ok: `"ok"`, alts: `"denied" | "locked"`, other: `"error"` },
+  mixed: { deny: "401", ok: "200", alts: `"denied" | 401 | 403`, other: "500" },
+};
+const ALT_ARMS = (k, sep, ind) => [
+  `${STATUS[k].alts} :> "rejected"${sep[0]}`,
+  `${STATUS[k].other} :> "rejected"${sep[1]}`,
+  `_ :> "LOGGED IN"${sep[2]}`,
+].map((l) => ind + l).join("\n");
+const ALT_PAGE = (k, pos, sep) => {
+  const { deny, ok } = STATUS[k];
+  const head = `type AuthErr:enum = { Denied }
+<msg> = "init"
+<st>: number | string = 0
+\${
+    function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied
+        return true
+    }
+    function code(p) {
+        const good = check(p) !{ .Denied :> false }
+        return good == true ? ${ok} : ${deny}
+    }
+    function pass(x) { return x }
+`;
+  const tail = `<button id="wrong" onclick=login("wrong")>go</button>
+<button id="right" onclick=login("secret")>go</button>
+<p id="out">\${@msg}</p>
+`;
+  if (pos === "cell") return `${head}    function login(p) {
+        @st = code(p)
+        @msg = match @st {
+${ALT_ARMS(k, sep, "            ")}
+        }
+    }
+}
+${tail}`;
+  if (pos === "call argument") return `${head}    function login(p) {
+        @st = code(p)
+        @msg = pass(match @st {
+${ALT_ARMS(k, sep, "            ")}
+        })
+    }
+}
+${tail}`;
+  // derived cell: the message is derived from the status
+  return head.replace(`<msg> = "init"\n`, "") + `    function login(p) { @st = code(p) }
+}
+const <msg> = match @st {
+    0 :> "init"${sep[0]}
+${ALT_ARMS(k, sep, "    ")}
+}
+${tail}`;
+};
+for (const k of Object.keys(STATUS)) {
+  for (const pos of ["cell", "call argument", "derived cell"]) {
+    for (const [sn, sep] of SPELLINGS) shapes.push([`literal alternation ${k} deny-list, ${pos} (${sn} arms)`, ALT_PAGE(k, pos, sep)]);
+  }
+}
 export default shapes;

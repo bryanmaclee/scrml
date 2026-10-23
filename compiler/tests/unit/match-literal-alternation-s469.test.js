@@ -100,6 +100,11 @@ ${a("      ")}
 ${a("  ")}
 }
 <p>\${@n}</>`,
+  "derived const cell": (ty, init, a) => `<k>: ${ty} = ${init}
+const <n> = match @k {
+${a("  ")}
+}
+<p>\${@n}</>`,
   "call argument": (ty, init, a) => `<k>: ${ty} = ${init}
 <n> = ""
 \${
