@@ -243,6 +243,10 @@ const E2E_PARAMS = [["a", "int", 7], ["b", "int", -2], ["n", "int", 3], ["total"
 
 export function e2e(mods, frontEnd, rt, tpl) {
   if (tpl.includes("@")) return { status: "skip" };
+  // ruled language differences, not reader ones: `not` is scrml's absence (a JavaScript name), and a
+  // string's `.length` counts code points (S469 "code points everywhere, `.length` included")
+  if (/\bnot\b/.test(tpl)) return { status: "skip" };
+  if (tpl.includes(".length") && /\\u\{[0-9A-Fa-f]{5,}\}|[\uD800-\uDFFF]/.test(tpl)) return { status: "skip" };
   const params = E2E_PARAMS.map(([nm, ty]) => nm + ": " + ty).join(", ");
   const src = "<program>\n    fn f(" + params + ") -> string {\n        return " + tpl + "\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
   let r;

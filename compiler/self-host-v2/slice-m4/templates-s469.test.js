@@ -328,6 +328,10 @@ describe("found by the end-to-end fuzz — `==` across types is E-EQ-001 (§45),
     expect(codes(fnProg("", "n: int, b: bool", "`${b == n}`"))).toEqual(["E-EQ-001"]);
     expect(codes(fnProg("", "n: int, x: number", "`${n == x}`"))).toEqual([]);
     expect(codes(fnProg("", "s: string, t: string", "`${s != t}`"))).toEqual([]);
+    // a tape against a string, an enum against a string: different kinds too
+    expect(codes(fnProg("", "xs: int[], s: string", "`${xs == s}`"))).toEqual(["E-EQ-001"]);
+    expect(codes(fnProg("    type C:enum = { Red, Green }", "c: C", "`${c == \"Red\"}`"))).toEqual(["E-EQ-001"]);
+    expect(codes(fnProg("    type C:enum = { Red, Green }", "c: C", "`${c == .Red}`"))).toEqual([]);
   });
 });
 
