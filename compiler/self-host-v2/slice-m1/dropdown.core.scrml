@@ -393,6 +393,7 @@ ${
             reset: true,
             sqlError: not,
             serverCallError: not,
+            css: not,
         }
     }
 

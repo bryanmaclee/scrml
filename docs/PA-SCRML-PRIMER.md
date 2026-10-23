@@ -1070,7 +1070,7 @@ Emits (verified end-to-end, S214):
 - **Flat declarations** (bare `property: value;` only, no selectors) → inline `style=""` on the element; not in the `.css` file.
 - **Program-level `#{}`** (top of `<program>`, no component) → global CSS, unwrapped.
 
-Also available: `<style>` blocks (§9.2), plain `.css` files (§9.3), and **CSS variable syntax** (§25) — write `name = value` (compiles to `--name: value`) and `prop: name fallback` (compiles to `var(--name, fallback)`); the `--` / `var()` are compiler-generated. Tailwind utilities (§26) live OUTSIDE `@scope` and are never wrapped.
+Also available: `<style>` blocks (§9.2), plain `.css` files (§9.3), and **CSS variable syntax** (§25) — write `name = value` inside a rule (§25.2; compiles to `--name: value`) and use it with CSS's own `var(--name)`, or reference a cell / theme token with `@name` (§25.7, §65.3.2). The old use-site form `prop: name fallback` → `var(--name, fallback)` (§25.3) is **retired** (S469): §65.3.2 governs — a bare identifier in a CSS value is always a literal value. Tailwind utilities (§26) live OUTSIDE `@scope` and are never wrapped.
 
 > **Currency note (S214).** SPEC §9.1 / §25.6 still use pre-v0.next "state type constructor" vocabulary + a stale worked example (manual lowercase `data-scrml="card"`); the live behavior is **component-keyed** with an **auto-injected** `data-scrml="Card"` (verified above). A SPEC §9/§25.6 currency pass is owed. **Known papercut:** `W-TAILWIND-UNRECOGNIZED-CLASS` false-fires on class names defined in your own in-scope `#{}` block (the lint only knows Tailwind utilities) — the lint should cross-reference in-scope `#{}`-defined selectors before warning.
 

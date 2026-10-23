@@ -305,12 +305,29 @@ describe("parse — S447 opener keywords (§66.2.5)", () => {
 describe("fix round — out-of-subset forms are REPORTED by name (F-C, F-D)", () => {
   const codes = (src) => parse("t.scrml", src).diags.map((d) => [d.code, d.message]);
 
-  test("F-D: `#{ … }` inside markup / at program level is reported, never lowered as text", () => {
+  // s469-boot-css: `#{}` is IN the bootstrap now (css-syntax.scrml) — the invariant this test guarded
+  // ("never lowered as text") stays: each block is a Css node, and no Text node holds its CSS.
+  test("F-D: `#{ … }` inside markup / at program level is a CSS node, never lowered as text", () => {
     const r = parse("t.scrml", "<program>\n#{ .x { color: red; } }\n<main><p>a #{ .y { margin: 0 } } b</p></main>\n</program>");
-    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(r.diags[0].message).toContain("#{");
-    expect(JSON.stringify(r.ast)).not.toContain("color");
-    expect(JSON.stringify(r.ast)).not.toContain("margin");
+    expect(r.diags).toEqual([]);
+    const variants = [];
+    const texts = [];
+    const walk = (v) => {
+      if (Array.isArray(v)) { v.forEach(walk); return; }
+      if (v === null || typeof v !== "object") return;
+      if (typeof v.variant === "string") {
+        variants.push(v.variant);
+        if (v.variant === "Text") texts.push(v.data.text);
+      }
+      for (const x of Object.values(v)) walk(x);
+    };
+    walk(r.ast);
+    expect(variants.filter((x) => x === "Css").length).toBe(2);
+    for (const t of texts) {
+      expect(t).not.toContain("color");
+      expect(t).not.toContain("margin");
+      expect(t).not.toContain("#{");
+    }
   });
 
   test("F-C: `@count += @step` names compound assignment; `@count++` names `++`", () => {

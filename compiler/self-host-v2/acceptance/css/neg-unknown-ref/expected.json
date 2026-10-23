@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-css-neg-unknown-ref",
+  "description": "E-THEME-TOKEN-UNKNOWN: a `@name` resolving to neither a token nor a cell.",
+  "language-version": "1.0",
+  "spec": "§65.3.2",
+  "rationale": "§65.3.2: the `@` sigil makes the use-site check decidable.",
+  "expect": {
+    "codes": [
+      "E-THEME-TOKEN-UNKNOWN"
+    ],
+    "codeCounts": {
+      "E-THEME-TOKEN-UNKNOWN": 1
+    }
+  }
+}

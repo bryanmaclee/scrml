@@ -708,7 +708,20 @@ ${
         // payload of every client call's `Transport` variant; `not` when no
         // client call is made.
         serverCallError: Sym | not,
+        // s469 (s469-boot-css): the program's author stylesheet (its `#{}`
+        // blocks, §9.1 / §65) and the §25.7 CSS-variable bridges it reads;
+        // `not` when the program writes no author CSS (the reset alone is
+        // `reset` above). The sheet's own `reset` agrees with `reset`.
+        css: CoreCss | not,
     }
+
+    // s469 — §25.7: a `@name` of a program cell in a `#{}` value is
+    // `var(--scrml-<name>)`; at run time the cell's value is written to that
+    // custom property on `:root`, now and on every change, through the
+    // runtime's value guard (only a safe CSS value is ever written — the CSS
+    // injection boundary). `read` reads the cell (the shared program instance).
+    export type CssVar:struct = { cell: Sym, read: Expr }
+    export type CoreCss:struct = { sheet: CssUnit, vars: CssVar[] }
 
     // -------------------------------------------------------------------------
     // Constructors — pure shorthands used by the hand-built Core oracles and

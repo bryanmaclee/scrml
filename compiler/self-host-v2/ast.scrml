@@ -25,6 +25,7 @@
 // =============================================================================
 ${
     import { Severity, severityOf } from "./severity.scrml"
+    import { ComplexSel } from "./core.scrml"
 
     export type ASpan:struct = { start: int, end: int }
 
@@ -277,7 +278,37 @@ ${
         // the tree, by the nearest enclosing element scope (§6.7.4 "Scope and
         // teardown"): the program, an `if=` element, an `<each>` row.
         Effect(w: AEffect),
+        // s469 — a `#{…}` CSS block where markup stands (§9.1, §65): its rules,
+        // parsed (css-syntax.scrml). It renders nothing where it stands; WHICH
+        // stylesheet it feeds — the program-global layer, a component's
+        // `@scope`, or the inline `style=` of a constructor root — is decided by
+        // its position (analyze, cssPass).
+        Css(c: ACss),
     }
+
+    // -------------------------------------------------------------------------
+    // s469 — CSS (§9.1, §25, §65). CSS is a foreign language: the parser reads
+    // it structurally (css-syntax.scrml) — a selector is a Core selector tree
+    // (core.scrml SimpleSel …: a selector names nothing scrml binds, so it is
+    // final at parse); a declaration value is literal CSS text with its `@name`
+    // references as nodes (which cell or token each names is analyze's).
+    // -------------------------------------------------------------------------
+    export type ACssRef:struct = { nid: int, span: ASpan, name: string }
+    export type ACssPart:enum = {
+        CText(text: string),
+        CRef(r: ACssRef),
+    }
+    // `prop: value` — `prop` as written (a property name, or `--name`, a §25.2
+    // `name = value` definition included).
+    export type ACssDecl:struct = { nid: int, span: ASpan, prop: string, value: ACssPart[] }
+    export type ACssRule:struct = { nid: int, span: ASpan, sel: ComplexSel[], decls: ACssDecl[] }
+    export type ACssItem:enum = {
+        CssRule(r: ACssRule),
+        CssFlat(d: ACssDecl),                          // a bare declaration, no selector (§9.1 flat block)
+        CssCharset(span: ASpan, encoding: string),     // `@charset "…";` (§65.8)
+        CssImport(span: ASpan, url: string, conditions: string),   // `@import …;` (§65.8)
+    }
+    export type ACss:struct = { nid: int, span: ASpan, items: ACssItem[] }
 
     // -------------------------------------------------------------------------
     // Declarations (§66.1–§66.5, §66.13).

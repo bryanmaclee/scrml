@@ -1,0 +1,10 @@
+{
+  "id": "acceptance-css-media-unsupported",
+  "description": "a `@media` block in `#{}` — the target is a clean compile; the bootstrap refuses it today.",
+  "language-version": "1.0",
+  "spec": "§65.2.2",
+  "rationale": "§65.2.2: a media rule is a deterministic layer over the base rule.",
+  "expect": {
+    "codes": []
+  }
+}

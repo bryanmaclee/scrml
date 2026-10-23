@@ -1,0 +1,5 @@
+// `p..x` does not parse — §65.2.5: fail loud, never a silent drop.
+<program>
+    #{ p..x { color: red; } }
+    <main><p>x</p></main>
+</program>
