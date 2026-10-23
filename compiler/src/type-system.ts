@@ -9100,10 +9100,28 @@ const RESERVED_AMBIENT_PROJECTION_NAMES: ReadonlySet<string> = new Set([
  *     type registry check.
  */
 /**
- * S469 — E-IMPL1-RULED-FORM-UNSUPPORTED for the call forms (see impl1-ruled-form-refusal.ts). One
- * report per call node: an expression can reach checkLogicExprIdents from more than one site.
+ * S469 — E-IMPL1-RULED-FORM-UNSUPPORTED for the call forms (see impl1-ruled-form-refusal.ts). An
+ * expression can reach checkLogicExprIdents from more than one site; runTS collapses the repeats
+ * (`dedupeRuledFormErrors`), so a report pushed on a pass that is later discarded silences nothing.
  */
-const _ruledCallReported = new WeakSet<object>();
+/**
+ * The codes a CHECK-ONLY copy walk (a handler value's re-parse, an engine body, a raw arm) keeps:
+ * every other check on those bodies already ran on the primary path. The ruled-form refusal is kept
+ * because a body that exists only as a copy has no primary path (S469 round 2, H1 / H4); the
+ * duplicates a body read both ways produces are collapsed by `dedupeRuledFormErrors`.
+ */
+const COPY_WALK_KEPT_CODES: ReadonlySet<string> = new Set(["E-ERROR-002", "E-IMPL1-FAILABLE-FN-VALUE", RULED_FORM_CODE]);
+/** One E-IMPL1-RULED-FORM-UNSUPPORTED per form per source line (a body can be read on two paths). */
+function dedupeRuledFormErrors(errors: TSError[]): void {
+  const seen = new Set<string>();
+  for (let i = 0; i < errors.length; i++) {
+    const e = errors[i];
+    if (!e || e.code !== RULED_FORM_CODE) continue;
+    const key = `${e.message}\u0000${e.span?.file ?? ""}\u0000${e.span?.line ?? ""}`;
+    if (seen.has(key)) { errors.splice(i, 1); i--; continue; }
+    seen.add(key);
+  }
+}
 /** Per-file literal-tape names (collectLiteralTapeNames), set at the top of runTS. */
 let _ruledLiteralTapeNames: ReadonlySet<string> = new Set();
 function checkRuledCallForms(
@@ -9132,14 +9150,33 @@ function checkRuledCallForms(
     },
     (lit) => templateInterpolationNodesAll(lit as Parameters<typeof templateInterpolationNodesAll>[0]),
     (f) => {
-      const key = f.node as object | undefined;
-      if (key) {
-        if (_ruledCallReported.has(key)) return;
-        _ruledCallReported.add(key);
-      }
       errors.push(new TSError(RULED_FORM_CODE, ruledFormMessage(f.form, f.section, f.detail), span, "error"));
     },
+    {
+      // Round 2 (H2): a block-bodied arrow / `function` expression is an escape hatch carrying its
+      // body as text — read it with the one check-time reader (escape-hatch-body.ts) and walk it.
+      hatchBody: (hatch) => escapeHatchBodyStatements(hatch, span?.file ?? ""),
+      enumNames: () => [...typeRegistry].filter(([, t]) => t && t.kind === "enum").map(([nm]) => nm),
+    },
   );
+}
+
+/**
+ * S469 round 2 (H5 / M1) — a body or slot impl#1 keeps only as TEXT (a `when … changes { … }` body,
+ * a parameter default it could not analyse): read it as statements and walk it; when it cannot be
+ * read, fail closed on the text (`lexicalRuledForms`).
+ */
+function checkRuledTextBody(
+  src: string,
+  span: Span,
+  scopeChain: ScopeChain,
+  typeRegistry: Map<string, ResolvedType>,
+  errors: TSError[],
+  asExpression = false,
+): void {
+  if (typeof src !== "string" || src.trim().length === 0) return;
+  const hatch = { kind: "escape-hatch", nativeKind: "ArrowFunctionExpression", params: [], raw: "", bodyRaw: asExpression ? `{ return (${src}); }` : `{ ${src} }` };
+  checkRuledCallForms(hatch, span, scopeChain, typeRegistry, errors);
 }
 
 function checkLogicExprIdents(
@@ -12023,6 +12060,19 @@ function annotateNodes(
           }
         }
 
+        // S469 round 2 (M1) — a parameter default is evaluated where the function runs; a ruled
+        // form impl#1 does not implement fails closed there too (E-IMPL1-RULED-FORM-UNSUPPORTED).
+        if (Array.isArray(n.params)) {
+          for (const _p of (n.params as unknown[])) {
+            const _dv = _p && typeof _p === "object" ? (_p as { defaultValue?: unknown }).defaultValue : undefined;
+            if (_dv === undefined || _dv === null || _dv === "") continue;
+            const _dSpan = ((paramDefaultSpan(_p) ?? n.span) as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+            const _a = analyzedParamDefault(_p, filePath);
+            if (_a && "tree" in _a) checkRuledCallForms(_a.tree, _dSpan, scopeChain, typeRegistry, errors);
+            else if (typeof _dv === "string") checkRuledTextBody(_dv, _dSpan, scopeChain, typeRegistry, errors, true);
+          }
+        }
+
         // Walk the body.
         const fnBody = n.body as ASTNodeLike[] | undefined;
         // A9-Ext-4 D3 (2026-05-08): mark body statements with the enclosing
@@ -13967,6 +14017,15 @@ function annotateNodes(
       // ------------------------------------------------------------------
       // Text and comment nodes.
       // ------------------------------------------------------------------
+      case "when-effect": {
+        // S469 round 2 (H5) — the `when … changes { … }` body is kept as text (`bodyRaw`); read it
+        // for the ruled forms impl#1 does not implement (E-IMPL1-RULED-FORM-UNSUPPORTED).
+        const _whenSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+        checkRuledTextBody(String((n as Record<string, unknown>).bodyRaw ?? ""), _whenSpan, scopeChain, typeRegistry, errors);
+        resolvedType = tAsIs();
+        break;
+      }
+
       case "text": {
         resolvedType = tPrimitive("string");
         break;
@@ -17603,7 +17662,7 @@ function annotateNodes(
       }
       const produced = errors.splice(before);
       for (const e of produced) {
-        if (!e || (e.code !== "E-ERROR-002" && e.code !== "E-IMPL1-FAILABLE-FN-VALUE")) continue;
+        if (!e || !COPY_WALK_KEPT_CODES.has(e.code)) continue;
         (e as { span: Span }).span = span;
         errors.push(e);
       }
@@ -17802,7 +17861,7 @@ function annotateNodes(
     const produced = errors.splice(before);
     if (!report) return;
     for (const e of produced) {
-      if (!e || (e.code !== "E-ERROR-002" && e.code !== "E-IMPL1-FAILABLE-FN-VALUE")) continue;
+      if (!e || !COPY_WALK_KEPT_CODES.has(e.code)) continue;
       (e as { span: Span }).span = span;
       errors.push(e);
     }
@@ -17865,7 +17924,7 @@ function annotateNodes(
         });
         scopeChain.pop();
         const produced = errors.splice(before);
-        for (const e of produced) if (e && (e.code === "E-ERROR-002" || e.code === "E-IMPL1-FAILABLE-FN-VALUE")) errors.push(e);
+        for (const e of produced) if (e && COPY_WALK_KEPT_CODES.has(e.code)) errors.push(e);
       }
       // S469 (g-match-failable-subject-in-handler-attribute-not-discriminated-s468) — the walk
       // above reads a CHECK-ONLY re-parse of the value, so the `match` stamps it applies land
@@ -30285,6 +30344,7 @@ function processFile(
   // and E-MU-001's severity / population / `_`-prefix hatch are left exactly as
   // they were. This dispatch changes NOTHING about E-MU-001.
 
+  dedupeRuledFormErrors(errors);
   return { typedAst, errors, stateTypeRegistry };
 }
 

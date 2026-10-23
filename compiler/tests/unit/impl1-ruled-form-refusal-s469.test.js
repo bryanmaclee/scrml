@@ -20,11 +20,12 @@ import { ruledFormMessage, isRangeIterable, RULED_FORM_CODE } from "../../src/im
 
 const CODE = "E-IMPL1-RULED-FORM-UNSUPPORTED";
 
-function compile(src) {
+function compile(src, aux = {}) {
   const dir = resolve(tmpdir(), `scrml-s469-ruled-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
   mkdirSync(dir, { recursive: true });
   const file = resolve(dir, "app.scrml");
   writeFileSync(file, src);
+  for (const [name, text] of Object.entries(aux)) writeFileSync(resolve(dir, name), text);
   try {
     const result = compileScrml({ inputFiles: [file], write: false, outputDir: resolve(dir, "out"), log: () => {} });
     const all = [...(result.errors ?? []), ...(result.warnings ?? [])];
@@ -62,6 +63,47 @@ const REFUSED = {
   "value-form for: expression statement then lift": [prog(`\${\n  const xs = for (x of [1, 2, 3]) { f(); lift x * 2; }\n  @n = xs.length\n}`), "§49.6", "`lift`"],
 };
 
+// Round 2 (review of dde3d558d) — positions the first round did not reach. Each compiled clean
+// and failed at run time (or ran wrong) before.
+const ENGINE = (slot) => `<program>\ntype S:enum = { A, B }\n<msg> = "init"\n<button id="go" onclick=\${ @s = .B }>go</button>\n<p>\${@msg}</p>\n<engine for=S initial=.A>\n${slot}\n<B rule=.A><p>b</p></B>\n</engine>\n</program>\n`;
+const REFUSED_R2 = {
+  "H1 handler arrow, block body: bool.parse": [prog(`<button onclick=\${() => { @n = bool.parse("true") ? 1 : 2 }}>g</button>`), "§14.13.4", "`bool.parse(s)`"],
+  "H1 handler arrow, block body: tape append": [prog(`<xs> = [1, 2]\n<button onclick=\${() => { @xs.append(3) }}>g</button>\n<p>\${@xs.length}</p>`), "§66.12.6", "`.append(…)`"],
+  "H1 handler one-statement \${…}: tape append (reported once)": [prog(`<xs> = [1, 2]\n<button onclick=\${@xs.append(3)}>g</button>\n<p>\${@xs.length}</p>`), "§66.12.6", "`.append(…)`"],
+  "H1 handler braced block": [prog(`<xs> = [1, 2]\n<button onclick={ @xs.append(3); @n = 1 }>g</button>\n<p>\${@xs.length}</p>`), "§66.12.6", "`.append(…)`"],
+  "H2 block-bodied lambda argument": [prog(`\${ const ys = ["1"].map(s => { return int.parse(s) }) }`), "§14.13.4", "`int.parse(s)`"],
+  "H2 function expression": [prog(`\${ const g = function(s) { return int.parse(s) }\n @n = g("1") }`), "§14.13.4", "`int.parse(s)`"],
+  "H2 setTimeout callback body": [prog(`<xs> = [1, 2]\n\${ setTimeout(() => { @xs.append(3) }, 10) }\n<p>\${@xs.length}</p>`), "§66.12.6", "`.append(…)`"],
+  "H2 hatch body: Enum.parse": [prog(`\${ const g = (s) => { return Color.parse(s) }\n @c = g("Red") }`), "§14.13.4", "`Color.parse(s)`"],
+  "H2 hatch body: tape local inside the body": [prog(`\${ const g = () => { const ys = [1]; ys.prepend(0); return ys }\n @n = g().length }`), "§66.12.6", "`.prepend(…)`"],
+  "H2/L2 hatch body: for (cond)": [prog(`\${ const g = () => { let i = 0; for (i < 3) { i = i + 1 } return i }\n @n = g() }`), "§49.3.1", "`for (cond) { … }`"],
+  "H2/L2 hatch body: range head": [prog(`\${ const g = () => { let t = 0; for (i of 0..3) { t = t + i } return t }\n @n = g() }`), "§49.2.5", "`a..b`"],
+  "H3 imported enum: Shade.parse": [[`<program>\nimport { Shade } from "./lib.scrml"\n<c> = Shade.parse("Dark")\n<p>\${@c}</p>\n</program>\n`, { "lib.scrml": "\${\n  export type Shade:enum = { Dark, Light }\n}\n" }], "§14.13.4", "`Shade.parse(s)`"],
+  "H4 engine <onTransition> body": [ENGINE(`<A rule=.B>\n<p>a</p>\n<onTransition to=.B>\${ @msg = int.parse("3") ? "a" : "b" }</>\n</A>`), "§14.13.4", "`int.parse(s)`"],
+  "H4 engine effect= body": [ENGINE(`<A rule=.B effect=\${ @msg = int.parse("3") ? "a" : "b" }><p>a</p></A>`), "§14.13.4", "`int.parse(s)`"],
+  "H5 when … changes body": [prog(`<m> = 0\n<button onclick=\${@m = 1}>g</button>\n<p>\${@m}</p>\n\${\n  when @m changes {\n    @n = int.parse("3")\n  }\n}`), "§14.13.4", "`int.parse(s)`"],
+  "M1 parameter default": [prog(`function g(k: int = int.parse("3")) { return k }\n\${ @n = g() }`), "§14.13.4", "`int.parse(s)`"],
+  "H6 arm: expression statement nested in an earlier if": [prog(`\${\n  const v = match @c {\n    .Red :> { if (true) { f() } lift 2 }\n    .Green :> 3\n  }\n  @n = v\n}`), "§18.5", "`lift`"],
+  "H6 arm: expression statement nested in an earlier for": [prog(`\${\n  const v = match @c {\n    .Red :> { for (x of [1]) { f() } lift 2 }\n    .Green :> 3\n  }\n  @n = v\n}`), "§18.5", "`lift`"],
+  "H6 value-form for: nested expression statement": [prog(`\${\n  const ys = for (x of [1, 2]) { if (true) { f() } lift x }\n  @n = ys.length\n}`), "§49.6", "`lift`"],
+  "H6 arm: lift after an expression statement in the same branch": [prog(`\${\n  const v = match @c {\n    .Red :> { if (true) { f(); lift 2 } else { lift 4 } }\n    .Green :> 3\n  }\n  @n = v\n}`), "§18.5", "`lift`"],
+  "M2 bracket key: int[\"parse\"]": [prog(`<k> = int["parse"]("4")\n<p>\${@k}</p>`), "§14.13.4", "`int.parse(s)`"],
+  "M2 bracket key: ys[\"append\"]": [prog(`\${\n  const ys = [1]\n  ys["append"](2)\n  @n = ys.length\n}`), "§66.12.6", "`.append(…)`"],
+  "L2 range outside a loop head": [prog(`\${ const r = 0..3 }`), "§49.2.5", "`a..b`"],
+  "L2 range in a spread": [prog(`\${ const r = [...0..3] }`), "§49.2.5", "`a..b`"],
+};
+
+const ACCEPTED_R2 = {
+  "handler arrow, block body, DOM remove": prog(`<button onclick=\${(e) => { e.target.remove() }}>g</button>`),
+  "hatch body: plain for-of / C-style / for (;;)": prog(`\${ const g = () => { let t = 0; for (x of [1, 2]) { t = t + x } for (let i = 0; i < 2; i = i + 1) { t = t + i } for (;;) { break } return t }\n @n = g() }`),
+  "hatch body: a spread and '..' in a string": prog(`\${ const g = () => { const a = [...[1], 2]; return "a..b" + a.length }\n @n = g().length }`),
+  "hatch body: JSON.parse and toEnum": prog(`\${ const g = (s) => { return JSON.parse(s) + Color.toEnum("Red") }\n @n = 1 }`),
+  "when … changes body without a ruled form": prog(`<m> = 0\n<button onclick=\${@m = 1}>g</button>\n<p>\${@m}</p>\n\${\n  when @m changes {\n    @n = @m + 1\n  }\n}`),
+  "parameter default without a ruled form": prog(`function g(k: int = 3) { return k }\n\${ @n = g() }`),
+  "bracket key on a non-ruled name": prog(`\${ const o = { parse: 1 }\n @n = o["parse"] }`),
+  "a hatch parameter named like a tape cell": prog(`<xs> = [1]\n\${ const g = (xs) => { xs.remove() }\n @n = @xs.length }`),
+};
+
 const ACCEPTED = {
   "Enum.toEnum (impl#1's spelling)": prog(`<k> = Color.toEnum("Red")\n<p>\${@k}</p>`),
   "JSON.parse": prog(`<k> = JSON.parse("42")\n<p>\${@k}</p>`),
@@ -96,6 +138,22 @@ describe("E-IMPL1-RULED-FORM-UNSUPPORTED — near-neighbours stay clean", () => 
     test(name, () => {
       const r = compile(src);
       expect(r.codes).not.toContain(CODE);
+    });
+  }
+});
+
+describe("E-IMPL1-RULED-FORM-UNSUPPORTED — round 2 positions", () => {
+  for (const [name, [src, section, formText]] of Object.entries(REFUSED_R2)) {
+    test(name, () => {
+      const r = Array.isArray(src) ? compile(src[0], src[1]) : compile(src);
+      expect(r.ruled.length).toBe(1);
+      expect(r.messages[0]).toContain(section);
+      expect(r.messages[0]).toContain(formText);
+    });
+  }
+  for (const [name, src] of Object.entries(ACCEPTED_R2)) {
+    test(`clean: ${name}`, () => {
+      expect(compile(src).codes).not.toContain(CODE);
     });
   }
 });

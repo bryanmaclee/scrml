@@ -19,6 +19,12 @@
  *     parser records (`for { … }`, `for (cond)`), the range head `a..b` / `a..=b`, and a value-form
  *     block (`match` arm / `for` value body) whose `lift` follows a bare expression statement.
  *
+ * Round 2 (review of dde3d558d): the expression walk also reads the bodies impl#1 keeps as text — a
+ * block-bodied arrow / `function` expression (escape hatch, read with escape-hatch-body.ts), a
+ * `when … changes` body, a parameter default — and falls back to `lexicalRuledForms` when one cannot
+ * be read; the type system's check-only copy walks (handler values, engine bodies, raw arms) keep
+ * this code (`COPY_WALK_KEPT_CODES`), and `runTS` collapses repeats per form per line.
+ *
  * Deliberately NOT refused — forms whose impl#1 meaning DIVERGES from the ruling but that legacy code
  * already relies on (string `.length` / positions in UTF-16, `indexOf` → -1, negative `slice` / `at`,
  * mutating `sort` / `reverse` / `fill`, JS `sort()` order, out-of-range `xs[i]` → absent). Changing or
@@ -82,17 +88,24 @@ export interface CallFormContext {
  */
 export function ruledFormOfCall(call: unknown, ctx: CallFormContext): RuledFormFinding | null {
   if (!call || typeof call !== "object") return null;
-  const c = call as { kind?: string; callee?: { kind?: string; object?: unknown; property?: unknown } };
-  if (c.kind !== "call" || !c.callee || c.callee.kind !== "member") return null;
-  const method = c.callee.property;
+  const c = call as { kind?: string; callee?: { kind?: string; object?: unknown; property?: unknown; index?: unknown } };
+  if (c.kind !== "call" || !c.callee) return null;
+  // `recv.m(…)`, or the bracket spelling `recv["m"](…)` with a string-literal key (round 2, M2).
+  let method: unknown;
+  if (c.callee.kind === "member") method = c.callee.property;
+  else if (c.callee.kind === "index") {
+    const ix = c.callee.index as { kind?: string; litType?: string; value?: unknown } | undefined;
+    if (ix && ix.kind === "lit" && ix.litType === "string") method = ix.value;
+  }
   if (typeof method !== "string") return null;
   const obj = c.callee.object as { kind?: string; name?: string } | undefined;
 
   if (method === "parse" && obj && obj.kind === "ident" && typeof obj.name === "string") {
     const name = obj.name;
-    // A local / parameter / cell of that name shadows the type namespace.
+    // A local / parameter / cell of that name shadows the type namespace; a type binding or an
+    // imported name (an imported enum, resolved through the seeded registry) does not.
     const bound = ctx.lookupKind(name);
-    if (bound !== null && bound !== "type") return null;
+    if (bound !== null && bound !== "type" && bound !== "import") return null;
     const prim = PARSE_PRIMITIVES.get(name);
     if (prim) {
       return {
@@ -128,26 +141,67 @@ export function ruledFormOfCall(call: unknown, ctx: CallFormContext): RuledFormF
 }
 
 /**
- * Walk an ExprNode tree (including lambda bodies and template interpolations) and report every
- * ruled call form. `templateNodes` expands a template literal into its interpolation ExprNodes.
+ * Optional readers the walk uses to see bodies an ExprNode keeps only as TEXT (round 2, H2).
+ */
+export interface BodyReaders {
+  /**
+   * The statements of a block-bodied arrow / `function` expression the expression parser kept as
+   * an escape hatch (`bodyRaw`), or null when the body cannot be read (the walk then falls back
+   * to `lexicalRuledForms` over the text, so an unreadable body still fails closed).
+   */
+  hatchBody?(hatch: Record<string, unknown>): unknown[] | null;
+  /** Enum type names in scope (for the lexical `E.parse(` fallback). */
+  enumNames?(): Iterable<string>;
+}
+
+/**
+ * Walk an ExprNode tree (including lambda bodies, template interpolations and the text bodies of
+ * escape-hatch functions) and report every ruled form: the call forms, and the statement forms of
+ * any block body reached on the way.
  */
 export function forEachRuledCallForm(
   root: unknown,
   ctx: CallFormContext,
   templateNodes: (lit: unknown) => unknown[],
   cb: (f: RuledFormFinding) => void,
+  readers: BodyReaders = {},
 ): void {
   const seen = new WeakSet<object>();
   const shadowStack: Set<string>[] = [];
+  const tapeStack: Set<string>[] = [];
   const shadowed = (name: string) => shadowStack.some((s) => s.has(name));
   const scopedCtx: CallFormContext = {
     lookupKind: (n) => (shadowed(n) ? "variable" : ctx.lookupKind(n)),
     typeKind: ctx.typeKind,
     receiverKind: (node) => {
       const id = node as { kind?: string; name?: string };
-      if (id && id.kind === "ident" && typeof id.name === "string" && shadowed(id.name.replace(/^@/, ""))) return null;
+      if (id && id.kind === "ident" && typeof id.name === "string") {
+        // A tape bound inside the body being walked (its literal-tape evidence is local to it).
+        if (!id.name.startsWith("@") && tapeStack.some((t) => t.has(id.name as string))) return "array";
+        if (shadowed(id.name.replace(/^@/, ""))) return null;
+      }
       return ctx.receiverKind(node);
     },
+  };
+  const paramNames = (params: unknown): Set<string> => {
+    const names = new Set<string>();
+    for (const p of (Array.isArray(params) ? params : []) as Array<{ name?: unknown } | string>) {
+      if (typeof p === "string") names.add(p);
+      else if (p && typeof p.name === "string") names.add(p.name);
+    }
+    return names;
+  };
+  // A block body: its statements are walked for call forms, scanned for statement forms, and its
+  // own literal-tape locals are evidence inside it.
+  const walkBody = (stmts: unknown[], params: Set<string>): void => {
+    const tapes = new Set<string>();
+    for (const nm of collectLiteralTapeNames(stmts)) if (!nm.startsWith("@") && !params.has(nm)) tapes.add(nm);
+    shadowStack.push(params);
+    tapeStack.push(tapes);
+    for (const f of collectRuledStatementForms(stmts)) cb(f);
+    walk(stmts);
+    tapeStack.pop();
+    shadowStack.pop();
   };
   const walk = (node: unknown): void => {
     if (!node || typeof node !== "object") return;
@@ -163,12 +217,25 @@ export function forEachRuledCallForm(
       for (const sub of templateNodes(n)) walk(sub);
       return;
     }
-    if (n.kind === "lambda") {
-      const names = new Set<string>();
-      for (const p of (n.params as Array<{ name?: string }> | undefined) ?? []) {
-        if (p && typeof p.name === "string") names.add(p.name);
+    if (n.kind === "escape-hatch") {
+      const text = typeof n.bodyRaw === "string" ? n.bodyRaw : typeof n.raw === "string" ? n.raw : "";
+      const isFn = n.nativeKind === "ArrowFunctionExpression" || n.nativeKind === "FunctionExpression";
+      if (isFn) {
+        const stmts = readers.hatchBody ? readers.hatchBody(n) : null;
+        if (Array.isArray(stmts)) { walkBody(stmts, paramNames(n.params)); return; }
       }
-      shadowStack.push(names);
+      // Unreadable (or a hatch the parser could not structure at all): fail closed on the text.
+      for (const f of lexicalRuledForms(text, scopedCtx, readers.enumNames ? readers.enumNames() : [], paramNames(n.params))) cb({ ...f, node: n });
+      return;
+    }
+    if (n.kind === "lambda") {
+      const body = n.body as { kind?: string; stmts?: unknown[] } | undefined;
+      if (body && body.kind === "block" && Array.isArray(body.stmts)) {
+        walkBody(body.stmts, paramNames(n.params));
+        for (const p of (n.params as Array<{ defaultValue?: unknown }> | undefined) ?? []) walk(p && p.defaultValue);
+        return;
+      }
+      shadowStack.push(paramNames(n.params));
       for (const key in n) { if (key !== "span") walk(n[key]); }
       shadowStack.pop();
       return;
@@ -176,6 +243,70 @@ export function forEachRuledCallForm(
     for (const key in n) { if (key !== "span") walk(n[key]); }
   };
   walk(root);
+}
+
+/**
+ * The fail-closed fallback for a body impl#1 keeps only as text it cannot read: a lexical match on
+ * the ruled call spellings (`int.parse(`, `E.parse(` on a known enum, a grant method on a name the
+ * context proves is a tape), a range `a..b`, and the two loop heads. Strings are blanked first.
+ */
+export function lexicalRuledForms(
+  text: string,
+  ctx: CallFormContext,
+  enumNames: Iterable<string>,
+  shadow: ReadonlySet<string> = new Set(),
+): RuledFormFinding[] {
+  if (typeof text !== "string" || text.length === 0) return [];
+  const src = stripStrings(text);
+  const out: RuledFormFinding[] = [];
+  const seenForms = new Set<string>();
+  const add = (f: RuledFormFinding | null) => {
+    if (!f || seenForms.has(f.form)) return;
+    seenForms.add(f.form);
+    out.push(f);
+  };
+  const fake = (objName: string, method: string) => ({
+    kind: "call",
+    callee: { kind: "member", object: { kind: "ident", name: objName }, property: method },
+    args: [],
+  });
+  const lexCtx: CallFormContext = {
+    lookupKind: (nm) => (shadow.has(nm) ? "variable" : ctx.lookupKind(nm)),
+    typeKind: ctx.typeKind,
+    receiverKind: (node) => {
+      const id = node as { name?: string };
+      if (id && typeof id.name === "string" && shadow.has(id.name.replace(/^@/, ""))) return null;
+      return ctx.receiverKind(node);
+    },
+  };
+  const names = new Set<string>(["int", "number", "bool", "integer", "boolean", ...enumNames]);
+  const parseRe = /(^|[^\w$.@])([A-Za-z_$][\w$]*)\s*\.\s*parse\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = parseRe.exec(src))) {
+    if (!names.has(m[2])) continue;
+    add(ruledFormOfCall(fake(m[2], "parse"), lexCtx));
+  }
+  const tapeRe = /(^|[^\w$.])(@?[A-Za-z_$][\w$]*)\s*\.\s*(append|prepend|insert|remove)\s*\(/g;
+  while ((m = tapeRe.exec(src))) add(ruledFormOfCall(fake(m[2], m[3]), lexCtx));
+  if (/(^|[^\w$])for\s*\{/.test(src)) add({ form: "the infinite loop `for { … }`", section: "§49.3.6" });
+  // A `for ( … )` head with no `;` and no `of` / `in` binder is the condition head.
+  const forRe = /(^|[^\w$])for\s*\(/g;
+  while ((m = forRe.exec(src))) {
+    let depth = 1;
+    let k = forRe.lastIndex;
+    while (k < src.length && depth > 0) {
+      const ch = src[k];
+      if (ch === "(" || ch === "[" || ch === "{") depth++;
+      else if (ch === ")" || ch === "]" || ch === "}") depth--;
+      k++;
+    }
+    const head = src.slice(forRe.lastIndex, k - 1);
+    if (depth === 0 && !head.includes(";") && !/(^|[^\w$])(of|in)([^\w$]|$)/.test(head)) {
+      add({ form: "the condition loop `for (cond) { … }`", section: "§49.3.1" });
+    }
+  }
+  if (isRangeIterable(src)) add({ form: "the range `a..b` / `a..=b`", section: "§49.2.5" });
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -195,34 +326,35 @@ export function isRangeIterable(iterable: unknown): boolean {
 
 const FN_BOUNDARY_KINDS = new Set(["function-decl", "fn-decl", "function", "fn", "lambda"]);
 
-function containsLift(node: unknown, seen = new WeakSet<object>()): boolean {
-  if (!node || typeof node !== "object") return false;
-  if (seen.has(node as object)) return false;
-  seen.add(node as object);
-  if (Array.isArray(node)) return node.some((x) => containsLift(x, seen));
-  const n = node as Record<string, unknown>;
-  if (n.kind === "lift-expr") return true;
-  if (FN_BOUNDARY_KINDS.has(n.kind as string)) return false;
-  // A nested value form owns its own lifts.
-  if (n.kind === "match-expr" || n.kind === "for-expr" || n.kind === "if-expr") return false;
-  for (const key in n) {
-    if (key === "span" || key === "parent") continue;
-    if (containsLift(n[key], seen)) return true;
-  }
-  return false;
-}
-
-/** A value-form block whose `lift` follows a bare expression statement (impl#1 mis-targets it). */
+/**
+ * A value-form block whose `lift` is emitted after a bare expression statement (impl#1 mis-targets
+ * it: the statement mints a new `~` accumulator and the later `lift` writes there). The walk is in
+ * source order and DEPTH-FIRST through nested statement bodies (round 2, H6): a bare statement in
+ * an earlier `if` / `for` body, or before the `lift` inside the same branch, counts. It does not
+ * cross a function boundary or a nested value form (which owns its own lifts).
+ */
 function liftAfterBareExpr(body: unknown): boolean {
   if (!Array.isArray(body)) return false;
   let sawBare = false;
-  for (const st of body) {
-    if (!st || typeof st !== "object") continue;
-    const s = st as Record<string, unknown>;
-    if (sawBare && containsLift(s)) return true;
-    if (s.kind === "bare-expr") sawBare = true;
-  }
-  return false;
+  let hit = false;
+  const seen = new WeakSet<object>();
+  const visit = (node: unknown): void => {
+    if (hit || !node || typeof node !== "object") return;
+    if (seen.has(node as object)) return;
+    seen.add(node as object);
+    if (Array.isArray(node)) { for (const x of node) visit(x); return; }
+    const n = node as Record<string, unknown>;
+    if (n.kind === "lift-expr") { if (sawBare) hit = true; return; }
+    if (n.kind === "bare-expr") { sawBare = true; return; }
+    if (FN_BOUNDARY_KINDS.has(n.kind as string)) return;
+    if (n.kind === "match-expr" || n.kind === "for-expr" || n.kind === "if-expr") return;
+    for (const key in n) {
+      if (key === "span" || key === "parent") continue;
+      visit(n[key]);
+    }
+  };
+  visit(body);
+  return hit;
 }
 
 /**
