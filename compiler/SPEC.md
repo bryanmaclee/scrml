@@ -5742,10 +5742,35 @@ deps-attr     ::= 'deps=' '[' deps-list ']'
 deps-list     ::= ('@' identifier (',' '@' identifier)*)?
 cache-attr    ::= 'cache'                          (S444 dpa-060 — bare; takes no value, see §6.7.7.2)
 
-request-body  ::= '$' '{' assignment-expression '}'
+request-body  ::= '$' '{' lin-declaration* assignment-expression '}'
+                  (* S469: `lin` declarations (§35.2) may precede the one assignment;
+                     was  request-body ::= '$' '{' assignment-expression '}' *)
 ```
 
-The `id` attribute is required (E-LIFECYCLE-018). The body SHALL contain exactly one assignment expression of the form `@variable = expr`.
+The `id` attribute is required (E-LIFECYCLE-018). ~~The body SHALL contain exactly one assignment expression of the form `@variable = expr`.~~ *(S469)* The body SHALL contain exactly one assignment expression of the form `@variable = expr`, which MAY be preceded by `lin` declarations and by nothing else.
+
+> **Amendment S469 — a `lin` declaration may stand inside a `<request>` body.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — a `lin` declaration may stand inside a `<request>` body" — *"I agree with your rec on the lin Q"* (the ratified rec: *"a `<request>` body may hold a `lin` declaration followed by the one assignment, so a single-use value is declared where it is consumed and never leaks (§35.5's E-LIN-006 fix-it reading). §6.7.7's "exactly one assignment" grammar and its "any `lin` reference is E-LIN-006" rule are amended to match. E-LIN-006 fires on a `lin` declared OUTSIDE the request and referenced inside it."*) · **supersedes:** `request-body ::= '$' '{' assignment-expression '}'`; *"The body SHALL contain exactly one assignment expression of the form `@variable = expr`."*; *"The compiler SHALL emit E-LIN-006 if a `lin` variable is referenced in a `<request>` body."*; the E-LIN-006 row *"`lin` variable in `<request>` body"* (each kept, struck or quoted, where it stood).
+>
+> The body holds the one `@var = expr` assignment, optionally preceded by `lin` declarations. Each run of the body declares those bindings afresh, so a `lin` declared there is consumed once per run, by the assignment, and is never visible outside the request. A `lin` declared OUTSIDE the request and referenced inside it is still E-LIN-006 (§35.5).
+>
+> ```scrml
+> <request id="profile">
+>     ${
+>         lin ticket = mintTicket();
+>         @user = fetchUser(ticket, @userId);
+>     }
+> </>
+> ```
+>
+> **PA readings (S469 — not separately ruled; bryan veto window):**
+> (a) more than one `lin` declaration is admitted: the ruling's "a `lin` declaration" is read as naming the statement kind, not a count;
+> (b) the `lin` declarations come before the assignment, and the ordinary §35 rules apply to each: one the assignment does not consume is E-LIN-001, a second use is E-LIN-002;
+> (c) no other statement joins the body: a `let` / `const`, a call statement or a second assignment is still outside the grammar;
+> (d) an `@variable` read in a `lin` initializer counts toward the inferred dependencies, like a read in the fetch expression, because the initializer runs on every execution of the body;
+> (e) a `lin` declaration is not an assignment for E-LIFECYCLE-020, and a body that holds only `lin` declarations is E-LIFECYCLE-021;
+> (f) the ruling names `<request>` only, so `<poll>` (§6.7.6) is unchanged.
+>
+> **Implementation status:** impl#1 already accepts a body-local `lin` in a `<request>` body without E-LIN-006 (its check compares the declaration's deferred-context depth with the reference's, `compiler/src/type-system.ts`), and it emits neither E-LIFECYCLE-020 nor E-LIFECYCLE-021. The bootstrap has no `lin` yet (`docs/known-gaps.md`).
 
 The `deps` attribute is optional. When absent, the compiler infers reactive dependencies from `@variable` reads within the fetch expression. When present, `deps` overrides inference.
 
@@ -5858,10 +5883,12 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 - The call that is the right-hand side of the body's assignment SHALL be handled by the request, and SHALL NOT be E-ERROR-002: its failure — the callee's declared error, or the transport failure of a call to a server function (§19.9.10) — SHALL set `<#id>.error` and leave `@var` and `<#id>.data` at their previous values (§19.4.3 item 5). *(S451 "your recs on all of them" — item 1 makes every client call of a server function failable; item 3 confirms the #1259 reading that the request handles its body's call.)*
 - The compiler SHALL emit E-LIFECYCLE-018 if `<request>` has no `id` attribute.
 - The compiler SHALL emit E-LIFECYCLE-019 if `<request>` is self-closing (no body).
-- The compiler SHALL emit E-LIFECYCLE-020 if the body contains more than one assignment.
-- The compiler SHALL emit E-LIFECYCLE-021 if the body contains logic but no `@var = expr`.
+- The compiler SHALL emit E-LIFECYCLE-020 if the body contains more than one assignment. *(S469 PA reading: a `lin` declaration is not an assignment for this count.)*
+- The compiler SHALL emit E-LIFECYCLE-021 if the body contains logic but no `@var = expr`. *(S469 PA reading: this includes a body that holds only `lin` declarations.)*
 - The compiler SHALL emit E-LIFECYCLE-022 if a `deps=` entry names an undeclared or non-`@` variable.
-- The compiler SHALL emit E-LIN-006 if a `lin` variable is referenced in a `<request>` body.
+- ~~The compiler SHALL emit E-LIN-006 if a `lin` variable is referenced in a `<request>` body.~~
+- *(S469)* A `<request>` body MAY hold `lin` declarations before its one assignment, and a `lin` declared there and consumed in that body SHALL NOT be E-LIN-006.
+- *(S469)* The compiler SHALL emit E-LIN-006 if a `lin` variable declared outside the `<request>` is referenced in its body (§35.5).
 - The compiler SHALL emit W-LIFECYCLE-011 if the assigned `@variable` is never read in enclosing markup.
 - The compiler SHALL emit W-LIFECYCLE-012 if `<#id>.refetch()` is called inside a `<timer>` or `<poll>` body.
 - The compiler SHALL emit W-LIFECYCLE-013 when no reactive deps and no explicit `deps=[]`.
@@ -5924,10 +5951,10 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 |---|---|---|
 | E-LIFECYCLE-018 | `<request>` has no `id` attribute | Error |
 | E-LIFECYCLE-019 | `<request>` is self-closing (no body) | Error |
-| E-LIFECYCLE-020 | `<request>` body has multiple assignments | Error |
-| E-LIFECYCLE-021 | `<request>` body has logic but no `@var = expr` | Error |
+| E-LIFECYCLE-020 | `<request>` body has multiple assignments *(a `lin` declaration is not one — S469 PA reading)* — **not yet emitted** by impl#1 or the bootstrap | Error |
+| E-LIFECYCLE-021 | `<request>` body has logic but no `@var = expr` *(including a body of only `lin` declarations — S469 PA reading)* — **not yet emitted** by impl#1 or the bootstrap | Error |
 | E-LIFECYCLE-022 | `deps=` entry names undeclared or non-`@` variable | Error |
-| E-LIN-006 | `lin` variable in `<request>` body | Error |
+| E-LIN-006 | ~~`lin` variable in `<request>` body~~ *(S469)* `lin` variable declared outside the `<request>` referenced in its body; a `lin` declared in the body before the assignment is valid (emitted at `compiler/src/type-system.ts`) | Error |
 | W-LIFECYCLE-011 | Assigned `@variable` never read in enclosing markup | Warning |
 | W-LIFECYCLE-012 | `refetch()` called inside `<timer>`/`<poll>` body | Warning |
 | W-LIFECYCLE-013 | No reactive deps, no explicit `deps=[]` | Warning |
@@ -6564,10 +6591,10 @@ reads inside an `animationFrame` callback body.
 
 | E-LIFECYCLE-018 | `<request>` has no `id` attribute | Error |
 | E-LIFECYCLE-019 | `<request>` is self-closing (no body) | Error |
-| E-LIFECYCLE-020 | `<request>` body has multiple assignments | Error |
-| E-LIFECYCLE-021 | `<request>` body has logic but no `@var = expr` | Error |
+| E-LIFECYCLE-020 | `<request>` body has multiple assignments *(a `lin` declaration is not one — S469 PA reading)* — **not yet emitted** by impl#1 or the bootstrap | Error |
+| E-LIFECYCLE-021 | `<request>` body has logic but no `@var = expr` *(including a body of only `lin` declarations — S469 PA reading)* — **not yet emitted** by impl#1 or the bootstrap | Error |
 | E-LIFECYCLE-022 | `deps=` entry names undeclared or non-`@` variable | Error |
-| E-LIN-006 | `lin` variable in `<request>` body | Error |
+| E-LIN-006 | ~~`lin` variable in `<request>` body~~ *(S469)* `lin` variable declared outside the `<request>` referenced in its body; a `lin` declared in the body before the assignment is valid (emitted at `compiler/src/type-system.ts`) | Error |
 | W-LIFECYCLE-011 | Assigned `@variable` never read in enclosing markup | Warning |
 | W-LIFECYCLE-012 | `refetch()` called inside `<timer>`/`<poll>` body | Warning |
 | W-LIFECYCLE-013 | No reactive deps, no explicit `deps=[]` | Warning |
@@ -16946,7 +16973,7 @@ exhaustiveness. When exhaustiveness over enum values is needed, use `match` (§1
 
 **Interaction with `lin` variables (§35):** A `lin` variable in an `if=` or `else-if=`
 condition counts as a consumption. The compiler SHALL enforce that a `lin` variable in a
-condition is not referenced in any other branch (standard linear branching rule, §34.4).
+condition is not referenced in any other branch (standard linear branching rule, ~~§34.4~~ §35.4).
 
 **Interaction with iteration (§17.4):** An `if=` chain MAY appear inside a `for` loop body.
 
@@ -19333,11 +19360,11 @@ This exclusion is tracked as **DC-018** in `docs/deferred-complexity.md`.
 
 ---
 
-### 18.12 Linear Types and `match` (Cross-reference to §34.4)
+### 18.12 Linear Types and `match` (Cross-reference to ~~§34.4~~ §35.4)
 
 This section records the full normative rules for `lin` x `match` interaction. The
 authoritative `lin` rules are in §34. This section provides the §18-perspective
-cross-reference and extends §34.4 with the gaps identified in the TS-C gate review.
+cross-reference and extends ~~§34.4~~ §35.4 with the gaps identified in the TS-C gate review.
 
 **Match as a consumption event:** Matching a `lin` variable is a consumption event. The
 expression `match token { ... }` consumes `token`. After the `match` expression, `token`
@@ -19346,7 +19373,7 @@ result falls to a branch that somehow doesn't execute — but since all arms exe
 exactly one path, the match always produces exactly one consumption).
 
 **Default arm and `lin` set consistency:** The `else` arm is treated as an arm for the
-purposes of §34.4's lin-set consistency rule. All arms, including `else`, MUST consume the
+purposes of ~~§34.4~~ §35.4's lin-set consistency rule. All arms, including `else`, MUST consume the
 same set of `lin` variables. If the `else` arm consumes a `lin` variable that named-variant
 arms do not, or vice versa, this is E-LIN-003.
 
@@ -19367,14 +19394,14 @@ must consume the match result exactly once, as with any `lin` value.
 - A `match` over a `lin` variable IS a consumption event for that variable. The variable
   is consumed at the point of the `match` keyword.
 - All arms, including the `else` arm, MUST consume the same set of outer `lin` variables
-  (§34.4). An arm that consumes a `lin` variable that another arm does not is E-LIN-003.
+  (~~§34.4~~ §35.4). An arm that consumes a `lin` variable that another arm does not is E-LIN-003.
 - Destructured payload bindings from a `lin` enum variable SHALL each inherit `lin` status.
   Each destructured binding MUST be consumed exactly once.
 - If all arm bodies produce a `lin` value of type `T`, the `match` expression produces a
   `lin` value of type `T`. The result must be consumed exactly once by the code following
   the `match` expression.
 
-*See §34.4 for the full branching and loop interaction rules for `lin` variables.*
+*See ~~§34.4~~ §35.4 for the full branching and loop interaction rules for `lin` variables.*
 
 ---
 
@@ -23045,8 +23072,10 @@ route.query         // object — query string parameters (e.g., ?tab=settings -
 route.path          // string — the current URL path (e.g., "/users/42")
 ```
 
-Parameter values accessed via `route.params` and `route.query` are always typed
-`string` (URL parameters are strings by nature). The developer is responsible for
+~~Parameter values accessed via `route.params` and `route.query` are always typed
+`string` (URL parameters are strings by nature).~~ *(S469)* Path parameters on `route.params` are typed
+`string` (URL parameters are strings by nature). A query key on `route.query` is typed `string | not`: the
+query string is not known until the request arrives, so a key may be absent. The developer is responsible for
 parsing numeric IDs (e.g., `let id = int.parse(route.params.id)`, an `int | not` — §14.13.4; S469 replaces the
 ambient `parseInt`, Appendix D).
 
@@ -23060,7 +23089,37 @@ ambient `parseInt`, Appendix D).
   the Route Inference pass (§12).
 - `route.query` SHALL expose all query string key-value pairs present in the
   request URL.
-- All values on `route.params` and `route.query` SHALL have type `string`.
+- ~~All values on `route.params` and `route.query` SHALL have type `string`.~~
+- *(S469)* All values on `route.params` SHALL have type `string`.
+- *(S469)* A read of a key on `route.query` (`route.query.k`) SHALL have type `string | not`. It SHALL be
+  `not` when the request URL has no such key; `""` when the key is present with no value (a bare `?k`, or
+  `?k=`); and the key's FIRST value when the key appears more than once (`?k=a&k=b` reads `"a"`).
+
+> **Amendment S469 — `route.query` missing / empty / repeated keys.** **Provenance:** ruling:user-voice-scrml.md
+> S469 "⭐ RULED — `route.query` missing / empty / repeated keys" — *"that'll work for the query key"* (the
+> ratified PA rec: *"`route.query.k` is typed `string | not`. A missing key is `not`. A bare `?k` with no value is
+> `""`. A repeated key yields its first value."*) · closes `g-spec-route-query-missing-key-s469` ·
+> **supersedes:** *"All values on `route.params` and `route.query` SHALL have type `string`."* and *"Parameter
+> values accessed via `route.params` and `route.query` are always typed `string`"* for the `route.query` half
+> (both struck above; the `route.params` half stands).
+>
+> A `route.query` value must be narrowed before it is used as a `string`. An absent key and a present-but-empty
+> one stay distinct (`not` vs `""`).
+>
+> ```scrml
+> function tabLabel() -> string {
+>     const tab = route.query.tab;          // string | not
+>     if (tab is not) {
+>         return "overview";                // ?tab absent
+>     }
+>     return tab;                           // narrowed to string; "" for a bare ?tab
+> }
+> ```
+>
+> **Implementation status: Nominal / spec-ahead.** Neither compiler implements it yet: measured S469, impl#1
+> reports `route` as undeclared (E-SCOPE-001) in a non-routed page, and the bootstrap has no `route` binding
+> (`g-route-query-string-or-not-unimplemented-s469`). The §64 SSE example's `route.query.since` is a separate
+> synthetic `route` object (`g-sse-route-object-typer-scope`).
 - A top-level declaration `let route = ...` or `const route = ...` or
   `@route = ...` in a scrml page SHALL be a compile error (E-SCOPE-010).
 - Accessing a path parameter that is not defined by the route pattern SHALL be a
@@ -28037,7 +28096,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | W-LIFECYCLE-002 | §28.1 | `<timer>` has no body (self-closing form). A bodyless timer has no observable effect; the warning surfaces probable dead code. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Warning |
 | W-LIFECYCLE-007 | §28.1 | `running=false` literal boolean on `<timer>` or `<poll>`. The literal-false form is useless — the element can never become un-paused without a reactive variable. Use `running=@flag` or remove the attribute. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Warning |
 | E-LIN-005 | §35.5 | `let` / `const` / `lin` declaration shadows an in-scope `lin` variable of the same name. Shadowing a `lin` variable prevents the compiler from determining which binding a consumption refers to. Resolution: rename the new binding, or consume the outer `lin` variable before this declaration. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts` (`checkLinShadowing`). Supersedes the retired pre-2026-04 E-LIN-005 noted in §6.7.12.) | Error |
-| E-LIN-006 | §35.5 | `lin` variable consumed inside a deferred-execution markup body (`<request>` / `<poll>`) when the variable was declared outside that body. The compiler cannot prove dominance across the scheduling boundary, so the consumption may happen zero or multiple times. Resolution: declare the `lin` variable inside the deferred body, or pass a consumed value into the body. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
+| E-LIN-006 | §35.5, §6.7.7 | `lin` variable consumed inside a deferred-execution markup body (`<request>` / `<poll>`) when the variable was declared outside that body. The compiler cannot prove dominance across the scheduling boundary, so the consumption may happen zero or multiple times. Resolution: declare the `lin` variable inside the deferred body, or pass a consumed value into the body. **(S469)** For `<request>` the resolution is grammar: a `<request>` body MAY hold `lin` declarations before its one assignment (§6.7.7), and a `lin` declared and consumed there is not this code; §6.7.7's former *"E-LIN-006 if a `lin` variable is referenced in a `<request>` body"* is struck. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — a `lin` declaration may stand inside a `<request>` body" — *"I agree with your rec on the lin Q"*. `<poll>` is unchanged by that ruling. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`; impl#1 already treats a body-local `lin` as valid. Not emitted by the bootstrap, which has no `lin` — `docs/known-gaps.md`.) | Error |
 | E-INPUT-001 | §36 | `<keyboard>` element is missing the required `id` attribute. Without an id the keyboard state cannot be addressed and the element has no observable effect. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts:718-719`.) | Error |
 | E-INPUT-002 | §36 | `<mouse>` element is missing the required `id` attribute. Without an id the mouse state cannot be addressed. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts:718-719`.) | Error |
 | E-INPUT-003 | §36 | `<gamepad>` element is missing the required `id` attribute. Without an id the gamepad state cannot be addressed. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts:718-719`.) | Error |
@@ -28128,8 +28187,8 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-LIFECYCLE-014 | §28.5 | `animationFrame()` called inside a server-escalated function. The function is run per-frame on the client; there is no server-side `animationFrame` analogue. (Catalog addition S84 Wave 2 #5; full prose at §28.5 line 4288.) | Error |
 | E-LIFECYCLE-016 | §6.7.4, §6.7.1a | An `<effect>` — or a soft-deprecated keyword `when … changes { }` — appears inside the body of another reactive effect; or (S449 — ruling:user-voice-scrml.md S449 item 2; Nominal) an `<onMount>` — or a soft-deprecated `on mount { }` — appears inside an effect body or another mount body. An effect body is logic, not a markup position, and an effect inside it would have no defined trigger or lifetime. Resolution: declare the inner effect as a sibling `<effect>` with its own `deps=`. (Catalog addition S84 Wave 2 #5.) **Re-expressed S447** for `<effect>`. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* · supersedes: the pre-S447 "`when` block appears syntactically inside another `when` block body" wording. **Nominal / not yet emitted** — impl#1 fails closed on the keyword shape with `E-CODEGEN-INVALID-LOGIC` instead (`g-impl1-when-effect-divergence-s447`); lands with the bootstrap. | Error |
 | E-LIFECYCLE-019 | §28.4 | A `<request>` element is self-closing (no body). A `<request>` body declares the assignment that captures the fetch result; without a body the element has no observable effect. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3880.) | Error |
-| E-LIFECYCLE-020 | §28.4 | A `<request>` body contains more than one assignment. `<request>` is single-assignment-by-design: the lone `@var = expr` form captures the fetch result; multiple assignments would race. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3881.) | Error |
-| E-LIFECYCLE-021 | §28.4 | A `<request>` body contains logic but no `@var = expr` capture. The fetch result is silently discarded. Resolution: add the assignment (`@var = fetchResult(...)`) or remove the logic. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3882.) | Error |
+| E-LIFECYCLE-020 | §28.4 | A `<request>` body contains more than one assignment. `<request>` is single-assignment-by-design: the lone `@var = expr` form captures the fetch result; multiple assignments would race. *(S469 PA reading: a `lin` declaration before the assignment is not an assignment for this count — §6.7.7.)* (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3881.) **Not yet emitted** by impl#1 or the bootstrap (no emitter found, S469). | Error |
+| E-LIFECYCLE-021 | §28.4 | A `<request>` body contains logic but no `@var = expr` capture. The fetch result is silently discarded. Resolution: add the assignment (`@var = fetchResult(...)`) or remove the logic. *(S469 PA reading: a body of only `lin` declarations is this code — §6.7.7.)* (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3882.) **Not yet emitted** by impl#1 or the bootstrap (no emitter found, S469). | Error |
 | E-LIFECYCLE-022 | §28.4 | A `<request>` `deps=` entry names an undeclared variable or a non-`@` variable. The `deps=` list participates in re-fetch invalidation; entries must resolve to declared reactive variables. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3883.) | Error |
 | E-REQUEST-CACHE-NO-READSET | §6.7.7.2 | The bare `cache` attribute is placed on a `<request>` that has no compiler-derivable read-set — a `url=` or `api=` request. `cache` is legal only where the compiler can derive staleness; there is no author-TTL fallback. Resolution: remove `cache`, or fetch through a server function whose SQL the compiler can see. **Provenance:** ruling:user-voice-scrml.md S444 dpa-060 call 2 (+4) — *"(i) and yes"*. **Nominal / spec-ahead — not yet emitted; lands with the impl** (impl#1 carries the divergence; the bootstrap builds it). | Error |
 | W-LIFECYCLE-003 | §6.7.10, §28.1 | A `<timer>` or `<poll>` is declared inside a `for`/`lift` loop body. N loop iterations produce N independent ticking instances; the resulting count and lifetime are usually unintended. Resolution: hoist the element to outside the loop, or confirm via a comment that N instances is intentional. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4323.) | Warning |
@@ -28416,6 +28475,10 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 
 ## 35. Linear Types — `lin`
 
+> **Amendment S469 — §35 migrated to the ruled dialect.** **Provenance:** ruling:user-voice-scrml.md S469 dpa-073 F1 — *"`;` terminates (Recommended)"* · ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2 = (iii) \"Comma list (Recommended)\"" — *"Comma list (Recommended)"* · ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" — F5 *"Yes, specify it (Recommended)"* (*"`const xs = for (…) { lift e; };` works from any head … the `let r = ~` pattern retires"*) · ruling:user-voice-scrml.md S469 "⭐ RULED — fall-off and tail returns: ALWAYS EXPLICIT" — *"Always explicit (Recommended)"* · ruling:user-voice-scrml.md S469 "⭐ RULED — a `lin` declaration may stand inside a `<request>` body" — *"I agree with your rec on the lin Q"*.
+>
+> What changed: every statement in this section's examples ends with `;`; `match` arms are a comma list; §35.3 rule 4's *"initializes `~` to the lifted value (§32.2)"* is struck and replaced by the S469 `lift` rules (§32.6, §49.6, §18.5); the `fn transform` example of §35.2.1 is redrawn so the `fn` returns its value (PA rewrite: the old body wrote a field of a parameter and returned nothing — see the note there); the `lin-declaration` production ends with `;`. **Numbering fix (no change of meaning):** the §35.4 subsections were headed `34.4.1`–`34.4.4` and the carve-out `§34.4.4.1`, and this section's cross-references said `§34.3` / `§34.4` for its own §35.3 / §35.4 (left over from when `lin` was §34). They are renumbered `35.4.1`–`35.4.4` / `§35.4.4.1`, and the old cross-references are struck where they stand (in this section, in §17's `if=` `lin` note and in §18.12). §35.8's *"See §31"* for `~` is struck for §32.
+
 ### 35.1 Overview
 
 A `lin` variable is a value with exactly-once consumption and restricted intermediate visibility. The binding is immutable, must be consumed on every execution path, and must not be referenced by any code between the declaration site and the consumption site except the consumption itself. This is a compile-time guarantee, not a runtime check. The compiler enforces it by static analysis of every execution path through the program.
@@ -28425,13 +28488,13 @@ A `lin` variable is a value with exactly-once consumption and restricted interme
 ### 35.2 Declaration Syntax
 
 ```scrml
-lin x = fetchToken()
+lin x = fetchToken();
 ```
 
 `lin` is a declaration keyword. It takes the same syntactic position as `let` and `const`.
 
 ```
-lin-declaration ::= 'lin' identifier '=' expression
+lin-declaration ::= 'lin' identifier '=' expression ';'     (* S469: `;` terminates, dpa-073 F1 *)
 ```
 
 A `lin` declaration binds a name to a value and marks that binding as linear. The binding is immutable — the developer cannot assign a new value to a `lin` variable after declaration. Every reference to a `lin` identifier is counted as a consumption event (§35.3); there is no "read-only" reference that sits between declaration and consumption. A second reference — even one that would be a read-only observation in a non-linear language — is E-LIN-002.
@@ -28449,17 +28512,19 @@ A function parameter may be declared linear by prefixing it with `lin`:
 
 ```scrml
 function processToken(lin token: string) {
-    useToken(token)   // consumed exactly once — valid
+    useToken(token);   // consumed exactly once — valid
 }
 
 function submitRequest(lin ticket: RequestTicket) {
-    ?{`INSERT INTO requests (ticket_id) VALUES (${ticket.id})`}.run()   // consumed once; ?{} escalates to server
+    ?{`INSERT INTO requests (ticket_id) VALUES (${ticket.id})`}.run();   // consumed once; ?{} escalates to server
 }
 
-fn transform(lin src: Data, dst: Data) {
-    dst.value = src.value   // lin src consumed exactly once
+fn transform(lin src: Data) -> int {
+    return src.value * 2;   // lin src consumed exactly once
 }
 ```
+
+*(S469 PA rewrite — supersedes* `fn transform(lin src: Data, dst: Data) { dst.value = src.value }`*: a `fn` with no return type returns nothing (ruling:user-voice-scrml.md S469 "⭐ RULED — fall-off and tail returns: ALWAYS EXPLICIT"), so its only effect was a write to a field of a caller's value, which §48.3.3 (E-FN-003) reads as an outer-scope mutation. The redrawn `fn` returns its value. The `lin` point is unchanged: `src` is consumed exactly once.)*
 
 The grammar extension is:
 
@@ -28496,7 +28561,7 @@ A `lin` variable declared in one `${}` logic block may be consumed in a subseque
 ```scrml
 <program>
   ${
-      lin token = fetchToken()
+      lin token = fetchToken();
   }
   <p>Value is ${token}</>   <!-- counts as the consumption -->
 </program>
@@ -28507,11 +28572,11 @@ The markup interpolation `${token}` is the one consumption event; it satisfies �
 ```scrml
 <program>
   ${
-      lin token = fetchToken()
+      lin token = fetchToken();
   }
   <p>middle</>
   ${
-      authenticate(token)   // consumption in a later block — valid
+      authenticate(token);   // consumption in a later block — valid
   }
 </program>
 ```
@@ -28533,9 +28598,9 @@ The following operations consume a `lin` variable. Each counts as exactly one us
 
 1. **Reading in an expression.** `let y = x` where `x` is `lin`. The identifier on the right-hand side is the consumption.
 2. **Passing as a function argument.** `process(x)` where `x` is `lin`. Passing to a function is a consumption regardless of what the function does with the value.
-3. **Capturing in a closure.** `let f = () => { use(x) }` where `x` is `lin`. The closure capture is the consumption event, even if `f` is never called.
-4. **Lifting.** `lift x` where `x` is `lin`. The `lift` statement consumes `x` and initializes `~` to the lifted value (§32.2).
-5. **Pattern match subject.** `match x { ... }` where `x` is `lin`. Providing a `lin` variable as the match subject is a consumption. Branch consistency rules apply (§34.4.3).
+3. **Capturing in a closure.** `let f = () => { use(x); };` where `x` is `lin`. The closure capture is the consumption event, even if `f` is never called.
+4. **Lifting.** `lift x;` where `x` is `lin`. The `lift` statement consumes `x`~~ and initializes `~` to the lifted value (§32.2)~~. *(S469)* The lifted value goes where a `lift` goes under the S469 rules: to the result of the nearest enclosing loop bound as a value (§49.6), as the yield of a value-position block arm or `if` branch (§18.5, §17.6.10), or to the render target (§10). It initializes `~` only as §32.6 says: when `~` is referenced in the same `${ }` body, and never when a bound loop captures the `lift`. Either way the `lift` is the one consumption of `x`.
+5. **Pattern match subject.** `match x { ... }` where `x` is `lin`. Providing a `lin` variable as the match subject is a consumption. Branch consistency rules apply (~~§34.4.3~~ §35.4.3).
 
 The key principle: the existence of a reference to a `lin` identifier in a consuming position is the consumption. Whether the consuming function reads the value, or whether the closure is ever invoked, is irrelevant to the static count.
 
@@ -28547,16 +28612,16 @@ The key principle: the existence of a reference to a `lin` identifier in a consu
 
 ### 35.4 Control Flow Interactions
 
-#### 34.4.1 Sequential code
+#### 35.4.1 Sequential code
 
 A `lin` variable declared and consumed once in straight-line code is trivially valid.
 
 ```scrml
-lin token = fetchToken()
-useToken(token)   // consumed exactly once — valid
+lin token = fetchToken();
+useToken(token);   // consumed exactly once — valid
 ```
 
-#### 34.4.2 `if`/`else`
+#### 35.4.2 `if`/`else`
 
 A `lin` variable consumed in both branches of an `if`/`else` is consumed exactly once on every execution path and is valid.
 
@@ -28566,17 +28631,17 @@ An `if` without an `else` that consumes the `lin` variable in the `if` body is E
 
 ```scrml
 // Valid — consumed in both branches
-lin token = fetchToken()
+lin token = fetchToken();
 if (admin) {
-    useAdminToken(token)
+    useAdminToken(token);
 } else {
-    useToken(token)
+    useToken(token);
 }
 
 // Invalid — E-LIN-003: no else; token unconsumed on false path
-lin token = fetchToken()
+lin token = fetchToken();
 if (admin) {
-    useAdminToken(token)
+    useAdminToken(token);
 }
 ```
 
@@ -28586,27 +28651,27 @@ if (admin) {
 - A `lin` variable consumed in both the `if` and `else` blocks SHALL be valid.
 - If neither branch consumes the `lin` variable and the variable exits scope after the conditional, E-LIN-001 fires.
 
-#### 34.4.3 `match` arms
+#### 35.4.3 `match` arms
 
-A `lin` variable used as the match subject (§34.3 rule 5) or consumed inside match arm bodies must be handled consistently across all arms. Every arm must consume the variable exactly once.
+A `lin` variable used as the match subject (~~§34.3~~ §35.3 rule 5) or consumed inside match arm bodies must be handled consistently across all arms. Every arm must consume the variable exactly once.
 
 This rule is coordinated with the exhaustiveness checker (§18). The exhaustiveness checker SHALL run before the linear type checker on the same `match` expression. A non-exhaustive match is E-TYPE-020 and is reported before E-LIN-003 is evaluated; linear type analysis is deferred on non-exhaustive matches.
 
 ```scrml
 // Valid — consumed in all arms
-lin token = fetchToken()
+lin token = fetchToken();
 match role {
-    .Admin :> useAdminToken(token)
-    .User  :> useToken(token)
-    .Guest :> discardToken(token)
+    .Admin :> useAdminToken(token),
+    .User  :> useToken(token),
+    .Guest :> discardToken(token),
 }
 
 // Invalid — E-LIN-003: .Guest arm does not consume token
-lin token = fetchToken()
+lin token = fetchToken();
 match role {
-    .Admin :> useAdminToken(token)
-    .User  :> useToken(token)
-    .Guest :> doSomethingElse()   // token not consumed — E-LIN-003
+    .Admin :> useAdminToken(token),
+    .User  :> useToken(token),
+    .Guest :> doSomethingElse(),   // token not consumed — E-LIN-003
 }
 ```
 
@@ -28615,37 +28680,37 @@ match role {
 - In an exhaustive `match` expression, every arm body SHALL consume any `lin` variable that was in scope and not yet consumed at the match expression boundary. Failure is E-LIN-003.
 - The exhaustiveness checker SHALL run before the linear type checker on the same `match` expression. E-TYPE-020 is reported first; E-LIN-003 evaluation is deferred until exhaustiveness is satisfied.
 
-#### 34.4.4 Loops
+#### 35.4.4 Loops
 
 A `lin` variable consumed inside a loop body is potentially consumed zero times (if the loop does not execute) or many times (if it does). Either case is an error.
 
 ```scrml
-lin token = fetchToken()
+lin token = fetchToken();
 for (item of items) {
-    useToken(token)   // Error E-LIN-002: token consumed on every iteration
+    useToken(token);   // Error E-LIN-002: token consumed on every iteration
 }
 ```
 
 `lin` variables from **outer scope** SHALL NOT be consumed inside loop bodies. To use a `lin` value from an outer scope in an iteration context, the developer must consume it once outside the loop or before the loop begins.
 
-**Loop-body carve-out (§34.4.4.1):** A `lin` variable that is both **declared and consumed within the same loop iteration** is permitted. This allows each iteration to mint, use, and consume a fresh linear resource independently. The `lin` variable must not escape the iteration — it must be fully consumed before the iteration ends.
+**Loop-body carve-out (~~§34.4.4.1~~ §35.4.4.1):** A `lin` variable that is both **declared and consumed within the same loop iteration** is permitted. This allows each iteration to mint, use, and consume a fresh linear resource independently. The `lin` variable must not escape the iteration — it must be fully consumed before the iteration ends.
 
 ```scrml
 // Valid — lin declared and consumed within each iteration
 for (const item of items) {
-    lin token = mintToken()
-    submitOne(token)  // consumed within iteration — valid
+    lin token = mintToken();
+    submitOne(token);  // consumed within iteration — valid
 }
 
 // Invalid — outer lin consumed inside loop — E-LIN-002
-lin token = mintToken()
+lin token = mintToken();
 for (const item of items) {
-    submitOne(token)  // Error E-LIN-002: outer lin consumed inside loop
+    submitOne(token);  // Error E-LIN-002: outer lin consumed inside loop
 }
 
 // Invalid — loop-local lin not consumed before iteration ends — E-LIN-001
 for (const item of items) {
-    lin token = mintToken()
+    lin token = mintToken();
     // token never consumed — Error E-LIN-001
 }
 ```
@@ -28653,7 +28718,7 @@ for (const item of items) {
 **Normative statements:**
 
 - A `lin` variable from an outer scope consumed inside any loop body (a `for` with any head, §49) SHALL be a compile error (E-LIN-002). *(Amendment S469 — supersedes "(`for`, `while`, `do...while`)"; `while` and `do...while` retired, ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F1 *"One `for` (Recommended)"*.)*
-- A `lin` variable declared inside a loop body and consumed within the **same iteration** SHALL be valid (loop-body carve-out, §34.4.4.1).
+- A `lin` variable declared inside a loop body and consumed within the **same iteration** SHALL be valid (loop-body carve-out, ~~§34.4.4.1~~ §35.4.4.1).
 - A `lin` variable declared inside a loop body that is NOT consumed before the iteration scope ends SHALL be a compile error (E-LIN-001).
 - The compiler SHALL verify, for each loop-local `lin` variable, that exactly one consumption appears on every path before the iteration scope exits.
 
@@ -28665,8 +28730,8 @@ The `lin` variable was declared but has zero consumption sites on at least one e
 
 ```scrml
 ${
-    lin token = fetchToken()
-    let result = doWork()
+    lin token = fetchToken();
+    let result = doWork();
     // token never used before scope exit — Error E-LIN-001
 }
 ```
@@ -28679,9 +28744,9 @@ The `lin` variable has more than one consumption site on the same execution path
 
 ```scrml
 ${
-    lin token = fetchToken()
-    authenticate(token)   // first use
-    log(token)            // Error E-LIN-002: second use
+    lin token = fetchToken();
+    authenticate(token);   // first use
+    log(token);            // Error E-LIN-002: second use
 }
 ```
 
@@ -28693,9 +28758,9 @@ The `lin` variable is consumed on at least one execution path but not consumed o
 
 ```scrml
 ${
-    lin token = fetchToken()
+    lin token = fetchToken();
     if (needsAuth) {
-        authenticate(token)   // consumed here
+        authenticate(token);   // consumed here
     }
     // else path: token not consumed — Error E-LIN-003
 }
@@ -28710,11 +28775,11 @@ A declaration introduces a name that already resolves, via the lexical scope cha
 ```scrml
 ${
     function outer() {
-        lin token = fetchToken()
+        lin token = fetchToken();
         for (let i = 0; i < 3; i = i + 1) {
-            let token = i   // Error E-LIN-005: shadows outer `lin token`
+            let token = i;   // Error E-LIN-005: shadows outer `lin token`
         }
-        use(token)
+        use(token);
     }
 }
 ```
@@ -28728,15 +28793,32 @@ A `lin` variable declared outside a `<request>` (§6.7.7) or `<poll>` (§6.7.6) 
 ```scrml
 <program>
     ${
-        lin token = fetchToken()   // declared outside the <request> body
+        lin token = fetchToken();   // declared outside the <request> body
     }
     <request id="profile">
-        ${ @user = authenticate(token) }   // Error E-LIN-006
+        ${ @user = authenticate(token); }   // Error E-LIN-006
     </>
 </program>
 ```
 
 > E-LIN-006: `lin` variable `token` is consumed inside a `<request>` body but was declared outside it. The compiler cannot prove dominance across the `<request>` scheduling boundary, so the consumption may happen zero or multiple times. Either declare `token` inside the `<request>` body, or pass a consumed (non-lin) value into the body.
+
+> **Amendment S469 — the fix-it is grammar for `<request>`.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — a `lin` declaration may stand inside a `<request>` body" — *"I agree with your rec on the lin Q"* (*"a `<request>` body may hold a `lin` declaration followed by the one assignment, so a single-use value is declared where it is consumed and never leaks (§35.5's E-LIN-006 fix-it reading). … E-LIN-006 fires on a `lin` declared OUTSIDE the request and referenced inside it."*) · **supersedes:** §6.7.7's *"The compiler SHALL emit E-LIN-006 if a `lin` variable is referenced in a `<request>` body"* and its one-assignment-only `request-body` (struck in §6.7.7). This section's rule was already the narrow one and stands.
+>
+> The fix-it "declare `token` inside the `<request>` body" is now legal under §6.7.7's grammar: `lin` declarations may precede the body's one assignment. Each run of the body declares the binding afresh and the assignment consumes it once, so the count is provable within the body.
+>
+> ```scrml
+> <program>
+>     <request id="profile">
+>         ${
+>             lin token = fetchToken();          // declared inside the <request> body
+>             @user = authenticate(token);       // consumed once per run — valid, not E-LIN-006
+>         }
+>     </>
+> </program>
+> ```
+>
+> The ruling names `<request>`. `<poll>` gets no grammar change, and its body keeps §6.7.6's shape *(PA reading, S469)*.
 
 Closures (arrow / `function` expressions) are NOT deferred-execution contexts for the purposes of E-LIN-006. §35.6 governs them: a closure capture of a `lin` variable is the synchronous consumption event regardless of when or whether the closure runs. The static count is fixed at capture time, so dominance is trivially provable and E-LIN-006 does not apply.
 
@@ -28747,27 +28829,28 @@ Closures (arrow / `function` expressions) are NOT deferred-execution contexts fo
 - The compiler SHALL emit E-LIN-003 when a `lin` variable is consumed on some execution paths but not others.
 - The compiler SHALL emit E-LIN-005 when a `let`, `const`, or `lin` declaration has the same name as an in-scope `lin` variable declared in a strictly enclosing scope. A same-scope rebinding is not shadowing in the hierarchical sense and is not covered by E-LIN-005.
 - The compiler SHALL emit E-LIN-006 when a `lin` variable is consumed inside a `<request>` or `<poll>` markup body and the `lin` variable was declared outside that body. The scoping check is based on the markup-ctx stack at consumption time; the closure model in §35.6 is unaffected.
+- *(S469)* A `lin` variable declared inside a `<request>` body (before its one assignment, §6.7.7) and consumed in that body SHALL NOT be E-LIN-006. The §35.3 and §35.5 rules apply to it within the body: unconsumed by the body is E-LIN-001, consumed twice is E-LIN-002.
 - When E-LIN-006 fires on a reference, that reference SHALL be treated as having consumed the `lin` variable for scope-exit accounting; E-LIN-001 SHALL NOT cascade on the same variable.
 - `~` is subject to the same rules; E-TILDE-001 and E-TILDE-002 (§32.5) are the `~`-specific forms of E-LIN-001 and E-LIN-002 respectively.
 - All `lin` errors SHALL be reported at the TS stage (Stage 6) as part of the linear type pass, after type resolution and route inference.
-- The linear type pass SHALL run after the exhaustiveness checker on `match` expressions (§34.4.3).
+- The linear type pass SHALL run after the exhaustiveness checker on `match` expressions (~~§34.4.3~~ §35.4.3).
 
 ### 35.6 Interaction with Closures
 
-Capturing a `lin` variable in a closure counts as one consumption (§34.3 rule 3). The capture is the consumption event regardless of whether the closure is ever called.
+Capturing a `lin` variable in a closure counts as one consumption (~~§34.3~~ §35.3 rule 3). The capture is the consumption event regardless of whether the closure is ever called.
 
 ```scrml
-lin token = fetchToken()
-let process = () => { useToken(token) }   // token consumed here (captured)
-useToken(token)                            // Error E-LIN-002: token used again
+lin token = fetchToken();
+let process = () => { useToken(token); };   // token consumed here (captured)
+useToken(token);                            // Error E-LIN-002: token used again
 ```
 
 A `lin` variable may be captured in at most one closure. Capturing it in more than one closure is E-LIN-002.
 
 ```scrml
-lin token = fetchToken()
-let a = () => { useToken(token) }   // consumes token
-let b = () => { useToken(token) }   // Error E-LIN-002: token used again
+lin token = fetchToken();
+let a = () => { useToken(token); };   // consumes token
+let b = () => { useToken(token); };   // Error E-LIN-002: token used again
 ```
 
 **Design rationale:** Closure capture is a consumption because the closure holds a reference to the value. The compiler cannot statically determine how many times or when the closure will be called. Treating capture as consumption prevents the use-count from depending on dynamic call patterns.
@@ -28783,7 +28866,7 @@ let b = () => { useToken(token) }   // Error E-LIN-002: token used again
 
 **Open question — tracked as core open question 3 (see §1):** The exact semantics of a `lin` variable consumed by a server-escalated function call are not yet fully resolved.
 
-**Working position (subject to revision):** A `lin` variable passed as an argument to a server-escalated function is consumed at the call site on the client, per §34.3 rule 2. The server function receives a serialized copy. The `lin` guarantee applies to the client-side variable only; it does not extend to the serialized copy on the server.
+**Working position (subject to revision):** A `lin` variable passed as an argument to a server-escalated function is consumed at the call site on the client, per ~~§34.3~~ §35.3 rule 2. The server function receives a serialized copy. The `lin` guarantee applies to the client-side variable only; it does not extend to the serialized copy on the server.
 
 **Normative statements (working position):**
 
@@ -28808,26 +28891,26 @@ The `~`-specific error codes exist for diagnostic clarity. The error messages fo
 - `~` SHALL be tracked as a `lin` variable by the linear type checker. The same enforcement pass handles both named `lin` declarations and `~`.
 - E-TILDE-001 and E-TILDE-002 SHALL be reported by the same pass that enforces E-LIN-001 and E-LIN-002. They are not a separate pass.
 
-See §31 for the complete specification of `~` including initialization rules, context boundary rules, and the `lift`-interaction elision exception.
+See ~~§31~~ §32 for the complete specification of `~` including initialization rules, context boundary rules, and the `lift`-interaction elision exception.
 
 ### 35.9 Worked Examples
 
 **Valid — basic single use:**
 ```scrml
 ${
-    lin token = fetchToken()
-    authenticate(token)       // consumed exactly once
+    lin token = fetchToken();
+    authenticate(token);       // consumed exactly once
 }
 ```
 
 **Valid — consumed in all match arms:**
 ```scrml
 ${
-    lin token = fetchToken()
+    lin token = fetchToken();
     match role {
-        .Admin :> adminAuth(token)
-        .User  :> userAuth(token)
-        .Guest :> guestAuth(token)
+        .Admin :> adminAuth(token),
+        .User  :> userAuth(token),
+        .Guest :> guestAuth(token),
     }
 }
 ```
@@ -28835,17 +28918,17 @@ ${
 **Valid — captured in closure (single capture = one use):**
 ```scrml
 ${
-    lin token = fetchToken()
-    let handler = () => { authenticate(token) }   // consumed by capture
-    registerHandler(handler)
+    lin token = fetchToken();
+    let handler = () => { authenticate(token); };   // consumed by capture
+    registerHandler(handler);
 }
 ```
 
 **Invalid — E-LIN-001: zero uses:**
 ```scrml
 ${
-    lin token = fetchToken()
-    let result = doWork()
+    lin token = fetchToken();
+    let result = doWork();
     // token never used — Error E-LIN-001
 }
 ```
@@ -28855,9 +28938,9 @@ ${
 **Invalid — E-LIN-002: double use:**
 ```scrml
 ${
-    lin token = fetchToken()
-    authenticate(token)   // first use
-    log(token)            // Error E-LIN-002: second use
+    lin token = fetchToken();
+    authenticate(token);   // first use
+    log(token);            // Error E-LIN-002: second use
 }
 ```
 
@@ -28866,9 +28949,9 @@ ${
 **Invalid — E-LIN-003: branch asymmetry:**
 ```scrml
 ${
-    lin token = fetchToken()
+    lin token = fetchToken();
     if (needsAuth) {
-        authenticate(token)
+        authenticate(token);
     }
     // else path: token not consumed — Error E-LIN-003
 }
