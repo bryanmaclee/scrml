@@ -79,7 +79,7 @@ import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 import { ScrmlParser } from "./scrml-acorn.ts";
 import { soleLogicBlockPayload } from "./interpolation-extent.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
-import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw, templateTextInterpolationNodes, templateInterpolationNodesAll } from "./expression-parser.ts";
+import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw, templateTextInterpolationNodes, templateInterpolationNodesAll, captureTrailingContentWarnings } from "./expression-parser.ts";
 import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS, STATEMENT_CHILD_KEYS, provableSubjectCallees, failableBindingFacts, failableFnValueOf } from "./failable-value-calls.ts";
 import type { FailableEnv, FailableCallCandidate, RootHandling } from "./failable-value-calls.ts";
 import { PH_EB_CHECK, isCompilerPlaceholderName } from "./placeholder-nonce.ts";
@@ -9155,7 +9155,12 @@ function checkRuledCallForms(
     {
       // Round 2 (H2): a block-bodied arrow / `function` expression is an escape hatch carrying its
       // body as text — read it with the one check-time reader (escape-hatch-body.ts) and walk it.
-      hatchBody: (hatch) => escapeHatchBodyStatements(hatch, span?.file ?? ""),
+      // The reader is check-only: its "trailing content would be dropped" console warning is
+      // captured, and a body it could not read whole counts as unreadable (lexical fallback).
+      hatchBody: (hatch) => {
+        const { result, warnings } = captureTrailingContentWarnings(() => escapeHatchBodyStatements(hatch, span?.file ?? ""));
+        return warnings.length > 0 ? null : result;
+      },
       enumNames: () => [...typeRegistry].filter(([, t]) => t && t.kind === "enum").map(([nm]) => nm),
     },
   );
