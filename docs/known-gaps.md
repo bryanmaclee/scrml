@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 4 |
-| MED | 668 | 7 |
+| MED | 669 | 7 |
 | LOW | 467 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -227,6 +227,41 @@ Never fail-open: the runtime check is authoritative in both directions; the nati
 <!-- @gap id=g-spec-s34-rows-owed-e-tape-js-method-w-string-interp-literal-s469 sev=LOW status=open locus=compiler/SPEC.md(§34 catalog)+scripts/gen-bootstrap-severity.ts(PROVISIONAL table: W-STRING-INTERP-LITERAL → Warning) prov=spec:§66.20(E-TAPE-JS-METHOD amendment S469);dispatch:s469-boot-strings-1(bryan approved provisional codes, S469) -->
 
 Without a §34 row, `E-TAPE-JS-METHOD` resolves fail-closed to Error (correct). `W-STRING-INTERP-LITERAL` takes Warning from the generator's PROVISIONAL table; once a §34 row lands the row decides, and the generator throws if they disagree (remove the entry then). The §66.20 row's "the bootstrap's method allowlist still uses the JS names and is owed the rename" is now stale (renamed in s469-boot-strings-1), as is the README item 4 (`@audit.push` → `@audit.append`).
+
+### g-row-and-arm-effect-scopes-never-disposed-s469 — per-row effects outlive their row, and a `<match>` arm teardown leaves the effects of an `<each>` inside the arm subscribed — `NEW S469 (final review of f19110273, LAND-W-F/U); MED; open`
+
+<!-- @gap id=g-row-and-arm-effect-scopes-never-disposed-s469 sev=MED status=open locus=compiler/src/runtime-template.js(_scrml_reconcile_list _removeGroup / _clearAll remove a row's nodes but dispose nothing; _scrml_mount_track registers an effect only while an if= mount scope is active, so per-row effects and an arm's each effects have no owner)+compiler/src/codegen/emit-each.ts(maybeWrapEachPerItemEffect / emitRowGateEffectLines) prov=review:S469-final-review-of-f19110273;empirical:S469-s469-match-if-in-row-wrap-up(both-repros-executed-under-happy-dom-on-f19110273) -->
+
+Two faces of one missing piece: an effect created for a row (or inside a dispatched arm) is registered with
+nothing that is torn down with that row (or arm).
+
+1. **A removed row keeps its per-item and gate effects subscribed, and they revive when the key returns.**
+   `_removeGroup` / `_clearAll` remove the row's nodes; the effects (`maybeWrapEachPerItemEffect`, and the row
+   `if=` gate effects of `emitRowGateEffectLines`) stay subscribed. While the key is absent they early-return
+   (`_scrml_resolve_item` → `null`); when the key comes back, every dead generation resolves the item again and runs
+   against its detached nodes. Measured (happy-dom, f19110273):
+   ```
+   <each in=@rows key=@.id as r><p><b if=tick(r.id > @n)>${r.t}</b></p></each>
+   -- write @n, then @rows = [] ; @rows = [{ id: 1 }]  — repeat
+   gate-effect runs per @n write after 0..3 remove/re-add cycles of key 1: 1,2,3,4   (1 live row)
+   ```
+   Not a wrong DOM (the dead effects write detached nodes), but linear growth per remove/re-add of a key, and work
+   on every write. Pre-existing for the per-item text / `class:` effects; the S469 row `if=` gates are the same
+   mechanism.
+2. **A `<match>` arm teardown does not dispose an `<each>` inside the arm.** The row-scoped `<match if=…>` teardown
+   (S469 `…_teardown`) and an arm switch call the arm's wire-fn dispose, but the per-item effects of an `<each>`
+   the arm mounted (`_scrml_remount_each`) were never registered with it. Measured (happy-dom, f19110273):
+   ```
+   <each in=@xs as y><match for=Phase on=@ph if=@shown><Idle><each in=@cells as c><b>${tick(@n)}</b></each></Idle>…
+   -- @cells = [1, 2, 3]; write @n, then @shown = false ; @shown = true — repeat
+   effect runs per @n write after 0..4 if= flips: 3,6,9,12,15   (3 live rows each time)
+   ```
+   i.e. +3 per flip here, one per inner row (the reviewer's shape: 12 per flip). Subsumes
+   [[g-arm-scoped-each-per-item-effects-leak-on-arm-switch]] (LOW, the arm-switch face) at the row-gate entry.
+
+Fix direction: give a row and an arm an owning scope — `_scrml_mount_track` already registers into the active if=
+mount scope; open one per created row (disposed by `_removeGroup` / `_clearAll` / a replace) and per dispatched arm
+(disposed by the arm's dispose and the `…_teardown`), and create the row's / arm's effects inside it.
 
 ### g-engine-in-lifted-markup-renders-garbled-text-s469 — an `<engine>` inside lifted markup (`${ for (r of @xs) { lift <span><engine for=Phase initial=.Idle>…</></span> } }`) renders the text `> < / span >` and no engine, at exit 0 with zero diagnostics — `NEW S469; MED; open`
 
@@ -17899,6 +17934,17 @@ type Phase:enum = { Idle, Active }
 Renders `<li>row:one</li><li>row:two</li>` — the engine body is absent, `initError: null`, no console error. Same
 on the S429 match-in-each fix head. Silent drop of authored markup at exit 0.
 
+⛑ **S469 — re-measured on `s469-match-if-in-row` (f19110273), still open; repro with `if=`.** The S469 row `if=` work
+did not touch it, and §17.1.2.3 now says so ("honoured" does not yet apply to an engine in a row):
+```
+type Phase:enum = { Idle, Active }
+<pw> = ""
+<xs> = [1]
+<div id="out"><each in=@xs as y><engine for=Phase initial=.Idle if=(@pw == "secret")><Idle rule=.Active>LOGGED IN</><Active rule=.Idle>LOGGED IN</></></each></div>
+```
+`#out` is empty for `@pw = "wrong"` AND for `@pw = "secret"` (with or without the `if=`), zero diagnostics — it fails
+closed, so it is not a guard hole, but the author gets no signal.
+
 ⚑ **S429-peter — LOCUS FOUND, RULING-GATED.** `compiler/src/codegen/emit-each.ts:1999` `renderTemplateChildToJs` falls through for `kind="engine-decl"` and emits only a comment. The fix picks language semantics: an engine is a singleton (§51.0.A), the declaration is the mount (§51.0.D), and §51.0.K refuses an engine in a component body for the multiplicity reason that applies equally to an `<each>` row — but no sentence covers iteration. Refuse (compile error, E-COMPONENT-ENGINE-SCOPE sibling) vs render the one singleton per row: **bryan's ruling**, asked in `handOffs/incoming/2026-09-23-from-S429-peter-to-bryan-two-rulings.md` (Q3). PA lean: refuse.
 
 ### g-arm-scoped-each-per-item-effects-leak-on-arm-switch — per-item effects of an `<each>` inside a match arm are never disposed on arm switch — `NEW S429-peter; LOW; open`
@@ -17906,6 +17952,9 @@ on the S429 match-in-each fix head. Silent drop of authored markup at exit 0.
 
 +2 dead per-item effects per arm re-entry, still writing to detached nodes. Pre-existing for a top-level match;
 the S429 match-in-each fix inherits it on the new row-arm path.
+
+⛑ **S469 — folded into [[g-row-and-arm-effect-scopes-never-disposed-s469]] (MED)**, which measures the same leak on the
+row-scoped `<match if=…>` teardown (+1 per inner row per flip) and the row-removal face, and names one fix for both.
 
 ### g-e-assign-004-position-and-binder-coverage — three E-ASSIGN-004 coverage holes found by the S429 lift-body work — `NEW S429-peter; MED; open; bryan's lane (#996 owner)`
 <!-- @gap id=g-e-assign-004-position-and-binder-coverage sev=MED status=open locus=compiler/src/type-system.ts(E-ASSIGN-004 statement-position check) prov=empirical:S429-lift-body-round-3-dev-agent-on-merged-db800e6e-NOT-PA-verified -->

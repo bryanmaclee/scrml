@@ -16524,7 +16524,14 @@ The `if=` attribute is a structural conditional. Its value is a condition (§42.
 - `if=` means the same thing wherever the element sits, including inside an `<each>` row template at any
   depth (§17.1.2.3): the element is absent while `expr` is false, and `expr` is re-evaluated whenever
   anything it reads changes, in both directions. *(PA correction S469 — a guard is never fail-open; see
-  §17.1.2.3.)*
+  §17.1.2.3.)* **Exception, Tier-0 lifted markup (impl#1 today, not the intended semantics):** inside
+  `${ … lift … }` markup only ONE position is a real render gate — the SOLE root of a reconciled
+  `for … lift` row whose condition is not the value-indexed `@cell == expr` shape (lowered to the same
+  element⇄comment swap). Every other `if=` in lifted markup — an element NESTED inside the lifted root, the
+  root of a non-loop `if … lift`, one root of a multi-root lift row, and a value-indexed sole root — is a
+  `display: none` toggle: the element stays in the DOM while `expr` is false. This exception is a defect
+  pending [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]], not a license; it closes when the
+  lift lowering adopts the structural swap.
 
 **Worked example:**
 ```scrml
@@ -16900,8 +16907,13 @@ element nested at any depth below a root, a nested `<each>`'s row, and an `<each
 > listed position was fail-open (a nested `<each if=>`, a `<match if=>`, a revoked nested / multi-root
 > markup `if=`) or fail-closed (a nested markup `if=` granted after row creation) before; impl#1 honours
 > all of them (emit-each.ts: `lowerRowScopedEachIfGate`, `emitRowGateEffectLines`, `_scrml_ifrow_apply`).
-> **Not covered here:** a markup `if=` inside Tier-0 lifted markup (`${ for … lift … }`) is still a
-> `display` toggle on impl#1, tracked as [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]].
+> **Not covered here:** a markup `if=` inside Tier-0 lifted markup (`${ … lift … }`) — see the exception
+> in §17.1 (only the sole root of a reconciled `for … lift` row with a non-value-indexed condition is a
+> render gate on impl#1; the rest are `display` toggles), tracked as
+> [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]]. **And `<engine>` in a row:** an `<engine>`
+> inside an `<each>` row renders NOTHING on impl#1 today — no state body, `if=` or not, no diagnostic —
+> so it fails closed and "honoured" does not yet apply to it; whether an engine may sit in a row at all
+> (§51.0.A singleton) is ruling-gated, tracked as [[g-engine-inside-each-row-renders-nothing]].
 >
 > ~~**`if=` on a structural element positioned INSIDE an `<each>` row template is NOT honored, and this
 > subsection's SHALL does not reach there.** Stated as a carve-out rather than left implicit because the
