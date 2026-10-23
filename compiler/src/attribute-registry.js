@@ -497,6 +497,11 @@ ELEMENT_ATTR_REGISTRY.set("each", {
     ["of",   attrSpec({ supportsInterpolation: false })],   // count-iteration source
     ["as",   attrSpec({ supportsInterpolation: false })],   // iteration-variable name override
     ["key",  attrSpec({ supportsInterpolation: false })],   // diff-key override
+    // §17.1.2 render gate. Only an `<each>` that reaches VP-1 as generic markup (one in
+    // lifted `${ for … lift }` markup) is checked here — the structural form never has an
+    // `attrs` list. Codegen gates it (emit-each `lowerRowScopedEachIfGate`, S469); before
+    // that it was dropped and this registry warned "not recognized … no compile-time effect".
+    ["if",   attrSpec()],
   ]),
 });
 
