@@ -16423,6 +16423,8 @@ const TabStrip = <div class="tabs" props={
 
 - Using `slot=` on a parametric snippet is E-COMPONENT-024.
 - The lambda parameter type is inferred from the snippet's declared type.
+  *(S469: a snippet prop's declared type spells the function signature, so this is position (3) of the §7.5
+  lambda rule — an argument to a parameter whose type spells the signature. PA cross-reference.)*
 
 ### 16.7 Error Codes
 
@@ -27345,13 +27347,13 @@ relies on the impl#1 behaviour is relying on a divergence, not on scrml. impl#1 
 | Language rule (S469) | impl#1 behaviour today |
 |---|---|
 | A string's `.length`, positions and iteration count code points (Appendix D.1) | `.length` counts UTF-16 units |
-| No negative positions (Appendix D.1, §66.12.8): a negative literal `slice` position is `E-POSITION-NEGATIVE`, a computed one traps; `at(-1)` is `not`; a negative `repeat` count / pad width is out of range | a negative position counts from the end (`slice(-1)`, `at(-1)`); `repeat` / `padStart` / `padEnd` follow JavaScript |
-| `indexOf` / `lastIndexOf` return `int \| not` (Appendix D.1) | `-1` when absent |
+| No negative positions (Appendix D.1, §66.12.8): a negative literal `slice` position is `E-POSITION-NEGATIVE`, a computed one traps; `at(-1)` is `not`; a negative `repeat` count / pad width is out of range | a negative position counts from the end (`slice(-1)`, `at(-1)`); `repeat` / `padStart` / `padEnd` follow JavaScript *(the `repeat` / pad limb: PA extension of the owner's list)* |
+| `indexOf` / `lastIndexOf` return `int \| not` (Appendix D.1) | `-1` when absent *(`lastIndexOf`: PA extension of the owner's list)* |
 | `replace` / `replaceAll` take plain strings; `with` is literal text (Appendix D.1) | the host's `$&` / `$1` replacement patterns apply |
-| `sort` / `reverse` / `fill` / `copyWithin` return a new tape (§66.12.6) | mutate in place, including through an alias |
+| `sort` / `reverse` / `fill` / `copyWithin` return a new tape (§66.12.6) | mutate in place, including through an alias *(`reverse` / `fill` / `copyWithin`: PA extension of the owner's list, which names `sort`)* |
 | `xs[i]` out of range traps, `E-INDEX-OUT-OF-RANGE-RT` (§66.12.8) | reads JavaScript `undefined` (absent) |
-| `scrml:math` parses are whole-string and return `\| not`; `round` needs a tie mode (§41.18, §14.13.4) | a failed parse gives `NaN`; `round(x)` without a mode is accepted |
-| tape methods are checked against the receiver's grants (§66.12) | a receiver impl#1 cannot prove is a tape passes its JavaScript array methods through unchecked |
+| `scrml:math` parses are whole-string and return `\| not`; `round` needs a tie mode (§41.18, §14.13.4) | a failed parse gives `NaN`; `round(x)` without a mode is accepted *(the `round` limb: PA extension of the owner's list)* |
+| tape methods are checked against the receiver's grants (§66.12) | impl#1 checks NO tape method against grants — it implements neither §66's grants nor the JS-method refusal (`E-TAPE-JS-METHOD`) — so JavaScript array methods pass through on any receiver |
 
 Separate from this list: ruled FORMS impl#1 does not implement at all (`int.parse`, `Enum.parse`, `.append`, …)
 are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that change), rather than emitted
@@ -48136,11 +48138,12 @@ attribute (`<x let a:T/>`, `export let a:T`) — is `E-DECL-LET-IN-OPENER` (§66
 > declaration is not visible to the enclosing program body;~~ *(struck S469 — reversed by the owner, below)*
 > `export` from inside the block is not addressed by the ruling and stays under §66.14.)*
 > **Amendment (S469) — O61 reach: readable program-wide.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — O61 reach and the page/theme half; impl#1 divergences; code names" — O61 reach: *"Readable program-wide (Rec)"* (*"State declared inside `<channel>` / `<db>` is owned and synced by the block, and the rest of the program can read it (§38 rule 4 stands). This corrects the PA reading in the SPEC catch-up draft, which had made it invisible outside."*)
-> State declared in a `<channel>` or `<db>` body is owned and synced by that block — only the block declares and
-> writes it — and every other part of the same `<program>` MAY read it by `@` (canonical access, the §38.1 rule 4
+> State declared in a `<channel>` or `<db>` body is owned and synced by the block, and every other part of the
+> same `<program>` MAY read it by `@` (canonical access, the §38.1 rule 4
 > cross-scope read, which stands). **supersedes:** the struck PA reading "not visible to the enclosing program
-> body". **Direction of change:** newly-accepting (reads from outside the block). *(PA reading: "owned" means a
-> write from outside the block is not granted by this ruling — writes follow each block's own rules, §38 / §8.)*
+> body". **Direction of change:** newly-accepting (reads from outside the block). *(PA reading: "owned" means only the
+> block declares and writes it — a write from outside the block is not granted by this ruling; writes follow each
+> block's own rules, §38 / §8.)*
 > ~~⚑ **Still OPEN (not addressed by the ruling) — the rest of O61:** whether a `<page>` body and a `<theme>` body
 > are item positions (the original question, below).~~ *(struck S469 — ruled, next.)*
 > **Amendment (S469) — O61 `<page>` / `<theme>`: the same rule. O61 is fully RULED.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — O61 reach and the page/theme half; impl#1 divergences; code names" — O61, `<page>` / `<theme>`: *"Same rule as channel/db (Rec)"* (*"`let <x/>` is allowed there, scoped to and owned by the block, and readable as above."*)
@@ -48153,10 +48156,10 @@ attribute (`<x let a:T/>`, `export let a:T`) — is `E-DECL-LET-IN-OPENER` (§66
 > `export` on `<theme>` tokens is now plain; what `export` grants stays under §66.14 / ⚑ O2.)*
 
 > ⚑ ~~**OPEN (not ruled) — O61: which bodies other than a program body and a declaration body are item
-> positions.**~~ *(S469: answered above — `<db>` / `<channel>`, then `<page>` / `<theme>`; O61 is fully RULED.)* Sub-ruling 3 names the program body and a declaration body. Not ruled: whether a `<page>` body
+> positions.**~~ *(S469: answered above — `<db>` / `<channel>`, then `<page>` / `<theme>`; O61 is fully RULED.)* Sub-ruling 3 names the program body and a declaration body. ~~Not ruled: whether a `<page>` body
 > (which parses in the same §40.8 default-logic mode as `<program>`) and a `<theme>` body (which holds only token
 > declarations, §66.17) are item positions — §66.19.4 writes `export` on `<theme>` tokens, as it did before S447,
-> and marks those lines `⚑ O61`.
+> and marks those lines `⚑ O61`.~~ *(struck S469 — ruled above; §66.19.4's `⚑ O61` marker is removed.)*
 
 ### 66.3 Own value, inline defaults, and inference
 
