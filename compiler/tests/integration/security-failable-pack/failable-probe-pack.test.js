@@ -1,9 +1,9 @@
 // security-failable-pack — the §19.4.3 failable wrong-password probe corpus as a permanent gate
 // (S468 fix round 1; a sibling of ../security-await-pack).
 //
-// 465 shapes: the S468 fix-round-1 review of 7ecae57eb (n1–n8 client, s1–s2 server) plus the dev's
+// 467 shapes: the S468 fix-round-1 review of 7ecae57eb (n1–n8 client, s1–s2 server) plus the dev's
 // n9 (the F1 class through a name) and n10 (by-binding probes), and S469's n11 (a failable `match`
-// in every event-handler value form × container) n12 (the `!` function imported) n13 (a handler through a `const` alias) n14 (a failable call inside a template-literal interpolation) n15 (an object shorthand / an exported `const` alias) n16 (a labeled block in a function-expression body; a quoted attribute `${…}`) n17 (a `}` in a comment / regex of a quoted-attribute interpolation; a line terminator injected through the codegen comment) n18 (a failable call in an engine / `<match>` body kept as raw text) n19 (an `if=` guard on an `<each>` nested in another `<each>`'s row or in lifted markup) n20 (an `if=` guard on a `<match>` inside an `<each>` row or `<empty>` body) n21 (a markup `if=` guard on a nested element or a multi-root item root in an `<each>` row, revoked after the row is built) and n22 (a stale effect of a removed row / torn-down arm granting after the revoke). Each shape is compiled and run with a
+// in every event-handler value form × container) n12 (the `!` function imported) n13 (a handler through a `const` alias) n14 (a failable call inside a template-literal interpolation) n15 (an object shorthand / an exported `const` alias) n16 (a labeled block in a function-expression body; a quoted attribute `${…}`) n17 (a `}` in a comment / regex of a quoted-attribute interpolation; a line terminator injected through the codegen comment) n18 (a failable call in an engine / `<match>` body kept as raw text) n19 (an `if=` guard on an `<each>` nested in another `<each>`'s row or in lifted markup) n20 (an `if=` guard on a `<match>` inside an `<each>` row or `<empty>` body) n21 (a markup `if=` guard on a nested element or a multi-root item root in an `<each>` row, revoked after the row is built) and n22 (a stale effect of a removed row / torn-down arm granting after the revoke; a top-level arm whose owner was taken from the writing row). Each shape is compiled and run with a
 // wrong and a right password. The floor: a wrong password never logs in. See pack.js for the classes
 // and README.md for the why.
 //
@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { loadFamilies, runShape } from "./pack.js";
 import { KNOWN_FAIL, UNJUDGED, BY_DESIGN_LOGS_IN } from "./known-fail.js";
 
-const EXPECTED_SHAPE_COUNT = 465;
+const EXPECTED_SHAPE_COUNT = 467;
 const families = await loadFamilies();
 const ids = families.flatMap(({ family, shapes }) => Object.keys(shapes).map((n) => `${family}/${n}`));
 

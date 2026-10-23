@@ -6,7 +6,8 @@
 // password logs in. Positions: an arm mounted in a removed row, the `<each>` rows of a torn-down arm (arm
 // switch at top level, in a row, in a removed row), a row-scoped `<match if=…>` teardown, the rows of an
 // `<each>` nested in a removed row (single and multi-root), a row-scoped `<match if=…>` arm in a removed
-// row, and an arm in a row of an `<each>` nested in a removed row. All 9 log in on `29b6320ad`.
+// row, and an arm in a row of an `<each>` nested in a removed row. All 9 log in on `29b6320ad`. Plus 2
+// round-2 shapes at the end (the opposite direction; see there).
 // Data, not logic: the default export is a list of [name, scrml source]. Side: client (click #wrong /
 // #right, read #out). Do not edit a shape to make it pass.
 
@@ -57,5 +58,32 @@ const shapes = [
   ["the each rows of an arm in a row of an each nested in a removed row",
     PAGE(`<each in=@sessions key=@.id as s><each in=s.cells as c><div>${ARMS(EACH_GRANT)}</div></each></each>`, "@sessions = []")],
 ];
+
+// S469 round 2 (F1) — the OPPOSITE direction: an owner taken from the WRITER. A row's template sets the
+// scrutinee of a top-level `<match>` / `<engine>` during the boot render, so its first dispatch happens
+// while that row is being built. If the top-level arm is filed under the row, removing the row kills
+// the arm's wiring: the guard text stays "LOGGED IN" after the password is revoked. `#wrong` removes the
+// row and revokes; `#right` removes the row only.
+const TOP = (dispatch) => `type Auth:enum = { Yes, No }
+${dispatch.decl}<pw> = "secret"
+<rows> = [{ id: 1 }, { id: 2 }]
+\${
+    function poke(x) {
+        if (x == 1) { @${dispatch.cell} = .Yes }
+        return x
+    }
+    function verdict(p) { return p == "secret" ? "LOGGED IN" : "rejected" }
+}
+<button id="wrong" onclick=\${ @rows = [{ id: 2 }]; @pw = "wrong" }>go</button>
+<button id="right" onclick=\${ @rows = [{ id: 2 }] }>go</button>
+<ul><each in=@rows key=@.id as r><li>\${poke(r.id)}</li></each></ul>
+<div id="out">${dispatch.body}</div>
+`;
+shapes.push(
+  ["a top-level match first dispatched from inside a row build, after the row goes",
+    TOP({ cell: "auth", decl: "<auth>: Auth = .No\n", body: `<match for=Auth on=@auth><Yes><b>\${verdict(@pw)}</b></Yes><No><i>rejected</i></No></match>` })],
+  ["a top-level engine first dispatched from inside a row build, after the row goes",
+    TOP({ cell: "auth", decl: "", body: `<engine for=Auth initial=.No><Yes rule=.No><b>\${verdict(@pw)}</b></Yes><No rule=.Yes><i>rejected</i></No></engine>` })],
+);
 
 export default shapes;
