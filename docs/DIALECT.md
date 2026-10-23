@@ -9,9 +9,11 @@ Owner rulings: scrml-support `user-voice-scrml.md`, S469, "public docs teach the
 | Gate | Checks | In CI |
 |---|---|---|
 | `bun scripts/snippet-gate.js` | every `.scrml` file under `docs/tutorial-snippets/`, `docs/readme-snippets/`, `docs/website/`; and that a fence under `<!-- snippet: path -->` is an exact copy of its file | yes (required) |
-| `bun scripts/claim-gate.js` | every other ` ```scrml ` fence in the public surface (README, NERDME, DESIGN, tutorial, `docs/articles/`, `docs/adopter/`) | not yet (`--report` to measure) |
+| `bun scripts/claim-gate.js` | every other ` ```scrml ` fence in the public surface (README, NERDME, DESIGN, tutorial, `docs/articles/`, `docs/adopter/`, `docs/lin.md`, `docs/external-js.md`, `docs/website/*.md`) | not yet (`--report` to measure) |
 
 Both print per-mode counts: impl1 and bootstrap (ruled).
+
+claim-gate also checks a **floor**: any README.md, NERDME.md, DESIGN.md or `docs/**.md` that holds a scrml fence must be in its surface or listed, with a reason, in `SURFACE_UNGATED` (`scripts/claim-gate-surface.js`). A new public page with scrml in it fails the gate until someone decides which.
 
 ## Marking a document ruled
 
@@ -40,12 +42,13 @@ These go on the line(s) directly above the fence. They are HTML comments, so rea
 - **`gate: spec-ahead — <what's missing>`** is for ruled documents only. It marks ruled scrml that the bootstrap cannot compile yet. The block (or the cited file) is **still compiled**. A failure is expected: it is counted as `spec-ahead` and listed with your reason and the bootstrap's error codes. Once it **compiles cleanly**, the gate prints `STALE … remove the marker`, and `--strict` turns that into a failure. Name the missing feature, not the symptom, e.g. "no `<match>` block element", not "parse error". On a snippet-marked block the marker covers the whole file, so excerpts of that file need not repeat it.
 - **Pinned codes (recommended for spec-ahead):** `<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG] — no <match> block element yet -->`. The block must then fail with exactly that set of distinct error codes; any other set fails the gate. This keeps "expected to fail" from hiding a typo or a real type error. When the bootstrap's refusal legitimately changes, update the pin. Every tutorial spec-ahead marker is pinned.
 - A bootstrap **crash** is always a failure, on a spec-ahead block too.
-- The kind must be exactly `skip` or `spec-ahead` (`skip-me` is an unknown kind and fails).
+- The kind must be exactly `skip` or `spec-ahead` (`skip-me` is an unknown kind and fails). A malformed pin is an error, never "unpinned": an unclosed `[`, codes without brackets, a pin list after the separator, or a second `[…]` group.
 - The legacy first line `// gate: skip` still works in unmigrated documents. In a ruled document it is an error, so move it to the HTML marker.
 
 ### Fences the gates read
 
 - A block is gated when its fence's info string starts with the word `scrml`, in any case and with or without extra words (` ```scrml title=app.scrml `). Backtick and tilde fences both count.
+- A fence on a list-item line (`- ```scrml`, `1. ```scrml`, nested) or in a list item's continuation is gated like any other. An opener or closer may be indented at most 3 spaces past its container (the list item's content column, or the page edge); a scrml fence indented 4+ spaces is an indented code block and an error.
 - A fence closes only on a run of the same character at least as long as the one that opened it. So a ```` ```` ````-fenced example can show ` ```scrml ` text without starting a gated block.
 - These are **errors**, not silent skips: an info string that starts with `scrml` but whose first word is something else (`scrml-old`), a scrml fence inside a blockquote (`> ```scrml`), and an unclosed scrml fence.
 

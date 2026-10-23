@@ -676,7 +676,7 @@ Validation in scrml is **declarative**, not imperative. You don't write a `valid
 
 Here is a signup form that exercises the full surface:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-IMPORT-NOT-EXPORTED, E-SCOPE-001] — the bootstrap has no <match> block element and no scrml:auth stdlib, and its validity surface does not evaluate eq(…) or this pattern(…) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-SCOPE-001] — the bootstrap has no <match> block element, cannot follow scrml:auth's `export { … } from` re-export of hashPassword, and its validity surface does not evaluate eq(…) or this pattern(…) yet -->
 <!-- snippet: docs/tutorial-snippets/05-signup-form.scrml -->
 ```scrml
 // 05-signup-form.scrml — declarative form with auto-synth validity surface.
@@ -692,9 +692,9 @@ Here is a signup form that exercises the full surface:
 // `db=` is required because persistSignup() runs a `?{}` write (E-SQL-004,
 // §44.7): a `?{}` with no db= in any ancestor <program> has no connection.
 
-${ import { hashPassword } from "scrml:auth" }
-
 <program db="users.db">
+
+  import { hashPassword } from "scrml:auth";
 
   type SignupPhase:enum = { Editing, Submitting, Done }
 

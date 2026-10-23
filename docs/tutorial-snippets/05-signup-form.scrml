@@ -11,9 +11,9 @@
 // `db=` is required because persistSignup() runs a `?{}` write (E-SQL-004,
 // §44.7): a `?{}` with no db= in any ancestor <program> has no connection.
 
-${ import { hashPassword } from "scrml:auth" }
-
 <program db="users.db">
+
+  import { hashPassword } from "scrml:auth";
 
   type SignupPhase:enum = { Editing, Submitting, Done }
 

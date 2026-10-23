@@ -67,14 +67,54 @@ export const DIALECTS = /** @type {const} */ (["ruled", "impl1"]);
 const DIALECT_COMMENT_RE = /^\s*<!--\s*dialect\s*:\s*([^\s>]*)\s*-->\s*$/;
 const FRONT_MATTER_DIALECT_RE = /^\s*dialect\s*:\s*["']?([^"'\s#]*)["']?\s*(?:#.*)?$/;
 const GATE_ANY_RE = /^\s*<!--\s*gate\s*:(.*?)-->\s*$/;
-// kind, not followed by a word character or `-` (so `skip-me` / `spec-ahead-ish` are unknown kinds);
-// an optional `[CODE, …]` pin list; an optional separator; the reason.
-const GATE_RE = /^\s*(skip|spec-ahead)(?![\w-])\s*(?:\[([^\]]*)\])?\s*(?:(?:—|–|--|-|:)\s*)?([\s\S]*?)\s*$/;
-const CODE_RE = /^[EWI]-[A-Z0-9]+(?:-[A-Z0-9]+)*$|^BOOTSTRAP-CRASH$/;
+// The kind, not followed by a word character or `-` (so `skip-me` / `spec-ahead-ish` are
+// unknown kinds). The rest — an optional `[CODE, …]` pin list, a separator, the reason —
+// is parsed by parseGateMarker, which rejects every malformed pin instead of ignoring it.
+const GATE_KIND_RE = /^\s*(skip|spec-ahead)(?![\w-])/;
+const SEPARATOR_RE = /^(?:—|–|--|-|:)/;
+const CODE_RE = /^[EWI]-[A-Z0-9]+(?:-[A-Z0-9]+)*$/;
+const CODE_LIKE_RE = /^[EWI]-[A-Z0-9]/;
 const SNIPPET_RE = /^\s*<!--\s*snippet:\s*(\S+?)(?:#L(\d+)-L(\d+))?\s*-->\s*$/;
-const FENCE_OPEN_RE = /^(\s*)(`{3,}|~{3,})(.*)$/;
-const BLOCKQUOTE_FENCE_RE = /^\s*(?:>\s*)+(`{3,}|~{3,})\s*(\S*)/;
+// Container prefixes (round 3, F1): a list-item marker — `-`, `*`, `+`, `1.`, `1)` — followed
+// by 1–4 spaces, at most 3 spaces in. Nestable (`- 1. ```scrml`).
+const LIST_MARKER_RE = /^( {0,3})([-*+]|\d{1,9}[.)])( {1,4})(?=\S)/;
+// A fence opener, relative to its container: at most 3 spaces of indent (F2).
+const FENCE_OPEN_RE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
+const INDENTED_FENCE_RE = /^ {4,}(`{3,}|~{3,})(.*)$/;
+const BLOCKQUOTE_RE = /^ {0,3}>/;
 const LEGACY_SKIP_RE = /^\s*\/\/\s*gate:\s*skip\b\s*(?:(?:—|–|--|-|:)\s*)?(.*)$/;
+
+/**
+ * Parse the inside of `<!-- gate: … -->`. Returns { marker } or { error }.
+ * Malformed pins are errors, never "unpinned" (round 3, F3): an unclosed `[`, a second
+ * bracket group, codes without brackets, or a pin list after the separator.
+ */
+export function parseGateMarker(inner) {
+  const km = GATE_KIND_RE.exec(inner);
+  if (!km) return { error: "unknown" };
+  const kind = /** @type {"skip"|"spec-ahead"} */ (km[1]);
+  let rest = inner.slice(km[0].length).trimStart();
+  let codes = null;
+  if (rest.startsWith("[")) {
+    const close = rest.indexOf("]");
+    if (close < 0) return { error: "an unclosed `[` pin list — write `[E-CODE, …]`" };
+    const list = rest.slice(1, close);
+    if (kind !== "spec-ahead") return { error: "a `[CODES]` pin is only allowed on `gate: spec-ahead`" };
+    codes = list.split(",").map((c) => c.trim()).filter(Boolean);
+    if (codes.length === 0 || codes.some((c) => !CODE_RE.test(c))) {
+      return { error: `bad pinned code list \`[${list}]\` — write diagnostic codes, e.g. \`[E-PARSE-TAG, E-BOOTSTRAP-UNSUPPORTED]\`` };
+    }
+    rest = rest.slice(close + 1).trimStart();
+    if (rest.startsWith("[")) return { error: "a second `[…]` group — put every pinned code in one list" };
+  }
+  const sep = SEPARATOR_RE.exec(rest);
+  if (sep) rest = rest.slice(sep[0].length).trimStart();
+  else if (CODE_LIKE_RE.test(rest)) return { error: "diagnostic codes outside brackets — a pin is `[E-CODE, …]`, before the separator" };
+  if (rest.startsWith("[") || (sep && CODE_LIKE_RE.test(rest) && /^[EWI]-[A-Z0-9-]+\s*[,\]]/.test(rest))) {
+    return { error: "a pin list after the separator — write `gate: spec-ahead [E-CODE, …] — <reason>`" };
+  }
+  return { marker: { kind, codes, reason: rest.trim() } };
+}
 
 /**
  * @typedef {{ kind: "skip" | "spec-ahead", reason: string, line: number, codes: string[] | null }} GateMarker
@@ -151,8 +191,32 @@ export function parseDocMarkers(text) {
     pendingSnippet = null;
   };
 
+  // List-item containers (F1). `listCols` holds the content column of each open list item.
+  /** @type {number[]} */
+  const listCols = [];
+  const indentOf = (l) => /^ */.exec(l)[0].length;
+  /** Strip this line's container prefix: returns its container column and the rest. */
+  const container = (l) => {
+    const col0 = listCols.length ? listCols[listCols.length - 1] : 0;
+    if (l.trim() === "") return { col: col0, rest: "" };
+    const ind = indentOf(l);
+    while (listCols.length && ind < listCols[listCols.length - 1]) listCols.pop();
+    let col = listCols.length ? listCols[listCols.length - 1] : 0;
+    let rest = l.slice(Math.min(ind, col));
+    for (;;) {
+      const lm = LIST_MARKER_RE.exec(rest);
+      if (!lm) break;
+      const w = lm[0].length;
+      col += w;
+      listCols.push(col);
+      rest = rest.slice(w);
+    }
+    return { col, rest };
+  };
+
   for (; i < lines.length; i++) {
-    const line = lines[i];
+    const raw = lines[i];
+    const { col, rest: line } = container(raw);
 
     const dm = DIALECT_COMMENT_RE.exec(line);
     if (dm) {
@@ -162,29 +226,19 @@ export function parseDocMarkers(text) {
 
     const gm = GATE_ANY_RE.exec(line);
     if (gm) {
-      const m = GATE_RE.exec(gm[1]);
-      if (!m) {
+      const pg = parseGateMarker(gm[1]);
+      if (pg.error === "unknown") {
         errors.push({
           line: i + 1,
           message: `unknown gate marker \`${line.trim()}\` — the kinds are \`gate: skip — <reason>\` and \`gate: spec-ahead [CODES] — <reason>\``,
         });
         continue;
       }
-      const kind = /** @type {"skip"|"spec-ahead"} */ (m[1]);
-      let codes = null;
-      if (m[2] !== undefined) {
-        codes = m[2].split(",").map((c) => c.trim()).filter(Boolean);
-        const bad = codes.filter((c) => !CODE_RE.test(c));
-        if (kind !== "spec-ahead") {
-          errors.push({ line: i + 1, message: "a `[CODES]` pin is only allowed on `gate: spec-ahead`" });
-          continue;
-        }
-        if (codes.length === 0 || bad.length > 0) {
-          errors.push({ line: i + 1, message: `bad pinned code list \`[${m[2]}]\` — write diagnostic codes, e.g. \`[E-PARSE-TAG, E-BOOTSTRAP-UNSUPPORTED]\`` });
-          continue;
-        }
+      if (pg.error) {
+        errors.push({ line: i + 1, message: `malformed gate marker \`${line.trim()}\`: ${pg.error}` });
+        continue;
       }
-      const reason = m[3].trim();
+      const { kind, codes, reason } = pg.marker;
       if (reason === "") {
         errors.push({
           line: i + 1,
@@ -203,11 +257,28 @@ export function parseDocMarkers(text) {
       continue;
     }
 
-    const bq = BLOCKQUOTE_FENCE_RE.exec(line);
-    if (bq) {
-      if (fenceKind(bq[2]) !== "other") {
-        errors.push({ line: i + 1, message: "a scrml fence inside a blockquote is not gated — move it out of the `>` quote (or make it a plain fence)" });
+    if (BLOCKQUOTE_RE.test(line)) {
+      // A blockquote: its own fences are consumed here, so their bodies cannot desync the
+      // parser; a scrml fence inside one is an error (the gates do not read quotes).
+      const q = (l) => l.replace(/^ {0,3}(?:> ?)+/, "");
+      const qm = FENCE_OPEN_RE.exec(q(line));
+      if (qm) {
+        if (fenceKind(qm[3]) !== "other") {
+          errors.push({ line: i + 1, message: "a scrml fence inside a blockquote is not gated — move it out of the `>` quote (or make it a plain fence)" });
+        }
+        const closeQ = new RegExp(`^ {0,3}${qm[2][0] === "`" ? "`" : "~"}{${qm[2].length},}\\s*$`);
+        while (i + 1 < lines.length && BLOCKQUOTE_RE.test(lines[i + 1])) {
+          i++;
+          if (closeQ.test(q(lines[i]))) break;
+        }
       }
+      dangle();
+      continue;
+    }
+
+    const im = INDENTED_FENCE_RE.exec(line);
+    if (im && fenceKind(im[2]) !== "other") {
+      errors.push({ line: i + 1, message: "a scrml fence indented 4+ spaces past its container is an indented code block, not a gated fence — indent it at most 3 spaces" });
       dangle();
       continue;
     }
@@ -217,15 +288,20 @@ export function parseDocMarkers(text) {
       const ch = fm[2][0];
       const len = fm[2].length;
       const kind = fenceKind(fm[3]);
-      const closeRe = new RegExp(`^\\s*${ch === "`" ? "`" : "~"}{${len},}\\s*$`);
+      const strip = col + fm[1].length; // content lines lose up to this many leading spaces
+      const closeRe = new RegExp(`^ {0,3}${ch === "`" ? "`" : "~"}{${len},}\\s*$`);
       const fenceLine = i + 1;
       const body = [];
-      i++;
-      while (i < lines.length && !closeRe.test(lines[i])) {
-        body.push(lines[i]);
+      let closed = false;
+      while (i + 1 < lines.length) {
+        const l = lines[i + 1];
+        // A non-blank line indented less than the container ends the list item, and the fence.
+        if (col > 0 && l.trim() !== "" && indentOf(l) < col) break;
         i++;
+        if (closeRe.test(l.slice(Math.min(indentOf(l), col)))) { closed = true; break; }
+        body.push(l.slice(Math.min(indentOf(l), strip)));
       }
-      if (i >= lines.length && kind === "scrml") {
+      if (!closed && i + 1 >= lines.length && kind === "scrml") {
         errors.push({ line: fenceLine, message: "unclosed scrml fence — it runs to the end of the document" });
       }
       if (kind === "bad") {

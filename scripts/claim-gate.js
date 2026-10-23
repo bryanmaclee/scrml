@@ -81,25 +81,10 @@ import { execFileSync } from "child_process";
 import { lintGhostPatterns } from "../compiler/src/lint-ghost-patterns.js";
 import { parseDocMarkers } from "./doc-gate-markers.js";
 import { isDriftScanned, inSnippetCorpus } from "./snippet-drift.js";
+import { PUBLIC_SURFACE, SURFACE_EXCLUDE, SURFACE_UNGATED, uncoveredDocs } from "./claim-gate-surface.js";
 
-/**
- * The declared PUBLIC SURFACE. A path may be a file or a directory (walked
- * recursively for `.md`). Adding a row here is the act that puts a surface
- * under the gate — deliberately explicit, never a broad glob, because the
- * non-gated buckets above are non-gated for real reasons.
- */
-const PUBLIC_SURFACE = [
-  "README.md",
-  "NERDME.md",
-  "DESIGN.md",
-  "docs/tutorial.md",
-  "docs/articles",
-  "docs/adopter",
-  "marketing", // does not exist yet; tolerated-absent so the row can pre-date the dir
-];
-
-/** Directories under a surface row that are NOT public surface (walked past, never gated). */
-const SURFACE_EXCLUDE = ["docs/articles/archive"];
+// The declared surface, its walked-past excludes, and the FLOOR (every fenced public
+// document must be gated or excused with a reason) live in scripts/claim-gate-surface.js.
 
 const args = process.argv.slice(2);
 const reportMode = args.includes("--report");
@@ -135,10 +120,18 @@ if (files.length === 0) {
   console.log("claim-gate: no markdown files resolved from the declared surface.");
   process.exit(0);
 }
+// FLOOR (round 3): with the declared surface (no explicit paths), every README / NERDME /
+// DESIGN / docs/**.md holding a scrml fence must be gated or excused in SURFACE_UNGATED.
+const REPO_ROOT_FLOOR = resolve(import.meta.dir, "..");
+const floorMisses = explicitPaths.length > 0
+  ? []
+  : uncoveredDocs(REPO_ROOT_FLOOR, new Set(files.map((f) => relative(REPO_ROOT_FLOOR, resolve(f)).split(sep).join("/"))));
+
 if (args.includes("--list")) {
   console.log(`claim-gate — ${files.length} file(s) in the surface:`);
   for (const f of files) console.log(`  ${f}`);
-  process.exit(0);
+  for (const f of floorMisses) console.log(`  UNGATED (surface floor) ${f}`);
+  process.exit(floorMisses.length > 0 ? 1 : 0);
 }
 
 // Loaded lazily: an impl1-only run never pays for the bootstrap bundle.
@@ -176,6 +169,15 @@ const failures = [];
 const specAheadList = [];
 const staleList = [];
 const perFile = [];
+
+for (const miss of floorMisses) {
+  failures.push({
+    file: miss, blockNum: null, startLine: 1,
+    why: "surface floor: this document has scrml fences but is neither in PUBLIC_SURFACE nor excused in SURFACE_UNGATED (scripts/claim-gate-surface.js) — add it to one, with a reason for an exclusion",
+    compileOutput: "", ghostDiags: [],
+  });
+  mode.impl1.failed++;
+}
 
 for (const file of files) {
   const doc = parseDocMarkers(readFileSync(file, "utf8"));
