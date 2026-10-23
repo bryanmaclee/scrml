@@ -4778,6 +4778,18 @@ ${
         return st
     }
 
+    // s469 (templates review H1, BACKSTOP) — a Recovered node is a parse-error
+    // placeholder: lower turns it into `not`, which is only safe because the
+    // parser's Error stops the build (lower.scrml hasError). A Recovered node
+    // in a file with NO Error-severity parse diagnostic would reach the printer
+    // as a silent `null` — an internal compiler error, reported (fail closed).
+    fn recoveredBackstop(env: Env, e: AExpr, st: AS) -> AS {
+        for (const f of env.g.files) {
+            if (f.path == env.file && f.errs.length > 0) return st
+        }
+        return addDiag(st, env.file, e.span, "E-INTERNAL-RECOVERED-UNREPORTED", "internal compiler error: the parser left a placeholder here (it could not read this expression) but reported no error for this file — the program would compile with this expression silently replaced by `not`. This is a compiler bug; the build is stopped")
+    }
+
     fn resolveExpr(env: Env, e: AExpr, expected: Type | not, st: AS) -> RX {
         const k: AExprK = e.k
         return match k {
@@ -4788,7 +4800,7 @@ ${
             .Str(v: s) :> plain(Type.Str, addValue(st, e.nid, ValueFact.VLit(Literal.Str(s))))
             .Bool(v: b) :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VLit(Literal.Bool(b))))
             .NotLit :> plain(expected, addValue(st, e.nid, ValueFact.VLit(Literal.Absent)))
-            .Recovered :> plain(not, st)                 // the parser reported it: no fact, no type
+            .Recovered :> plain(not, recoveredBackstop(env, e, st))   // the parser reported it: no fact, no type
             .Variant(name: n) :> resolveVariant(env, e, n, expected, st)
             .Member(obj: o, name: n) :> resolveMember(env, e, o, n, st)
             .Call(callee: c, args: args) :> resolveCall(env, e, c, args, st)
@@ -5236,6 +5248,14 @@ ${
             // operand of a `return` in a function that is itself void (it passes `void` on).
             if (isVoidFn(env.g, cf.sym.id) && env.fx.stmtCall != e.nid && env.fx.subject != e.nid) return plain(not, addDiag(sp, env.file, e.span, "E-TYPE-001", "`" + cf.name + "(…)` is `void` (no path of it returns a value) — it cannot be used as a value (§18.3); call it as a statement, or make it `return` a value on every path"))
             return plain(not, sp)
+        }
+        // s469 (templates review round 2 — found by the end-to-end fuzz): a call
+        // whose callee is NOT a declared function — a local, a parameter, a field,
+        // an instance — was accepted silently and lowered to `not` (`total()` on a
+        // `number` parameter printed `null`). Refused by name, fail closed. An
+        // undeclared callee already carries its own report (E-SCOPE-001).
+        if (nameFactIn(st, callee.nid) is given) {
+            return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only a declared scrml function is callable in the bootstrap — `" + exprName(callee) + "` names a value (a local, a parameter, a field), and calling a function VALUE is not in the bootstrap"))
         }
         return plain(not, st)
     }

@@ -20,7 +20,8 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { bootLex, acornRead, acornTokRead, judge, runFuzz } from "./template-slot-fuzz.js";
-import { textOf } from "../slice-m1/runtime/runtime.js";
+import * as runtime from "../slice-m1/runtime/runtime.js";
+const { textOf } = runtime;
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
@@ -115,14 +116,15 @@ describe("L — the slot's extent: one reader, refused where JavaScript could re
     expect(toks[0].kind.data.cooked).toBe("a\nb\nc");
   });
 
-  test("FUZZ — the bootstrap's slot extents against acorn's (both goals), 4000 generated templates", () => {
-    const res = runFuzz(mods, 4000, 469);
+  test("FUZZ — the bootstrap's slot extents against acorn's (both goals), 4000 generated templates; every one it reads is a Template node; every one it compiles clean RUNS to JavaScript's own text", () => {
+    const res = runFuzz(mods, 4000, 469, { frontEnd, rt: runtime });
     const bad = res.disagreements.map((d) => `${d.verdict}: ${JSON.stringify(d.tpl)}`);
     expect(bad).toEqual([]);
     // coverage: every verdict class is exercised
     expect(res.tally["agree-read"]).toBeGreaterThan(300);
     expect(res.tally["agree-refuse"]).toBeGreaterThan(1000);
     expect(res.tally["scrml-content"]).toBeGreaterThan(50);
+    expect(res.tally["e2e-same"]).toBeGreaterThan(200);
   });
   test("judge: a scrml form acorn's expression reader refuses is bounded by its tokens, as here", () => {
     const j = judge(mods, "`${ match n { .A :> \"}\" .B :> \"b\" } }`");
@@ -254,5 +256,110 @@ describe("E — emitted JavaScript", () => {
     expect(() => textOf({ a: 1 })).toThrow("has no text");
     expect(() => textOf(null)).toThrow("has no text");
     expect(() => textOf([1])).toThrow("has no text");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review round 1 (s469-boot-templates r1): H1, the Recovered backstop, M1, L1, P1.
+// ---------------------------------------------------------------------------
+const jsOf = (src) => {
+  const r = run(src);
+  expect(r.diags.filter((d) => !d.code.startsWith("W-")).map((d) => `${d.code}: ${d.message}`)).toEqual([]);
+  return mods.print.printProgram(r.core, "t.client.js", "scrml-runtime.js").js;
+};
+
+describe("H1 — a WARNING in a slot does not refuse the template", () => {
+  test("`is some` (W-IS-SOME-DEPRECATED) in a slot: the template stands, the slot is typed", () => {
+    const src = fnProg("", "m: int | not", "`given=${m is some}`");
+    expect(codes(src)).toEqual(["W-IS-SOME-DEPRECATED"]);
+    const out = jsOf(src);
+    expect(out).toContain("return \"given=\" + rt.textOf(");
+    expect(out).not.toContain("return null;");
+  });
+  test("a quoted `${…}` (W-STRING-INTERP-LITERAL) in a slot: the text stands", () => {
+    const src = fnProg("", "n: int", "`v=${\"${n}\"}`");
+    expect(codes(src)).toEqual(["W-STRING-INTERP-LITERAL"]);
+    expect(jsOf(src)).toContain("return \"v=\" + \"${n}\";");
+  });
+  test("a struct slot beside a warning slot is still E-TEXT-NON-PRIMITIVE", () => {
+    const src = fnProg("    type P:struct = { name: string }", "p: P, m: int | not", "`${m is some} ${p}`");
+    expect(codes(src)).toEqual(["E-TEXT-NON-PRIMITIVE", "W-IS-SOME-DEPRECATED"]);
+  });
+});
+
+describe("BACKSTOP — a Recovered node never reaches the printer when the file reported no error", () => {
+  test("a placeholder with no Error diagnostic is E-INTERNAL-RECOVERED-UNREPORTED, and nothing is lowered", () => {
+    const src = fnProg("", "n: int", "`v=${n}`");
+    const linked = mods.link.parseProgram([{ path: "t.scrml", src }], "t.scrml");
+    expect(linked.diags).toEqual([]);
+    // forge what a parser bug would leave behind: the returned template as a placeholder, no error reported
+    const json = JSON.stringify(linked.files);
+    const at = json.indexOf("{\"variant\":\"Template\"");
+    expect(at).toBeGreaterThan(0);
+    let depth = 0;
+    let end = at;
+    for (; end < json.length; end++) {
+      if (json[end] === "{") depth++;
+      else if (json[end] === "}") { depth--; if (depth === 0) break; }
+    }
+    const forged = JSON.parse(json.slice(0, at) + "\"Recovered\"" + json.slice(end + 1));
+    const tp = mods.analyze.analyze(forged, "t.scrml");
+    expect(tp.diags.map((d) => d.code)).toContain("E-INTERNAL-RECOVERED-UNREPORTED");
+    expect(mods.lower.lower(tp).core ?? null).toBe(null);
+  });
+  test("twin: the same kind of node beside a parse error is the parse error's (no internal report)", () => {
+    expect(codes(fnProg("", "n: int", "`v=${}`"))).toEqual(["E-PARSE-TEMPLATE"]);
+  });
+});
+
+describe("found by the end-to-end fuzz — a call of a value is never silently `not`", () => {
+  test("`total()` on a `number` parameter is refused (it printed `null === 1`)", () => {
+    const src = "<program>\n    fn f(total: number) -> bool {\n        return total() == 1\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
+    const d = diag(src, "E-BOOTSTRAP-UNSUPPORTED");
+    expect(d.message).toContain("only a declared scrml function is callable");
+    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+});
+
+describe("M1 — a backslash before U+2028 / U+2029 is a line continuation", () => {
+  for (const [name, ch] of [["U+2028", " "], ["U+2029", " "]]) {
+    test(`${name} in a template and in a quoted string`, () => {
+      expect(mods.lex.lex("`a\\" + ch + "b`")[0].kind.data.cooked).toBe("ab");
+      expect(mods.lex.lex("\"a\\" + ch + "b\"")[0].kind.data.cooked).toBe("ab");
+      expect(eval("`a\\" + ch + "b`")).toBe("ab");   // JavaScript agrees
+    });
+  }
+});
+
+describe("L1 — a template on the line after an expression reads two ways", () => {
+  test("refused by name (E-PARSE-TEMPLATE), never dropped as a second statement", () => {
+    const src = "<program>\n    fn f(s: string, n: int) -> string {\n        const t: string = s\n        `x${n}`\n        return t\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
+    expect(diag(src, "E-PARSE-TEMPLATE").message).toContain("line after an expression");
+    expect(codes(src)).toEqual(["E-PARSE-TEMPLATE"]);
+  });
+});
+
+describe("P1 — the printer never merges a prefix `-` with its operand's sign", () => {
+  const P1 = (body, params) => "<program>\n    fn f(" + params + ") -> number {\n        return " + body + "\n    }\n    <main>\n        <p>${f(3)}</p>\n    </main>\n</program>\n";
+  const fnText = (src) => {
+    const out = jsOf(src);
+    const at = out.indexOf("function f(");
+    return out.slice(at, out.indexOf("\n}", at) + 2);
+  };
+  test("-(-x) prints `-(-x)`, never the decrement `--x`, and computes x", () => {
+    const f = fnText(P1("-(-x)", "x: int"));
+    expect(f).toContain("-(-x)");
+    expect(f).not.toContain("--");
+    expect(new Function(f + "; return f(3);")()).toBe(3);
+  });
+  test("-(-1.0) never prints the SyntaxError `--1`", () => {
+    const f = fnText(P1("-(-1.0)", "x: int"));
+    expect(f).not.toContain("--");
+    expect(new Function(f + "; return f(3);")()).toBe(1);
+  });
+  test("-(-(-x)) and x - -1 stay what they say", () => {
+    const f = fnText(P1("-(-(-x)) + (x - -1)", "x: int"));
+    expect(f).not.toContain("--");
+    expect(new Function(f + "; return f(3);")()).toBe(1);
   });
 });

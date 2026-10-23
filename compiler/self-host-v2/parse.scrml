@@ -411,6 +411,14 @@ ${
                 const dt: TP = diagAt(r.tp, "E-BOOTSTRAP-UNSUPPORTED", "a tagged template (`tag` followed by a backtick template) is not in the bootstrap — a logic template is text (§14.13.3); pass the template to the function as an argument instead (`f(` then the template then `)`)", t)
                 const rt: RExpr = parseTemplate(dt)
                 r = mkE(rt.tp, start, AExprK.Recovered)
+            } else if (t.cls == TC.TChunk) {
+                // s469 (review L1) — a template on the LINE AFTER an expression:
+                // JavaScript reads it as a tagged template (the expression called
+                // with the template's pieces); scrml would read a new statement and
+                // drop the template. Read two ways — refused by name, fail closed.
+                const dn: TP = diagAt(r.tp, "E-PARSE-TEMPLATE", "this template starts the line after an expression, which reads two ways — JavaScript continues the expression (a tagged template: `" + prev.text + "` called with the template's pieces), scrml would start a new statement and drop it (§14.13.3). Put the template where its value is used (`const t = ` + the template)", t)
+                const rn: RExpr = parseTemplate(dn)
+                r = mkE(rn.tp, start, AExprK.Recovered)
             } else if (isHandlerOpen(r.tp)) {
                 // s451 (Ue): `expr !{ … }` — a failable handler (§19.4.3 item 3)
                 r = parseGuard(r, start)
@@ -1337,7 +1345,7 @@ ${
     fn parseTemplate(tp: TP) -> RExpr {
         const first: PTok = cur(tp)
         const start: int = first.start
-        const d0: int = tp.diags.length
+        const d0: int = errorCount(tp.diags)
         let t: TP = tmplText(tp, first)
         let quasis: string[] = [first.v]
         let slots: AExpr[] = []
@@ -1391,8 +1399,18 @@ ${
                 }
             }
         }
-        if (t.diags.length > d0) return mkE(t, start, AExprK.Recovered)
+        // only an ERROR refuses the template: a warning inside a slot (W-STRING-
+        // INTERP-LITERAL, W-IS-SOME-DEPRECATED, …) is a lint, and the program
+        // still means what it says (review H1: counting warnings made the whole
+        // template a Recovered node, lowered to `null`, its slots untyped)
+        if (errorCount(t.diags) > d0) return mkE(t, start, AExprK.Recovered)
         return mkE(t, start, AExprK.Template(quasis, slots))
+    }
+
+    fn errorCount(ds: Diag[]) -> int {
+        let n: int = 0
+        for (const d of ds) { if (d.severity == Severity.Error) n = n + 1 }
+        return n
     }
 
     // A template chunk's text: a malformed escape (lex.scrml escapeWhy) is refused.

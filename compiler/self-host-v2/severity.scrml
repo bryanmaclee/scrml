@@ -12,7 +12,7 @@
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
 // 153 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
-// generator's PROVISIONAL table: none); 69 without one (FAIL-CLOSED Error):
+// generator's PROVISIONAL table: none); 70 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-POSITION — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -39,6 +39,7 @@
 //   E-HANDLE-REDECLARE — no §34 row
 //   E-IMPORT-NOT-EXPORTED — no §34 row
 //   E-INT-DIVISION — no §34 row
+//   E-INTERNAL-RECOVERED-UNREPORTED — no §34 row
 //   E-OPERAND-NOT-NARROWED — no §34 row
 //   E-OPERATOR-OPERAND-TYPE — no §34 row
 //   E-PARSE-ARM — no §34 row

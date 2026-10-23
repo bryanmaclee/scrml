@@ -27,7 +27,8 @@ const diagsOf = (src) => run(src).diags;
 // rule says about such a value; they first check the refusal is there, then read the rest.
 const fnValueRefused = (ds) => {
   expect(ds.some((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED" && d.message.includes("names a function without calling it"))).toBe(true);
-  return ds.filter((d) => !(d.code === "E-BOOTSTRAP-UNSUPPORTED" && d.message.includes("names a function without calling it")));
+  // s469: a call THROUGH that local is refused too (only a declared function is callable) — the same root
+  return ds.filter((d) => !(d.code === "E-BOOTSTRAP-UNSUPPORTED" && (d.message.includes("names a function without calling it") || d.message.includes("only a declared scrml function is callable"))));
 };
 const clean = (src) => {
   const r = run(src);

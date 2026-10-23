@@ -219,9 +219,44 @@ function endsTemplate(raw) {
 
 /** The bootstrap PARSER's verdict on `return <tpl>`: the E- codes it reports. */
 export function bootParseCodes(mods, tpl) {
+  return bootParse(mods, tpl).codes;
+}
+
+/**
+ * The parser's verdict: its E- codes, and (review r1) whether what it built for a template it
+ * accepted IS a Template node — a parse placeholder (Recovered) with no error would print as `null`.
+ */
+export function bootParse(mods, tpl) {
   const src = "<program>\n    fn f() -> string {\n        return " + tpl + "\n    }\n</program>\n";
   const r = mods.parse.parseFile("fuzz.scrml", src, 0);
-  return [...new Set(r.diags.map((d) => d.code).filter((c) => c.startsWith("E-")))].sort();
+  const json = JSON.stringify(r.ast);
+  const codes = [...new Set(r.diags.map((d) => d.code).filter((c) => c.startsWith("E-")))].sort();
+  return { codes, isTemplate: json.includes("\"variant\":\"Template\"") && !json.includes("\"Recovered\"") };
+}
+
+// ---------------------------------------------------------------------------
+// END TO END (review r1's oracle): a template the bootstrap compiles CLEAN — through analyze,
+// lower and print — is run, and its text compared with JavaScript's own evaluation of the
+// same template in a sloppy script, with the same bindings. Only the names below are bound.
+// ---------------------------------------------------------------------------
+const E2E_PARAMS = [["a", "int", 7], ["b", "int", -2], ["n", "int", 3], ["total", "number", 0.1], ["x1", "string", "s}`"]];
+
+export function e2e(mods, frontEnd, rt, tpl) {
+  if (tpl.includes("@")) return { status: "skip" };
+  const params = E2E_PARAMS.map(([nm, ty]) => nm + ": " + ty).join(", ");
+  const src = "<program>\n    fn f(" + params + ") -> string {\n        return " + tpl + "\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
+  let r;
+  try { r = frontEnd(mods, [{ path: "e.scrml", src }]); } catch (e) { return { status: "CRASH", why: String(e).slice(0, 200) }; }
+  if (r.diags.some((d) => !d.code.startsWith("W-") && !d.code.startsWith("I-")) || !r.core) return { status: "skip" };
+  const js = mods.print.printProgram(r.core, "e.client.js", "scrml-runtime.js").js;
+  const at = js.indexOf("function f(");
+  const end = js.indexOf("\n}", at);
+  if (at < 0 || end < 0) return { status: "NO-FN", got: js, want: "" };
+  let got;
+  try { got = new Function("rt", js.slice(at, end + 2) + "\nreturn f;")(rt)(...E2E_PARAMS.map((p) => p[2])); } catch (e) { got = "THROW " + String(e); }
+  let want;
+  try { want = new Function(...E2E_PARAMS.map((p) => p[0]), "return " + tpl + ";")(...E2E_PARAMS.map((p) => p[2])); } catch (e) { want = "THROW " + String(e); }
+  return { status: got === want ? "same" : "DIFFER", got, want };
 }
 
 /**
@@ -239,11 +274,13 @@ export function judge(mods, tpl) {
   const a = acornRead(tpl);
   const t = acornTokRead(tpl);
   const l = bootLex(mods, tpl);
-  const codes = l.ok ? bootParseCodes(mods, tpl) : [];
+  const bp = l.ok ? bootParse(mods, tpl) : { codes: [], isTemplate: false };
+  const codes = bp.codes;
   const bootReads = l.ok && codes.length === 0;
   const same = (x) => JSON.stringify(x.slots) === JSON.stringify(l.slots);
   let verdict;
-  if (l.ok && ((a.ok && !same(a)) || (t.ok && !same(t)))) verdict = "DISAGREE-extent";
+  if (bootReads && !bp.isTemplate) verdict = "DISAGREE-not-a-template";
+  else if (l.ok && ((a.ok && !same(a)) || (t.ok && !same(t)))) verdict = "DISAGREE-extent";
   else if (!t.ok && bootReads) verdict = "DISAGREE-lexical";
   else if (a.ok && bootReads) verdict = "agree-read";
   else if (bootReads) verdict = "scrml-content";
@@ -336,7 +373,7 @@ export function template(r, d = 0) {
 }
 
 /** Run `count` generated templates from `seed`; returns { tally, disagreements, conservative }. */
-export function runFuzz(mods, count, seed) {
+export function runFuzz(mods, count, seed, run = null) {
   const r = rng(seed);
   const tally = {};
   const disagreements = [];
@@ -353,6 +390,12 @@ export function runFuzz(mods, count, seed) {
     tally[j.verdict] = (tally[j.verdict] ?? 0) + 1;
     if (j.verdict.startsWith("DISAGREE")) disagreements.push(j);
     if (j.verdict === "scrml-content") content.push(j.tpl);
+    if (run && j.verdict === "agree-read") {
+      const x = e2e(mods, run.frontEnd, run.rt, tpl);
+      const k = "e2e-" + x.status;
+      tally[k] = (tally[k] ?? 0) + 1;
+      if (x.status !== "same" && x.status !== "skip") disagreements.push({ verdict: "DISAGREE-" + k, tpl, acorn: x.got, lex: x.want, codes: [] });
+    }
     if (j.verdict === "conservative") {
       const cls = !j.lex.ok ? "lex: " + j.lex.why.replace(/`[^`]*`/g, "`…`").slice(0, 70) : "parse: " + j.codes.join(",");
       conservative[cls] = (conservative[cls] ?? 0) + 1;
@@ -363,11 +406,13 @@ export function runFuzz(mods, count, seed) {
 
 if (import.meta.main) {
   const { loadM2 } = await import("../slice-m2/harness.js");
+  const { frontEnd } = await import("../slice-m2/lowered.js");
+  const rt = await import("../slice-m1/runtime/runtime.js");
   const { mods } = loadM2();
   const count = Number(process.argv[2] ?? 20000);
   const seed = Number(process.argv[3] ?? 469);
   const t0 = performance.now();
-  const res = runFuzz(mods, count, seed);
+  const res = runFuzz(mods, count, seed, { frontEnd, rt });
   console.log(`generated ${count}, unique ${res.unique}, seed ${seed}, ${((performance.now() - t0) / 1000).toFixed(1)} s`);
   console.log(JSON.stringify(res.tally, null, 2));
   console.log("conservative refusals by class:");

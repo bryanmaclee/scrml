@@ -656,7 +656,10 @@ ${
         let c = advance(cur, 1)                          // consume the backslash
         if (isEof(c)) return { text: "", cur: c }
         const code: int = peekCode(c, 0)
-        if (code == 10) {                                // \<LF> — line continuation
+        // \<LF>, \<U+2028>, \<U+2029> — a line continuation (ECMA-262
+        // LineContinuation: `\` LineTerminatorSequence; s469 review M1 — LS / PS
+        // are line terminators too, in strings and templates alike)
+        if (code == 10 || code == 8232 || code == 8233) {
             return { text: "", cur: advance(c, 1) }
         }
         if (code == 13) {                                // \<CR> (+ optional LF) — line continuation
