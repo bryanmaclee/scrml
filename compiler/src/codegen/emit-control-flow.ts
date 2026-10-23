@@ -2361,6 +2361,17 @@ export function splitMultiArmString(s: string): string[] {
     while (a >= 0 && /\s/.test(s[a])) a--;
     return a >= 0 && (s[a] === ":" || s[a] === "=" || s[a] === "-");
   };
+  /** S469 r5 — does an operator that wants an OPERAND end right before `p` (`x + "|"`, `f("a"`,
+   *  `c ? "a"`)? Then the literal at `p` is that operand — part of an arm body — never an arm head. */
+  const isOperandOfOperatorAt = (p: number): boolean => {
+    let b = p - 1;
+    while (b >= 0 && /\s/.test(s[b])) b--;
+    if (b < 0) return false;
+    const c = s[b];
+    if (c === ">") return false; // `:>` / `=>` / `->` — isAfterArmArrowAt's case; `a > "x"` is rare
+    if (c === "|" && s[b - 1] !== "|") return false; // an alternate — isAlternateAt's case
+    return "+-*/%<=!&|?:(".includes(c);
+  };
   /** Is position `p` an ALTERNATE (the previous non-space char is a lone `|`)? */
   const isAlternateAt = (p: number): boolean => {
     let b = p - 1;
@@ -2376,7 +2387,7 @@ export function splitMultiArmString(s: string): string[] {
       if (lit.kind === "string" && braceDepth === 0) {
         // String literal arm: "..." :> / => / -> (or `"a" | "b" :>`) — an arm head when an
         // arrow follows its alternate chain, and it is not itself an alternate.
-        if (!isAlternateAt(i) && !isAfterArmArrowAt(i) && literalChainArrowAt(lit.end)) armStartPositions.push(i);
+        if (!isAlternateAt(i) && !isAfterArmArrowAt(i) && !isOperandOfOperatorAt(i) && literalChainArrowAt(lit.end)) armStartPositions.push(i);
       }
       i = lit.end;
       continue;
@@ -2475,7 +2486,7 @@ export function splitMultiArmString(s: string): string[] {
       }
       if (j < s.length) {
         // S469 r3 — through a `| literal` alternate chain, and never at an alternate.
-        if (!isAlternateAt(i) && !isAfterArmArrowAt(i) && literalChainArrowAt(j + 1)) {
+        if (!isAlternateAt(i) && !isAfterArmArrowAt(i) && !isOperandOfOperatorAt(i) && literalChainArrowAt(j + 1)) {
           armStartPositions.push(i);
           inString = q;
           i++;
@@ -2511,7 +2522,7 @@ export function splitMultiArmString(s: string): string[] {
         if (ch === "-") { k = i + 1; while (k < s.length && /\s/.test(s[k])) k++; }
         while (k < s.length && /[0-9a-fA-FxXbBoO._]/.test(s[k])) k++;
         // S469 r3 — through a `| literal` alternate chain, and never at an alternate.
-        if (!isAlternateAt(i) && !isAfterArmArrowAt(i) && literalChainArrowAt(k)) {
+        if (!isAlternateAt(i) && !isAfterArmArrowAt(i) && !isOperandOfOperatorAt(i) && literalChainArrowAt(k)) {
           armStartPositions.push(i);
           i = k;
           continue;
