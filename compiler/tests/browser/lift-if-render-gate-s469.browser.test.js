@@ -616,3 +616,53 @@ describe("S469 round 3 — a gate reading a LOCAL of the lift body uses its valu
     expect(count("#out b.g")).toBe(2);
   });
 });
+
+describe("S469 round 3 — F2: a gate whose row an OUTER owner removes is released (owner-scope tree)", () => {
+  const PATCH = `globalThis.__vi = () => { let n = 0; for (const nm of Object.values(_scrml_value_indexed_subscribers)) for (const b of Object.values(nm)) n += b.length; return n; }; globalThis.__sw = 0; { const _o = _scrml_ifrow_apply; _scrml_ifrow_apply = function (c, e, p, on) { globalThis.__sw++; return _o(c, e, p, on); }; }`;
+
+  test("(a) value buckets of rows in an `if … lift` arm: constant over arm toggles; old rows never swap", async () => {
+    const app = compileAndMount(`<show> = true
+<sel> = 0
+<items> = [{ id: 1 }, { id: 2 }]
+<div id="out">\${ if (@show) { for (r of @items) { lift <div><b class="g" if=(@sel == r.id)>E</b></div> } } }</div>
+`, "app", PATCH);
+    expect(app.errors).toEqual([]);
+    await flush();
+    const seen = [globalThis.__vi()];
+    for (let k = 0; k < 10; k++) { await set("show", false); await set("show", true); seen.push(globalThis.__vi()); }
+    expect(seen).toEqual(Array(11).fill(2));
+    globalThis.__sw = 0;
+    await set("sel", 1);
+    await set("sel", 2);
+    expect(globalThis.__sw).toBe(3); // the live rows only: 1 opens, then 1 closes + 2 opens
+    expect(count("#out b.g")).toBe(1);
+  });
+
+  test("(a') value buckets of an inner row when its OUTER lift row is removed", async () => {
+    const app = compileAndMount(`<sel> = 0
+<outer> = [{ id: 1 }]
+<items> = [{ id: 1 }, { id: 2 }]
+<div id="out">\${ for (o of @outer) { lift <div>\${ for (r of @items) { lift <span><b class="g" if=(@sel == r.id)>x</b></span> } }</div> } }</div>
+`, "app", PATCH);
+    expect(app.errors).toEqual([]);
+    await flush();
+    const seen = [globalThis.__vi()];
+    for (let k = 0; k < 10; k++) { await set("outer", []); await set("outer", [{ id: 1 }]); seen.push(globalThis.__vi()); }
+    expect(seen).toEqual(Array(11).fill(2));
+  });
+
+  test("(b) a plain gate in an inner row stops swapping once its outer row is removed", async () => {
+    const app = compileAndMount(`<ok> = true
+<outer> = [{ id: 1 }]
+<inner> = [{ id: 1 }]
+<div id="out">\${ for (o of @outer) { lift <div>\${ for (r of @inner) { lift <span><b class="g" if=@ok>x</b></span> } }</div> } }</div>
+`, "app", PATCH);
+    expect(app.errors).toEqual([]);
+    await flush();
+    await set("outer", []);
+    globalThis.__sw = 0;
+    await set("ok", false);
+    await set("ok", true);
+    expect(globalThis.__sw).toBe(0);
+  });
+});

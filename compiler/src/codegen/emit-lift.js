@@ -834,6 +834,10 @@ function emitLiftIfGate(lines, elVar, exprJS, rawText) {
     const keyVar = genVar("vi_key");
     lines.push(`let ${offVar} = null;`);
     lines.push(`let ${keyVar} = null;`);
+    // The bucket is not an effect, so the owner-scope tree cannot retire it by itself:
+    // its release is registered with the row's scope (open while the factory runs), so
+    // destroying the row — by its own key or with an outer owner — releases it.
+    lines.push(`_scrml_mount_track(function() { if (${offVar} !== null) { ${offVar}(); ${offVar} = null; } });`);
     // The bucket calls the updater outside any effect: it re-resolves the row itself.
     // It is defined inside the snapshot scope with the effect, so both read the
     // render-time values of any body local the condition names.

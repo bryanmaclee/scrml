@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 262 | 4 |
-| MED | 680 | 8 |
+| MED | 679 | 8 |
 | LOW | 475 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -26381,15 +26381,16 @@ element's direct listener returns early (`isConnected === false`). The narrowing
   `show=`. The gate's effect (and a row's value-bucket updater) now runs in a scope whose parameters snapshot the
   condition's free locals at render time; outside a row the condition is also read inline, so the enclosing group
   keeps the read as on main. Pack `n23` "body local" (13 shapes: 8 FAIL on `060495fe2` → PASS), browser tests.
-- **F2 (MED, a leak, not fail-open):** filed as [[g-lift-gate-not-released-on-outer-owner-teardown-s469]] — it
-  needs the owner-scope teardown s469-effect-scope-dispose is building.
+- **F2 (MED, a leak, not fail-open):** [[g-lift-gate-not-released-on-outer-owner-teardown-s469]], resolved on
+  the #1508 owner-scope tree (bucket release registered with the row scope; an `if … lift` arm render is an owner
+  scope).
 
 Found while making the Q18 premise true by effect ordering (S462 round 7). `${ for (x of @xs) { lift <li><div if=@user><button onclick={ @out = @user.name }>…</button></div></li> } }` emits `_scrml_lift_el_N.style.display = (@user) ? "" : "none"` (and the S293/W-LIFT-TIER0 deferred value-indexed and multi-root forms are display toggles too): the button stays connected while `@user` is `not`, so a programmatic `.click()` (or any non-user dispatch) runs the handler. TODAY no false acceptance results, because the §42.3.5 walk does not check explicit `lift` markup at all (the pre-existing coverage hole noted in presence-narrowing.ts `expandCheckPieces`) — neither the handler nor `${@user.name}` there is judged. When that hole closes (newly-rejecting), the walk must treat a `lift`-row `if=` as `show=` (no narrowing for children or handlers) unless the lowering becomes structural. `<each>` per-row `if=` IS structural (`_scrml_ifrow_apply` swap, a render-gate effect since round 7).
 
 
 
-### g-lift-gate-not-released-on-outer-owner-teardown-s469 — a lifted row gate whose row is removed by an OUTER owner (an `if … lift` arm switching away, an outer lift row removed) is never released: its value-bucket registration and gate effects stay live — `NEW S469; MED; open`
-<!-- @gap id=g-lift-gate-not-released-on-outer-owner-teardown-s469 sev=MED status=open locus=compiler/src/codegen/emit-lift.js(maybeWrapLiftPerItemEffect gate self-dispose fires only when the row's OWN key stops resolving)+compiler/src/runtime-template.js(_scrml_effect has no dispose/cleanup hook; _scrml_lift_arm_run disposes owned effects, not value buckets) prov=review:s469-lift-if-render-gate-round-2(F2);empirical:S469 -->
+### g-lift-gate-not-released-on-outer-owner-teardown-s469 — a lifted row gate whose row is removed by an OUTER owner (an `if … lift` arm switching away, an outer lift row removed) is never released: its value-bucket registration and gate effects stay live — `NEW S469; MED; RESOLVED S469`
+<!-- @gap id=g-lift-gate-not-released-on-outer-owner-teardown-s469 sev=MED status=resolved locus=compiler/src/codegen/emit-lift.js(maybeWrapLiftPerItemEffect gate self-dispose fires only when the row's OWN key stops resolving)+compiler/src/runtime-template.js(_scrml_effect has no dispose/cleanup hook; _scrml_lift_arm_run disposes owned effects, not value buckets) prov=review:s469-lift-if-render-gate-round-2(F2);empirical:S469 -->
 
 Filed by the review of `060495fe2` (F2). Round 2 made a row's gate release itself (and its
 `_scrml_reactive_subscribe_when` bucket) when its key no longer resolves. A row removed by an OUTER owner never gets
@@ -26402,6 +26403,16 @@ inner key keeps resolving). Not fail-open — the swapped nodes are detached —
 and work grows with every teardown. Fix direction: release from the owner's teardown (an effect cleanup hook /
 the owner-scope tree), not only the `resolve → null` path. That tree is what **s469-effect-scope-dispose** builds
 (not merged when filed); do it once both have landed, rather than a second teardown mechanism here.
+
+**RESOLVED S469** (branch `s469-lift-if-render-gate` round 3, after #1508 landed — the owner-scope tree, no second
+mechanism): (b) was already closed by the tree (an inner row's gate effect remembers its row scope, which dies
+with the outer row: 0 swaps after removal). (a) two changes reuse it — the value-bucket release is registered with
+the row's scope (`_scrml_mount_track`, open while the row factory runs), and each render of an `if … lift` arm
+(`_scrml_lift_arm_run`, emit-reactive-wiring.ts) is now an `as` owner scope through three small 'lift'-chunk
+helpers (`_scrml_lift_arm_scope_open` / `_run` / `_close`, runtime-template.js), which call the tree only when the
+'owner' chunk ships — so a re-render or the arm's end destroys the rows it rendered, and a file without lists
+ships no owner chunk for its arms (the `scrml fix` given-presence verify compares the runtime too). Measured: buckets 2,2,…,2 over 10 arm toggles (was 2 → 4 → 6 → 8) and over 10
+outer-row removals; the live rows alone swap on `@sel` writes. Pins: browser `lift-if-render-gate-s469` "F2".
 
 ### g-while-lift-in-reconciled-row-escapes-the-row-s469 — a `while` loop inside a reconciled `${ for (r of @rows) { … } }` row lifts its markup to the ambient lift target, not into the row — `NEW S469; MED; open`
 <!-- @gap id=g-while-lift-in-reconciled-row-escapes-the-row-s469 sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(the row factory routes lift-expr / if-stmt / for-stmt children to the row fragment; a while-stmt falls to emitLogicNode, whose lift is the global `_scrml_lift(…)`) prov=empirical:S469(s469-lift-if-render-gate round 3, reproduced on main 0a2d747d3) -->

@@ -1567,6 +1567,28 @@ function _scrml_lift(factoryOrElement) {
 // closure at call-time (after module init, so no TDZ issue).
 let _scrml_lift_target = null;
 
+// S469 — an if-lift arm render as an owner scope (§6.7.2 tree). Called by the
+// emitted _scrml_lift_if_group / _scrml_lift_arm_run helper: when the 'owner' chunk ships
+// (a list renders somewhere in the file), each arm render is an "as" scope, so the rows of
+// a list it renders — then or later — are its children and die with the render (their
+// effects never run again; what they registered, a value-bucket release, runs). Without the
+// chunk there are no row scopes to own: the calls are no-ops. The owner helpers are named
+// only here, so a file without lists does not ship the owner chunk for its arms.
+function _scrml_lift_arm_scope_open(host) {
+  if (typeof _scrml_scope_recs === "undefined") return null;
+  const sid = _scrml_scope_open("as", _scrml_mount_owner(host));
+  host._scrml_arm_sid = sid;
+  return sid;
+}
+function _scrml_lift_arm_scope_run(sid, fn) {
+  return sid === null ? fn() : _scrml_in_scope(sid, fn);
+}
+function _scrml_lift_arm_scope_close(host, sid) {
+  if (sid === null) return;
+  if (host._scrml_arm_sid === sid) host._scrml_arm_sid = undefined;
+  _scrml_owner_destroy(sid);
+}
+
 // ---------------------------------------------------------------------------
 // §6.7.3 Scope-aware cleanup registry
 // ---------------------------------------------------------------------------
