@@ -1371,7 +1371,7 @@ function _rowScopeNames(enclosingIterVar: string | null): Set<string> {
  * Fails CLOSED: an `if=` value this cannot lower is refused (E-CG-003) and the gate
  * is emitted as `false` — never dropped.
  */
-function lowerRowScopedEachIfGate(
+export function lowerRowScopedEachIfGate(
   node: any,
   enclosingIterVar: string | null,
   element: "each" | "match" = "each",
