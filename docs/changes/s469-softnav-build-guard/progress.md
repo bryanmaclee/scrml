@@ -48,3 +48,6 @@ The shell had 8 B of headroom (ceiling 6,095). Minimum correct variant (admit + 
 - a second scrml build on the same origin (link-boost to it): different identity → hard nav (test, pack n23).
 - esm: registration-only admit; foreign esm chunks are scoped by the listener checks but not refused (deferred).
 - pre-identity tab: no check exists in code already running — residual, closes as tabs reload.
+
+## Hermeticity finding (merge commit's hook run)
+Order-dependent RED: a test file that evaluates the runtime at GLOBAL scope leaves `_scrml_build_admit` and a fixed `_scrml_build_id` on `globalThis`; a later file in the same `bun test` process that runs another build's chunk with NO runtime (`new Function` loaders) had its chunk refused by the stale admit. Fixed at the three no-runtime loaders (bootstrap `compiler/self-host-v2/slice-m1/harness.js` `evaluateChunks`, `imported-enum-match-binding`, S452 `runGo`): they shadow the name as `undefined` (they ARE the runtime there). Proven against a hostile preload (a global admit that always refuses): unit + integration + conformance 36,904 / 0; slices + `compiler/tests/*.test.js` 5,223 / 0; browser 1,805 / 8 (the baselined names). In a browser this cannot arise — one document runs one runtime.
