@@ -1,4 +1,4 @@
-// Security: `${…}` would splice a runtime string into CSS text — unruled; `@name` is the channel.
+// Security: `${…}` would splice a runtime string into CSS text — never allowed (S469); `@name` is the channel.
 <program>
     let <c:string="red"/>
     #{ p { color: ${@c}; } }

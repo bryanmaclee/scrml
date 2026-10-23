@@ -1,9 +1,12 @@
 // css-injection-pack-s469.test.js — s469-boot-css: the CSS-INJECTION security pack for the bootstrap.
 //
-// The only DATA that reaches CSS in a bootstrap program is a cell's value, through the §25.7 bridge:
-// a `#{}` value's `@cell` prints as `var(--scrml-cell)` and the runtime writes the cell's value to that
-// custom property on `:root` (`rt.cssVar`). Everything else in a sheet is the author's literal source,
-// checked at compile time. So the pack attacks the two walls:
+// SCOPE (narrowed, review F4): this pack covers the `#{}` STYLESHEET only. The only data that reaches a
+// `#{}` sheet is a cell's value, through the §25.7 bridge: a `#{}` value's `@cell` prints as
+// `var(--scrml-cell)` and the runtime writes the cell's value to that custom property on `:root`
+// (`rt.cssVar`). Everything else in a sheet is the author's literal source, checked at compile time.
+// NOT covered: a bound `style=(@c)` attribute, which today writes the cell's whole value into `style`
+// with no CSS guard — docs/known-gaps.md `g-bootstrap-style-attr-bound-value-unguarded-s469`.
+// So the pack attacks the two walls of the `#{}` path:
 //
 //   WALL 1 — compile time (css-syntax.scrml): the sheet is printed inside the page's `<style>`, a
 //   raw-text element only `</style` can end. Every `<` in a `#{}` block — selector, value, string —
@@ -146,8 +149,17 @@ const SOURCE = [
   ["`</style>` in a selector", `p</style><script>x { color: red; }`, "E-CSS-SYNTAX"],
   ["`<!--` in a value", `p { color: <!-- red; }`, "E-CSS-SYNTAX"],
   ["`</STYLE` upper-case in a url", `p { background: url(</STYLE>); }`, "E-CSS-SYNTAX"],
-  ["`${…}` splicing a cell into CSS text", `p { color: \${@c}; }`, "E-BOOTSTRAP-UNSUPPORTED"],
-  ["`${…}` in a selector", `\${@c} { color: red; }`, "E-BOOTSTRAP-UNSUPPORTED"],
+  ["`${…}` splicing a cell into CSS text", `p { color: \${@c}; }`, "E-CSS-SYNTAX"],
+  ["`${…}` in a selector", `\${@c} { color: red; }`, "E-CSS-SYNTAX"],
+  // review F1: a `/*` INSIDE a string is string text — it must not hide the `<` behind it
+  ["`/*` in a string hiding `</style>` (content)", `p::before { content: "/*</style><script>window.pwned=1</script>*/"; }`, "E-CSS-SYNTAX"],
+  ["`/*` in an attribute-selector string", `a[title="/*</style>*/"] { color: red; }`, "E-CSS-SYNTAX"],
+  ["`/*` in an @import string", `@import "/*</style>*/";`, "E-CSS-SYNTAX"],
+  ["`/*` in a custom property's string", `p { --x: "/*</style>*/"; }`, "E-CSS-SYNTAX"],
+  ["`/*` in a §25.2 definition's string", `p { x = "/*</style>*/"; }`, "E-CSS-SYNTAX"],
+  ["`</style>` after an unclosed comment", `p { color: red; } /* </style>`, "E-CSS-SYNTAX"],
+  ["`/*` in a flat block's string", `content: "/*</style>*/";`, "E-CSS-SYNTAX"],
+  ["`<` in a `//` comment's neighbour line", `p { color: red; } // ok\n p::after { content: "</style>"; }`, "E-CSS-SYNTAX"],
   ["`!important`", `p { color: red !important; }`, "E-BOOTSTRAP-UNSUPPORTED"],
 ];
 

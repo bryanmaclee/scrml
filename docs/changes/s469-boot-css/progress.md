@@ -77,3 +77,101 @@ Branch `s469-boot-css` (cut from origin/main `0ff6c93aa`, which includes #1510).
    identifier is a literal CSS value"), and impl#1 does not implement it either (OWNER_QUESTIONS).
 7. **Conformance**: `style/program-scope-overlap-soft` moves UNSUPPORTED → FAIL — it reaches grading now
    and asserts `W-STYLE-CONFLICT-POSSIBLE`; the §65.2 conflict checker is not in the bootstrap (deferred).
+
+## Round 2 (review LAND-W-F/U; rulings scrml-support `f487d21` + `0908198`)
+
+Rulings applied (user-voice-scrml.md S469 "⭐ RULED — `#{}` CSS on the bootstrap" `f487d21`; "⭐ RULED —
+runtime ratchet, scope root, engine in `<empty>`, CSS output" `0908198`):
+
+- (a) **Any malformed `#{}` is E-CSS-SYNTAX** — written into §65.2.5 (new bullet) and §9.1; §34 row updated.
+- (b) **`${}` inside `#{}` is never allowed** — §9.1 normative bullet + §65.4.2 note; the bootstrap now emits
+  E-CSS-SYNTAX (was E-BOOTSTRAP-UNSUPPORTED) in a value and in a selector. No new code (E-CSS-SYNTAX's row covers it).
+- (c) **Component CSS goes inside `renders`** (or a field's variant body there) — §9.1 DQ-7 bullet. The bootstrap
+  already refused `#{}` in a declaration body (E-PARSE-DECL-BODY).
+- (d) **§25.3 retired** (struck, "§65.3.2 governs"); §25.4's use-site half struck with it; §65.14's table row fixed.
+- (e) **DQ-7 → "the page's stylesheet"; either shape conforms** (an inline `<style>` keeps the `<` refusal and the
+  `\3c` re-encode). Decision 1 above is now ruled, not a divergence.
+- (f) **A component's scoped rules match its own root in real browsers** — §9.1 DQ-7 bullet + §25.6 rule 1. css.scrml
+  emits each scoped arm twice: as written (a descendant of the root — inside `@scope` a selector is relative to
+  `:scope` as a DESCENDANT, so `.card {}` never matches the root) and ROOT-ANCHORED, `:scope` in its leftmost compound
+  after any type selector: `:where(.card), :where(:scope.card)` for a flat arm, `.card:hover, :where(:scope).card:hover`
+  for a conditional one (`:where(:scope)` adds no specificity). The donut limit `to ([data-scrml])` still applies.
+  Verified in Chromium (below); slice-m3 `css.test.js` and the slice-m4 shape tests re-pinned.
+- (g) Engine in a top-level `<empty>` — not touched by this change (no §65 text involves it); left to the bootstrap side.
+
+### Chromium run (the real-browser check)
+
+The machine's Chromium is `/usr/bin/chromium` (the reviewer's probes `scope*.mjs` drove it through playwright's
+`chromium.launch({ executablePath: "/usr/bin/chromium" })`; puppeteer's bundled Chrome is not installed, which is why
+the slice-m3 oracle cannot launch here). `slice-m4/css-chromium-s469.test.js` uses the repo's own puppeteer dep with
+that `executablePath`. It is **OPT-IN** (`SCRML_BROWSER_TESTS=1`, binary `$SCRML_CHROMIUM` else `/usr/bin/chromium`):
+CI and the hook have no Chromium, so in the hook it is 4 skipped tests. Recorded run (2026-10-23, Chromium 152, from
+`compiler/self-host-v2`, `SCRML_BROWSER_TESTS=1 bun test slice-m4/css-chromium-s469.test.js`): **4 pass, 0 fail** —
+the root takes `.card` / `.hit` / `*` / `::before`; a child takes `.card > h2`; the component rule beats the
+program-global layer; a nested component's root and subtree, and the page, are not styled by the parent (the donut);
+the program-global `@layer` rule applies; a flat block's inline style applies; the §25.7 bridge resolves and follows a
+click. **Bite:** with the root-anchored arms removed, the root test FAILS (3 pass / 1 fail) — so the check pins (f).
+
+### Findings fixed
+
+- F1 MED — `ltAt` now skips STRINGS first (a `<` inside a string is found even behind a `/*` in it), then comments (an
+  unclosed comment no longer hides what follows). Pack shapes added: content, attribute selector, `@import` string,
+  `--x`, §25.2 definition, flat block, `</style>` after an unclosed comment, a `//`-comment neighbour line.
+- F3 — `//` is a comment in CSS (SPEC §4.7 says it is unchanged in CSS): at a line start or after whitespace, to the
+  end of the line, so `url(http://x)` / `a//b` stay content (the S444 free-text reading, as the PA directed). The block
+  is masked once (`maskLineComments`, offsets kept) and `blockEnd` / `blockStop` skip it. Corpus: 88 `.scrml` files
+  with `#{` under samples/ examples/ docs/ stdlib/ — 0 E-CSS-SYNTAX. The §65.13 worked example: its `#{}` blocks (with
+  their trailing `//` comments) report no E-CSS-SYNTAX; the program as a whole does not compile on the bootstrap
+  (`<theme>`, `<defaults>`, style values, `&` nesting, `props={…}`, legacy `<mode> = .Light` — all spec-ahead).
+- F4 — the injection pack's header narrowed to the `#{}` stylesheet; `<p style=(@c)>` filed:
+  `g-bootstrap-style-attr-bound-value-unguarded-s469` (MED) — it should NOT reuse `cssValueOf` as is (one value vs a
+  declaration list); recommended: a `cssDeclarationsOf` guard that admits each `prop: value` through `cssValueOf`.
+- F5 — the malformed-`@import` messages rewritten (they no longer show quotes while forbidding quotes); CSS escapes in
+  class / id names are accepted and printed as written (`.\31 0`, `.a\:b` — safe: no raw `<` can be in a block, and
+  `\3c` is text); a class / id starting with a digit names the escape to write.
+- F6 — filed `g-bootstrap-css-residuals-s469` (LOW): `url(@c)` literal, `:root` / `:host` in a scope matching nothing,
+  an author `data-scrml` off the root colliding with the scope key. Fixed here: an extra `}` directly after a block is
+  E-CSS-SYNTAX (consumed); `-->` / `--x` / `_x` are not element names (E-CSS-SYNTAX).
+- F7 — README and NERDME say the guard refuses gradients, transforms, quoted font names and `url()`.
+
+### Proposed edits to scrml-support `docs/workability/bootstrap-map-2026-10-22.md` (for the PA to apply)
+
+- **§1 item 6** ("No author CSS, though the emitter is done.") → "Author CSS (`#{}`) compiles: program-global rules,
+  component `@scope` (root included), flat root `style=`, `@cell` values; not yet `@media` / at-rule blocks, `<theme>`,
+  `<defaults>`, style values, or the §65.2 conflict checker."
+- **Row 9** (CSS contexts `#{}`): status REFUSED → **PARTIAL**. Built: "`#{}` at file top / program / plain element →
+  `@layer global`; in `renders` → the component's `@scope` donut with root-anchored arms; a flat block on the root →
+  inline `style=`; `@charset` / `@import` hoisted; §25.2 definitions; `//` and `/* */` comments; E-CSS-SYNTAX for any
+  malformed block (ruled S469), every `<` refused". Missing: "`@media` / `@supports` / `@container` / `@keyframes` /
+  `@font-face` / `@layer` blocks, CSS nesting / `&`, `@apply`, `!important` (§65.7 unclassified), the §65.2 conflict
+  checker (`style/program-scope-overlap-soft` FAILs on it), per-instance `@field`". Evidence: "`css-syntax.scrml`;
+  analyze `cssPass`; lower `coreCss` / `stampViews`; `print.scrml` `sheetOf` / `cssVarStmts`; `slice-m4/css-s469.test.js`,
+  `css-injection-pack-s469.test.js`, `css-chromium-s469.test.js` (opt-in, Chromium); `acceptance/css` (10); change
+  `s469-boot-css`". Size: S–M (at-rule blocks: a Core node + emitter; the conflict checker: M).
+- **Row 25** (CSS variable syntax): UNSTARTED → **PARTIAL**: "§25.2 `name = value;` → `--name` inside a rule; `@cell`
+  → `var(--scrml-cell)` + the guarded `:root` bridge (`rt.cssVar` / `cssValueOf`); §25.3 retired (S469). Missing:
+  `<theme>` tokens (`var(--name)`), per-instance fields, bool / enum cells."
+- **Row 65** (Native CSS model): keep PARTIAL; Missing becomes "`<theme>` / `<defaults>` / style values (Wave 2), the
+  §65.2 conflict checker, `!important` interop, at-rule blocks"; drop "no author styles reach it" and the
+  `print.scrml:2317` / `parse.scrml:2744` evidence (both lines are gone).
+- **The `#{}` row of the blocker table** (line ~380): "REFUSED at parse; emitter built but unfed" → "compiles (program,
+  component, flat root, `@cell`); at-rule blocks and the conflict checker missing".
+- **W0 item 0d** (CSS wiring): mark DONE (change `s469-boot-css`); the follow-on is "`<theme>` (blocked on O17) and
+  at-rule blocks".
+
+### OWNER_QUESTIONS remaining (after the S469 rulings)
+
+1. `!important` (§65.7 internal vs interop) — rec: E-STYLE-IMPORTANT-INTERNAL when the file has no `@import`.
+2. Flat blocks outside a component root (§9.1 ⚑ OPEN) — rec: error everywhere but the root.
+3. A top-level `#{}` in a module with no `<program>` — rec: it joins the importing program's global layer.
+4. Per-instance `@field` in a component's CSS — rec: a per-instance custom property on the instance root.
+5. Bool / enum cells through the bridge — rec: an enum's tag as an identifier value.
+6. `g-bootstrap-style-attr-bound-value-unguarded-s469` — rec: guard `style=(expr)` with a declaration-list allow-list.
+
+### After round 2 (origin/main `dba986eb9` merged)
+
+- slices: 3155 pass / 4 skip (the opt-in Chromium file) / 0 fail (3160 tests, 87 files).
+- bootstrap-conformance (1809 cases after the merge): PASS 218 = main's 218 · FAIL 52 (main 51; +1 is
+  `style/program-scope-overlap-soft`, now graded, wanting the conflict checker) · UNSUPPORTED 858 (main 859) · CRASH 0.
+- snippet-gate --strict 0 · claim-gate --strict 0 · SPEC-INDEX regenerated · known-gaps counts regenerated
+  (`bun scripts/state.ts --write`, only the count hunk moved).

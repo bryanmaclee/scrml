@@ -94,9 +94,10 @@ describe("placement and the printed sheet (§9.1 DQ-6 / DQ-7, §65.5, §65.8)", 
     expect(author(css)).toBe([
       "@layer reset, global;",
       '@scope ([data-scrml="card"]) to ([data-scrml]) {',
-      "  :where(.card > h2), .card:hover { color: green; }",
-      '  [data-k="1"] { margin: 0; }',
-      "  p::first-line { color: red; }",
+      // each arm twice: as written (a descendant) and root-anchored (ruled S469 "include the root")
+      "  :where(.card > h2), :where(:scope.card > h2), .card:hover, :where(:scope).card:hover { color: green; }",
+      '  [data-k="1"], :where(:scope)[data-k="1"] { margin: 0; }',
+      "  p::first-line, p:where(:scope)::first-line { color: red; }",
       "}",
     ].join("\n"));
     // the `>` combinator is printed verbatim in the raw-text `<style>`, never as `&gt;`
@@ -106,7 +107,7 @@ describe("placement and the printed sheet (§9.1 DQ-6 / DQ-7, §65.5, §65.8)", 
 
   test("§65.2.4 R1: a universal / bare-root arm is emitted FIRST in its scope (a floor below specific rules)", () => {
     const core = clean(P(`        <k t="a"/>`, `    <k t:string/>\n    renders <div>#{ .x { padding: 1px; } * { padding: 0; } }<p class="x">\${t}</p></div>\n`));
-    expect(author(sheetOf(core))).toContain(':where(*) { padding: 0; }\n  :where(.x) { padding: 1px; }');
+    expect(author(sheetOf(core))).toContain(':where(*), :where(*:scope) { padding: 0; }\n  :where(.x), :where(:scope.x) { padding: 1px; }');
   });
 
   test("once any component has a scoped sheet, EVERY component root is stamped (the donut's limit); with none, nothing is", () => {
@@ -179,7 +180,7 @@ describe("diagnostics — E-CSS-SYNTAX (malformed CSS) with spans the author can
     ["an unparseable selector (§65.2.5 fail loud)", `        p..x { color: red; }`, "p..x", "does not parse"],
     ["an unclosed `(`", `        p { width: calc(1px + 2px; }`, " calc(1px + 2px; ", "unclosed `(`"],
     ["a stray `@`", `        p { color: @; }`, "@", "stray `@`"],
-    ["a malformed `@import`", `        @import foo;`, "@import foo", "takes a url"],
+    ["a malformed `@import`", `        @import foo;`, "@import foo", "needs a url"],
   ]) {
     test(name, () => {
       const d = only(G(css));
@@ -213,7 +214,6 @@ describe("diagnostics — ruled CSS the bootstrap refuses by name, and the use-s
     ["`&` nesting", `        &.x { color: red; }`, "&.x", "`&`"],
     ["`@apply` (§26.8)", `        p { @apply p-4; }`, "@apply", "§26.8"],
     ["`!important` (§65.7 unclassified)", `        p { color: red !important; }`, "!important", "§65.7"],
-    ["`${…}` in a value (unruled; `@name` is the channel)", `        p { color: \${@c}; }`, "${", "§25.7"],
     ["a bool cell", `        p { color: @b; }`, "@b", "a bool cell"],
     ["a flat block outside a component's root (§9.1 ⚑ OPEN)", `        color: red;`, null, "§9.1"],
     ["a flat block mixed with rules", `        color: red;\n        p { color: blue; }`, null, "mixes"],
@@ -225,6 +225,12 @@ describe("diagnostics — ruled CSS the bootstrap refuses by name, and the use-s
       expect(d.message).toContain(words);
     });
   }
+  test("`${…}` inside `#{}` is never allowed (ruled S469): E-CSS-SYNTAX, in a value and in a selector", () => {
+    const v = only(G(`        p { color: \${@c}; }`));
+    expect([v.code, v.at]).toEqual(["E-CSS-SYNTAX", "${"]);
+    expect(v.message).toContain("never allowed");
+    expect(only(G(`        \${@c} p { color: red; }`)).code).toBe("E-CSS-SYNTAX");
+  });
   test("`@name` naming no token and no cell → E-THEME-TOKEN-UNKNOWN at the reference (§65.3.2); an int cell is fine", () => {
     const d = only(G(`        p { color: @nope; }`));
     expect([d.code, d.at]).toEqual(["E-THEME-TOKEN-UNKNOWN", "@nope"]);
@@ -262,7 +268,7 @@ describe("diagnostics — ruled CSS the bootstrap refuses by name, and the use-s
     ], "app.scrml");
     expect(r.diags).toEqual([]);
     const html = mods.print.printProgram(r.core, "x.client.js", "scrml-runtime.js").html;
-    expect(html).toContain('@scope ([data-scrml="card"]) to ([data-scrml]) {\n  :where(.c) { color: red; }\n}');
+    expect(html).toContain('@scope ([data-scrml="card"]) to ([data-scrml]) {\n  :where(.c), :where(:scope.c) { color: red; }\n}');
     expect(html).toContain('<div class="c" data-scrml="card">');
   });
 });
@@ -346,5 +352,38 @@ describe("`@name` resolution — the nearest scope first", () => {
   test("a member path `@a.b` is refused by name (it would print `var(--scrml-a).b`)", () => {
     const d = only(`<program>\n    <a:string="red"/>\n    #{ p { color: @a.b; } }\n    <main><p>x</p></main>\n</program>\n`);
     expect([d.code, d.at]).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "@a.b"]);
+  });
+});
+
+describe("round 2 (review F3 / F5 / F6) — `//` comments, escapes, stray braces", () => {
+  const G = (css) => `<program>\n    #{\n${css}\n    }\n    <main><p>x</p></main>\n</program>\n`;
+  test("§4.7: a `//` comment at a line start or after whitespace is a comment; `url(http://…)` and `a//b` stay content", () => {
+    const core = clean(G(`        // a heading rule\n        h1 { color: red; } // trailing\n        p { background: url(http://x.example/a.png); } // done`));
+    const css = author(sheetOf(core));
+    expect(css).toContain("h1 { color: red; }");
+    expect(css).toContain("p { background: url(http://x.example/a.png); }");
+    expect(css).not.toContain("heading");
+    expect(css).not.toContain("trailing");
+  });
+  test("a `}` or `<` inside a `//` comment is comment text (it neither closes the block nor is refused)", () => {
+    const core = clean(G(`        p { color: red; } // } <b> }\n        a { color: blue; }`));
+    expect(author(sheetOf(core))).toContain("a { color: blue; }");
+  });
+  test("CSS escapes in class / id names are accepted and printed as written (`.\\31 0`, `.a\\:b`)", () => {
+    const core = clean(G(`        .\\31 0, .a\\:b, #\\31 x { color: red; }`));
+    expect(author(sheetOf(core))).toContain(".\\31 0, .a\\:b, #\\31 x { color: red; }");
+  });
+  test("a class starting with a digit names the escape to write", () => {
+    const d = only(G(`        .10px { color: red; }`));
+    expect(d.code).toBe("E-CSS-SYNTAX");
+    expect(d.message).toContain("escape it: `.\\31 0px`");
+  });
+  test("`-->` / `--x` are not element names", () => {
+    expect(only(G(`        --> p { color: red; }`)).code).toBe("E-CSS-SYNTAX");
+  });
+  test("an extra `}` after a block is E-CSS-SYNTAX (it would be page text)", () => {
+    const src = `<program>\n    #{ p { color: red; } }\n    }\n    <main><p>x</p></main>\n</program>\n`;
+    const d = only(src);
+    expect([d.code, d.at]).toEqual(["E-CSS-SYNTAX", "}"]);
   });
 });

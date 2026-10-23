@@ -196,7 +196,7 @@ const STATUS = {
   "css/neg-missing-semicolon": ["PASS", ["E-CSS-SYNTAX"]],
   "css/neg-bad-selector": ["PASS", ["E-CSS-SYNTAX"]],
   "css/neg-style-breakout": ["PASS", ["E-CSS-SYNTAX"]],
-  "css/neg-interp": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "css/neg-interp": ["PASS", ["E-CSS-SYNTAX"]],
   "css/neg-unknown-ref": ["PASS", ["E-THEME-TOKEN-UNKNOWN"]],
   // `@media` is ruled CSS (§65.2.2); the bootstrap's reader does not carry block at-rules yet
   "css/media-unsupported": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED"]],

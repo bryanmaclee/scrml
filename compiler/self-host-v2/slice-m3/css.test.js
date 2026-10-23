@@ -45,7 +45,7 @@ describe("emitter — §66.17 T3 (hand-built Cores)", () => {
       ':root[data-scrml-theme-mode="Light"] { --ink: #0f172a; }',
       ':root[data-scrml-theme-mode="Dark"] { --ink: #e2e8f0; }',
       '@scope ([data-scrml="Card"]) to ([data-scrml]) {',
-      "  :where(.card) { color: var(--ink); background-color: var(--brand); }",
+      "  :where(.card), :where(:scope.card) { color: var(--ink); background-color: var(--brand); }",
       "}",
     ].join("\n"));
   });
@@ -78,7 +78,7 @@ describe("emitter — §66.17 T3 (hand-built Cores)", () => {
   test("§65.8: a hoisted @charset is the sheet's first bytes; a pseudo-element arm stays unwrapped", () => {
     const css = C.emitCss(K.charsetUnit());
     expect(css.startsWith('@charset "UTF-8";\n@scope ([data-scrml="C"]) to ([data-scrml]) {')).toBe(true);
-    expect(css).toContain('  .c::before { content: "é"; }');
+    expect(css).toContain('  .c::before, :where(:scope).c::before { content: "é"; }');
   });
 });
 
@@ -98,9 +98,10 @@ describe("emitter — sheet order, flat specificity, the floor", () => {
   });
 
   test("§65.2.5: unconditional arms :where()-wrapped one by one (never :is()); conditional arms and pseudo-elements unwrapped", () => {
-    expect(css).toContain(":where(.card .title), :where(ul > li) { margin: 0; }");
-    expect(css).toContain(":where(#a + * ~ p) { width: calc(var(--scrml-count) * 1px); }");
-    expect(css).toContain('.btn:hover, li:not(.x), input[type="submit"], .card::before { color: red; }');
+    expect(css).toContain(":where(.card .title), :where(:scope.card .title), :where(ul > li), :where(ul:scope > li) { margin: 0; }");
+    expect(css).toContain(":where(#a + * ~ p), :where(:scope#a + * ~ p) { width: calc(var(--scrml-count) * 1px); }");
+    // s469-boot-css round 2: each scoped arm has its root-anchored twin (ruled S469, scrml-support 0908198)
+    expect(css).toContain('.btn:hover, :where(:scope).btn:hover, li:not(.x), li:where(:scope):not(.x), input[type="submit"], input:where(:scope)[type="submit"], .card::before, :where(:scope).card::before { color: red; }');
     expect(css).not.toContain(":is(");
   });
 
@@ -117,7 +118,7 @@ describe("emitter — sheet order, flat specificity, the floor", () => {
 </program>
 `;
     const out = cssOf(src);
-    expect(out).toContain("  :where(*) { padding: 0; }\n  :where(.btn) { padding: 16px; }\n  :where(.x) { padding: 0; }");
+    expect(out).toContain("  :where(*), :where(*:scope) { padding: 0; }\n  :where(.btn), :where(:scope.btn) { padding: 16px; }\n  :where(.x), :where(:scope.x) { padding: 0; }");
   });
 });
 
@@ -126,7 +127,7 @@ describe("shim — legacy mappings (graded through the CSS seam)", () => {
     const out = cssOf(caseSource("style/theme-emission-clean"));
     expect(out).toContain(":root { --ink: #0f172a; --bg: #ffffff; }");
     expect(out).toContain(':root[data-scrml-theme-mode="Dark"] { --ink: #f8fafc; --bg: #0f172a; }');
-    expect(out).toContain("  :where(.card) { padding: 16px; color: var(--ink); background: var(--bg); }");
+    expect(out).toContain("  :where(.card), :where(:scope.card) { padding: 16px; color: var(--ink); background: var(--bg); }");
   });
 
   test("`<program reset=\"none\">` drops the reset and the layer statement", () => {

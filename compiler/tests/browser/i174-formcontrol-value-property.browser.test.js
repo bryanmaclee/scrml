@@ -24,6 +24,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { chunkCellKey } from "../helpers/chunk-scope.js";
 import { tmpdir } from "os";
 
 // The adopter's exact repro (GH #174).
@@ -104,9 +105,12 @@ describe("i174 (browser) §2 — type-then-clear executed DOM", () => {
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
+    // S469: cells are chunk-namespaced since BUG-6 (#180) — the BARE global accessors key on
+    // `<token>$name`, so a bare "name" read/wrote a cell the program never declared.
+    const cellKey = chunkCellKey(clientJs);
     return {
-      set: (name, val) => globalThis.__scrml_set__(name, val),
-      get: (name) => globalThis.__scrml_get__(name),
+      set: (name, val) => globalThis.__scrml_set__(cellKey(name), val),
+      get: (name) => globalThis.__scrml_get__(cellKey(name)),
       input: () => document.querySelector("input"),
       button: () => document.querySelector("button"),
     };

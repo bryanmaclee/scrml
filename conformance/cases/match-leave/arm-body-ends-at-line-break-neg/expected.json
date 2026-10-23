@@ -1,9 +1,9 @@
 {
   "id": "match-leave-arm-body-ends-at-line-break-neg",
-  "description": "A single-expression arm body ends at its line break: the `\"orphan\"` line after `.A :> return` is not part of the arm, and a line at arm level that is no arm is a parse error (E-PARSE-001), not a silently dropped statement and not `return \"orphan\"`.",
+  "description": "A single-expression arm body ends at its line break: the `\"orphan\"` line after `.A :> return` is not part of the arm, and a line at arm level that is no arm is a parse error (E-PARSE-001), not a silently dropped statement and not `return \"orphan\"`. (impl#1-legacy dialect — see rationale.)",
   "language-version": "1.0",
   "spec": "§7.2.2",
-  "rationale": "§7.2.2 rule 8: \"`return` ends at the line break\"; \"Arm heads\": inside a `match { … }` body \"a line at that level begins an arm\" and a line that does not form an arm \"is a parse error\". impl#1 joined the lines into `return return \"orphan\"` (dpa-068 D8); with the extent fixed and no arm-level check, the line would have been dropped silently.",
+  "rationale": "IMPL#1-LEGACY behaviour (S469, dpa-073 F5): this case pins impl#1's newline-terminated reading, which impl#1 keeps as a carried divergence — it is NOT the language rule. Under SPEC §7.2.2 as rewritten S469 (dpa-073 F1 (a)) a line break is whitespace, a leave operand ends at the arm's `,` or the list's `}` (§18.2 \"Extent\"), and arms are a comma list; this source (no arm commas, no `;`) is not ruled-dialect input. Pre-S469 rationale, kept for the record: §7.2.2 (S446) rule 8 \"`return` ends at the line break\" and \"Arm heads\" made the `\"orphan\"` line a parse error; impl#1 had joined the lines into `return return \"orphan\"` (dpa-068 D8).",
   "expect": {
     "codes": [
       "E-PARSE-001"

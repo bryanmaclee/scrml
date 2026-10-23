@@ -816,20 +816,29 @@ export function sessionNumOf(subj: string): string | null {
  */
 const NO_SESSIONS_SENTINEL = "_(no session-wrap commits found)_";
 
+// S469 (s469-spec-small round 3): the walk pages through the WHOLE log until `n` anchors are found.
+// It used to read a fixed `git log -n 600` window, so the section's population depended on how many
+// commits sat above the last wraps on the current branch: main itself yielded 6 entries, not 8, and
+// `--check` failed there while a branch with a different commit count wrote a different section.
+const RECENT_SESSIONS_PAGE = 2000;
 function recentSessions(n: number): string {
-  const r = sh("git", ["log", "--abbrev=9", "--pretty=%h %s", "-n", "600"]);
   const seen = new Set<string>();
   const picked: { sha: string; subj: string }[] = [];
-  for (const line of r.stdout.split("\n")) {
-    const sp = line.indexOf(" ");
-    const sha = sp >= 0 ? line.slice(0, sp) : line;
-    const subj = sp >= 0 ? line.slice(sp + 1) : "";
-    if (!isSessionClose(subj)) continue;
-    const sess = sessionNumOf(subj);
-    if (sess && seen.has(sess)) continue; // one anchor per session (newest close commit)
-    if (sess) seen.add(sess);
-    picked.push({ sha, subj });
-    if (picked.length >= n) break;
+  for (let skip = 0; picked.length < n; skip += RECENT_SESSIONS_PAGE) {
+    const r = sh("git", ["log", "--abbrev=9", "--pretty=%h %s", "-n", String(RECENT_SESSIONS_PAGE), "--skip", String(skip)]);
+    const page = r.stdout.split("\n").filter((l) => l.length > 0);
+    for (const line of page) {
+      const sp = line.indexOf(" ");
+      const sha = sp >= 0 ? line.slice(0, sp) : line;
+      const subj = sp >= 0 ? line.slice(sp + 1) : "";
+      if (!isSessionClose(subj)) continue;
+      const sess = sessionNumOf(subj);
+      if (sess && seen.has(sess)) continue; // one anchor per session (newest close commit)
+      if (sess) seen.add(sess);
+      picked.push({ sha, subj });
+      if (picked.length >= n) break;
+    }
+    if (page.length < RECENT_SESSIONS_PAGE) break; // the log is exhausted
   }
   if (picked.length === 0) return NO_SESSIONS_SENTINEL;
   const lines: string[] = [];
