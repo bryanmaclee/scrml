@@ -1321,7 +1321,7 @@ The tier ladder (§1) is "promotion is mechanical and additive." Promotion ergon
 - SPEC §56 — full normative spec (fire conditions, message shapes, CLI flag set, exit codes, formatting-preservation invariant)
 - Primer §1 — tier ladder framing
 - Primer §11 — anti-pattern row pointing here
-- `docs/articles/tier-ladder-promotion-devto-2026-05-04.md` — the dev.to article
+- `docs/articles/archive/tier-ladder-promotion-devto-2026-05-04.md` — the dev.to article (archived S469, superseded dialect)
 - `docs/changes/promotion-ergonomics/` — dispatch artifacts (SCOPE, SURVEY-NOTE, progress)
 
 ---

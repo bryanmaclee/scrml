@@ -1,11 +1,11 @@
-// 02-counter.scrml — reactive state, V5-strict declaration form.
+// 02-counter.scrml — reactive state: a writable `let` declaration, touched as `@count`.
 
 <program>
 
-  <count> = 0
+  let <count:int=0/>
 
-  function inc() { @count = @count + 1 }
-  function dec() { @count = @count - 1 }
+  function inc() { @count = @count + 1; }
+  function dec() { @count = @count - 1; }
 
   <div>
     <h1>Counter: ${@count}</h1>

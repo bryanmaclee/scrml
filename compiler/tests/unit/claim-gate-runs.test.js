@@ -43,13 +43,13 @@ describe("scripts/claim-gate.js runs", () => {
   test("--report: tallies pass / skip / fail and exits 0", () => {
     const r = run("--report");
     expect(r.stderr).not.toContain("is not defined");
-    expect(r.stdout).toContain("claim-gate: 1 passed, 1 skipped, 1 failed (3 total).");
+    expect(r.stdout).toContain("claim-gate: 1 passed, 1 skipped, 0 snippet-gated, 0 spec-ahead, 1 failed (3 total).");
     expect(r.status).toBe(0);
   });
 
   test("gate mode: the failing block exits 1 and is named in the detail", () => {
     const r = run();
-    expect(r.stdout).toContain("claim-gate: 1 passed, 1 skipped, 1 failed (3 total).");
+    expect(r.stdout).toContain("claim-gate: 1 passed, 1 skipped, 0 snippet-gated, 0 spec-ahead, 1 failed (3 total).");
     expect(r.stderr).toContain("block #3 — compile-fail");
     expect(r.status).toBe(1);
   });

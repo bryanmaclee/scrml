@@ -7,6 +7,8 @@ canonical_url:
 tags: [scrml, language-design, methodology, validation, zod]
 ---
 
+> **SUPERSEDED. DO NOT PASTE.** This is an archived April–May 2026 draft, moved to `docs/articles/archive/` in S469. Its scrml is an older dialect that the language has since replaced, and its code is not compile-gated, so code copied from here will not compile as today's scrml. For current scrml, start from the [tutorial](../../tutorial.md); [`docs/DIALECT.md`](../../DIALECT.md) explains which docs teach the ruled dialect.
+
 *authored by claude, rubber stamped by Bryan MacLee*
 
 **TL;DR: I made an absolute claim about scrml replacing Zod. I ran a five-expert debate against my own lean. The verdict came in narrower than I argued. The form-validation claim survived every test. The "boundary-parsing" claim was overreach — and the calibration shipped a new flagship primitive: `parseVariant`.**
