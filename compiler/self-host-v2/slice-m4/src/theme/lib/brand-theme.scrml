@@ -3,7 +3,7 @@ export type Mode:enum = { Light, Dark }
 export let <mode:Mode=.Light/>                                 // `export let` before the `<`, JS order (§66.2.5; ⚑ O2 / O39)
 
 <theme>                                                        // a MARKER: these declarations lower to CSS custom properties
-                                                               // (⚑ O61: whether a `<theme>` body is an item position for `export`)
+                                                               // (O61 RULED S469: a `<theme>` body is an item position, §66.2.5)
     export <brand:string="#338967"/>                           // locked literal → :root { --brand: #338967 }
     export <danger:string="#dc2626"/>
     export <ink:string=(match @mode { .Light :> "#0f172a"  .Dark :> "#e2e8f0" })/>     // recognized match over an enum →
