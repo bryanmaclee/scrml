@@ -3,26 +3,26 @@
 <program>
 
   type LoadPhase:enum = {
-    Idle
-    Loading
-    Loaded(rows: number)
-    Failed(msg: string)
+    Idle,
+    Loading,
+    Loaded(rows: int),
+    Failed(msg: string),
   }
 
-  <phase>: LoadPhase = .Idle
+  let <phase:LoadPhase=.Idle/>
 
   function load() {
-    @phase = .Loading
-    @phase = LoadPhase.Loaded(42)        // fake result for the demo
+    @phase = .Loading;
+    @phase = LoadPhase.Loaded(42);        // fake result for the demo
   }
 
   // The value-return form of match: compute a value from the variant.
-  const <status> = match @phase {
-    .Idle        :> "idle"
-    .Loading     :> "loading"
-    .Loaded(n)   :> "loaded"
-    .Failed(msg) :> "failed"
-  }
+  <status:string=(match @phase {
+    .Idle        :> "idle",
+    .Loading     :> "loading",
+    .Loaded(n)   :> "loaded",
+    .Failed(msg) :> "failed",
+  })/>
 
   <p>Status: ${@status}</p>
 
@@ -36,11 +36,11 @@
     </Loading>
     <Loaded(n)>
       <p>Got ${n} rows.</p>
-      <button onclick={ @phase = .Idle }>Reset</button>
+      <button onclick={ @phase = .Idle; }>Reset</button>
     </Loaded>
     <Failed(msg)>
       <p class="err">Failed: ${msg}</p>
-      <button onclick={ @phase = .Idle }>Try again</button>
+      <button onclick={ @phase = .Idle; }>Try again</button>
     </Failed>
   </match>
 

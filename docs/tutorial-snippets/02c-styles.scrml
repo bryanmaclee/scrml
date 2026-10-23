@@ -2,8 +2,8 @@
 
 <program>
 
-  <count> = 0
-  function inc() { @count = @count + 1 }
+  let <count:int=0/>
+  function inc() { @count = @count + 1; }
 
   #{
     .card {

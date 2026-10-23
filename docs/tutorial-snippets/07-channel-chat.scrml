@@ -2,21 +2,23 @@
 
 <program>
 
-  <channel name="chat" topic="lobby">
-    <messages> = []
+  type Message:struct = { author: string, body: string, ts: number }
 
-    function postMessage(author, body) {
-      @messages = [...@messages, { author, body, ts: Date.now() }]
+  <channel name="chat" topic="lobby">
+    <messages:Message[free, append]=[]/>
+
+    function postMessage(author: string, body: string) {
+      @messages.append({ author: author, body: body, ts: Date.now() });
     }
   </>
 
-  <username> = ""
-  <draft>    = ""
+  let <username:string=""/>
+  let <draft:string=""/>
 
   function send() {
-    if (@draft.trim() == "" || @username.trim() == "") return
-    postMessage(@username, @draft)
-    reset(@draft)
+    if (@draft.trim() == "" || @username.trim() == "") { return; }
+    postMessage(@username, @draft);
+    reset(@draft);
   }
 
   <div class="chat">

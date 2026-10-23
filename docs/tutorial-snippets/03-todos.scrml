@@ -1,29 +1,35 @@
-// 03-todos.scrml — in-memory todos with for/lift, components, and bind:value.
+// 03-todos.scrml — in-memory todos: a tape, a component declaration, for/lift, bind:value.
 
 <program>
 
-  type Todo:struct = { id: number, body: string, done: boolean }
+  type Todo:struct = { id: int, body: string, done: bool }
 
-  <items>: Todo[] = []
-  <draft> = ""
-  <nextId> = 1
+  <items:Todo[free, append, remove, writable]=[]/>
+  let <draft:string=""/>
+  let <nextId:int=1/>
 
   function add() {
-    if (@draft == "") return
-    @items = [...@items, { id: @nextId, body: @draft, done: false }]
-    @nextId = @nextId + 1
-    @draft = ""
+    if (@draft == "") { return; }
+    @items.append({ id: @nextId, body: @draft, done: false });
+    @nextId = @nextId + 1;
+    @draft = "";
   }
 
-  function toggle(id) {
-    @items = @items.map(t => t.id == id ? { ...t, done: !t.done } : t)
+  function flipped(t: Todo) -> Todo {
+    let out: Todo = { id: t.id, body: t.body, done: !t.done };
+    return out;
   }
 
-  function remove(id) {
-    @items = @items.filter(t => t.id != id)
+  function toggle(id: int) {
+    @items = @items.map(t => t.id == id ? flipped(t) : t);
   }
 
-  const TodoRow = <li class="row" props={ item: Todo }>
+  function remove(id: int) {
+    @items = @items.filter(t => t.id != id);
+  }
+
+  <todoRow item:Todo/>
+  renders <li class="row">
     <input type="checkbox" checked=item.done onchange=toggle(item.id)/>
     <span class:done=item.done>${item.body}</span>
     <button onclick=remove(item.id)>x</button>
@@ -44,8 +50,8 @@
     </form>
     <ul>
       ${
-        for (let t of @items) {
-          lift <TodoRow item=t/>
+        for (t of @items) {
+          lift <todoRow item=t/>;
         }
       }
     </ul>
