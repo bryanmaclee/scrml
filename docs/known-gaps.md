@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 262 | 4 |
 | MED | 679 | 8 |
-| LOW | 467 | 0 |
+| LOW | 468 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -27205,3 +27205,9 @@ SPEC §45: single `==`, structural. Structural equality is applied only in the t
 <!-- @gap id=g-eq-server-raw-text-loose-eq-s468 sev=MED status=open locus=compiler/src/codegen/rewrite.ts(serverPasses — no counterpart of client Pass 18 rewriteEqualityOps / lowerEqualityOps) prov=review:s468-structural-eq-everywhere-S239;dispatch:s468-structural-eq-everywhere -->
 
 The client string pipeline's last pass now lowers `==` per §45.4 (`lowerEqualityOps`); `serverPasses` (`rewriteServerExpr` / `rewriteServerBlockBody`) has no equality pass at all, so any server-side `==` that reaches the string fallback ships as JS loose `==` (coercing: `0 == ""` is true) — neither structural nor `===`. Not reached in the corpus (S468 differential): server-fn `match` arms, `for` bodies, and ternaries take the structured path. Fix direction: run `lowerEqualityOps` as the last server pass (the server inlines `_scrml_structural_eq` when referenced — `emit-server.ts` SERVER_STRUCTURAL_EQ_HELPER).
+
+### g-bootstrap-local-shadows-state-accepted-s469 — the bootstrap accepts a local that shadows a registered state name (`let <count:int=0/>` + `function f() { let count = 5; @count = count; }` compiles) — `NEW S469; LOW; open`
+
+<!-- @gap id=g-bootstrap-local-shadows-state-accepted-s469 sev=LOW status=open locus=searched:compiler/self-host-v2/*.scrml(grep `COLLIDES` — zero hits; no E-NAME-COLLIDES-STATE emitter) prov=empirical:s469-docs-migrate-3-round-3-probe;review:S469-docs-migrate-3-final-review-item-5 -->
+
+SPEC §6.1 / §34: a local identifier declaration that uses the same name as a registered state cell in scope is `E-NAME-COLLIDES-STATE` (Error). Probe (bootstrap, `bun scripts/scrml-boot.ts compile`): `let <count:int=0/>` at program level and `let count = 5;` inside a function body compiles with no diagnostic. impl#1 emits the code. NERDME.md ("State and reactivity" and "Not in the bootstrap yet") says the bootstrap does not check it yet. Fix direction: the bootstrap's scope pass refuses a `let` / `const` / parameter / arm binder whose name is a state cell in scope.

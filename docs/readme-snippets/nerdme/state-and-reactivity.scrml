@@ -1,18 +1,26 @@
-// NERDME.md "State and reactivity" — gated by scripts/snippet-gate.js.
+// NERDME.md "State and reactivity" — compiled by the bootstrap (scripts/snippet-gate.js).
 // If this stops compiling, the NERDME section citing it is making a false claim.
 <program>
-<count> = 0
-<userName req length(>=2)> = <input/>
-const <doubled> = @count * 2
-<formRes>
-    <name> = ""
-    <email> = ""
+
+let <count:int=0/>
+<doubled:int=(@count * 2)/>
+
+<profile:struct>
+    let <name:string="" req length(>=2)/>
+    renders <input type="text" bind:value=@name/>
+    let <email:string=""/>
 </>
-<agree> = false
-<result> = not
-<button onclick={ @count = @count + 1; @formRes.email = "alice" }>+</button>
-<userName/>
-<input type="checkbox" bind:checked=@agree/>
-<p>${@count} ${@doubled} ${@formRes.name} ${@userName}</p>
-<p if=(@result is not)>none yet</p>
-</>
+renders <label>Name <*name/></label>
+
+let <agree:bool=false/>
+let <result:int | not=not/>
+
+<main>
+    <button onclick={ @count = @count + 1; @profile.email = "alice"; }>+</button>
+    <*profile/>
+    <input type="checkbox" bind:checked=@agree/>
+    <p>${@count} ${@doubled} ${@profile.name} ${@profile.email}</p>
+    <p if=(@result is not)>none yet</p>
+</main>
+
+</program>

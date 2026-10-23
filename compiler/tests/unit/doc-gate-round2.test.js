@@ -210,10 +210,30 @@ describe("claim-gate end to end", () => {
     expect(r.status).toBe(1);
   }, 120_000);
 
-  test("A7: docs/articles/archive is not in the claim-gate surface", () => {
-    const r = claim("--list", "docs/articles");
+  test("A7: docs/articles/archive and the bannered dated articles are not in the claim-gate surface; the ruled kickstarter is", () => {
+    // The declared surface (no path argument), so the excludes apply. Paths print POSIX-style on
+    // every OS (S469: the Windows job printed `docs\articles\…`).
+    const r = claim("--list");
+    expect(r.status).toBe(0);
     expect(r.stdout).toContain("docs/articles/llm-kickstarter-v2-2026-05-04.md");
     expect(r.stdout).not.toContain("archive");
+    expect(r.stdout).not.toContain("i-am-jacks-");
+    expect(r.stdout).not.toContain("if-you-give-a-dev-an-enum");
+    expect(r.stdout).not.toContain("v0.2.0-announce");
+    expect(r.stdout).not.toContain("v0.3.0-announce");
+    expect(r.stdout).not.toContain("\\");
+  }, 120_000);
+  test("A7: run from another directory, the surface and its excludes are the same (the gate chdirs to the repo root)", () => {
+    const fromRoot = claim("--list");
+    const elsewhere = spawnSync("bun", [join(ROOT, "scripts/claim-gate.js"), "--list"], { cwd: tmpdir(), encoding: "utf8" });
+    expect(elsewhere.status).toBe(0);
+    expect(elsewhere.stdout).toBe(fromRoot.stdout);
+    expect(elsewhere.stdout).not.toContain("i-am-jacks-");
+  }, 120_000);
+  test("A7: an explicit path still lists what is under it, POSIX-style", () => {
+    const r = claim("--list", "docs/articles");
+    expect(r.stdout).toContain("docs/articles/llm-kickstarter-v2-2026-05-04.md");
+    expect(r.stdout).not.toContain("\\");
   }, 120_000);
 });
 
