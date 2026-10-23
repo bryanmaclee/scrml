@@ -72,7 +72,7 @@
 
 import { existsSync, statSync, readdirSync, readFileSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
-import { join, extname, dirname, resolve } from "path";
+import { join, extname, dirname, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { checkDrift, discoverDocs, SNIPPET_CORPUS as DRIFT_SNIPPET_CORPUS } from "./snippet-drift.js";
 import { collectSnippetDialects } from "./doc-gate-markers.js";
@@ -109,9 +109,12 @@ function discover(roots) {
       return;
     }
     if (extname(p) !== ".scrml") return;
-    if (seen.has(p)) return;
-    seen.add(p);
-    out.push(p);
+    // POSIX separators (S469): `join` writes `\` on Windows, and every printed path, the
+    // dialect map and the tests compare `/`-separated paths. Bun's fs accepts `/` there too.
+    const posix = p.split(sep).join("/");
+    if (seen.has(posix)) return;
+    seen.add(posix);
+    out.push(posix);
   };
   for (const r of roots) walk(r);
   return out.sort();

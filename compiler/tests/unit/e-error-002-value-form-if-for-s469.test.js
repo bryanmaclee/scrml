@@ -495,7 +495,7 @@ describe("D — DECL_KEY_CLASSES covers every key ast-builder.js writes on a dec
     "isServer", "isGenerator", "canFail", "errorType", "test", "armArrow", "result", "resultExpr",
     "_onMountEffect", "raw", "exported", "fromExport", "route", "isHandleEscapeHatch", "label",
     "dependencies", "bodyRaw", "bodyExpr", "openerHadSpaceAfterLt",
-    "typeAnnotation", "isAwait", "letBinder", "constBinder", "isAsync", "hasReturnType",
+    "typeAnnotation", "isAwait", "letBinder", "constBinder", "ruledHead", "isAsync", "hasReturnType",
     "returnTypeAnnotation", "isPure", "isPinned", "idempotentModifier",
     "objectLiteralArm", // a flag (#1473 / arm-body-statements.ts): the arm's value is its `exprNode`
 

@@ -1,17 +1,25 @@
-// NERDME.md "Type-derived apps" — gated by scripts/snippet-gate.js.
+// NERDME.md "Type-derived apps" — ruled; spec-ahead on the bootstrap (no refinement types, <schema>, <formFor>, <tableFor>).
 <program db="contacts.db">
-import { formFor, schemaFor, tableFor } from "scrml:data"
+
+import { formFor, schemaFor, tableFor } from "scrml:data";
 
 type Contact:struct = {
-    name:  string(.length > 0)
-    email: string(email)
-    phone: string(phone)?
+    name:  string(.length > 0),
+    email: string(email),
+    phone: string(phone) | not,
 }
 
-<contacts>: Contact[] = []
-function save(c) { @contacts = [...@contacts, c] }
+<schema>
+    ${ schemaFor(Contact) }
+</>
+
+<contacts:Contact[free, append]=[]/>
+
+function save(c: Contact) {
+    @contacts.append(c);
+}
 
 <formFor for=Contact onsubmit=save/>
-<schema>${ schemaFor(Contact) }</schema>
 <tableFor for=Contact rows=@contacts/>
-</>
+
+</program>

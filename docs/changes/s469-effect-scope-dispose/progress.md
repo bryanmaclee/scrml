@@ -29,6 +29,22 @@ Branch `s469-effect-scope-dispose`, cut from origin/main @ 29b6320ad (includes #
 - [x] SPEC §17.7.2 sentence + regen-spec-index (`6bc5a7fc7`).
 - [x] known-gaps: entry + the folded LOW resolved; two residual LOWs filed; `bun scripts/state.ts --write`.
 
+## Round 2 (review of ffbe1cf2b: FIX)
+
+- [x] F1 HIGH (`79435fdc6`): reproduced (match + engine). A mount already in the document now takes its
+      STRUCTURAL owner (`_scrml_structural_owner`: if= range marker `_scrml_if_sid`, arm marker `_scrml_arm_sid`,
+      row head `_scrml_row_scope`), never the writer's scope; a mount still being built takes the active (row)
+      scope. Probes: top-level `<each>` rendered from a row write, top-level `if=` first flipped from a row,
+      derived first read in a row — all already correct; pinned as browser tests anyway.
+- [x] n22 +2 shapes (`2e7e91300`): FAIL on ffbe1cf2b, PASS on main and after. 467 shapes.
+- [x] LOW: `_scrml_arm_scope` tears its scope down if `wire` throws (in `79435fdc6`).
+- [x] LOW: on a page without the owner chunk an effect no longer re-enters its creation scope (no cleanups
+      under a dead `if_N` key) — in `79435fdc6`.
+- [x] Gap re-rated HIGH (branch-only) and resolved.
+- Power loss mid-round; resumed from 2e7e91300 + the staged known-gaps edit (committed as-is).
+- Hook flake: `slice-m1/counter.browser.test.js`'s inner `beforeAll` has the default 5 s timeout and its first
+  `printCore` takes ~4 s on main, ffbe1cf2b and head alike (measured); it times out under load. Not this change.
+
 ## Pre-existing (not this change)
 
 Browser suite on main in this environment: 61 failing tests (49 after this branch = 61 − the 12 fixed here).
