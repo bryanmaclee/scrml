@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1807 of 1807 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1808 of 1808 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -15,8 +15,8 @@ Scope: **1807 of 1807 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 68 | 3.8% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 675 | 37.4% |
-| UNSUPPORTED | 812 | 44.9% |
+| NOT-TWINNED | 675 | 37.3% |
+| UNSUPPORTED | 813 | 45.0% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,11 +26,11 @@ Scope: **1807 of 1807 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 36 of 68; the other 32 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 503 · parse-reject 309.
+UNSUPPORTED by reason: bootstrap-unsupported 504 · parse-reject 309.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **797** — PASS 152 · FAIL 54 · UNSUPPORTED 591. Twin holds 152 (non-vacuous 136). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **798** — PASS 152 · FAIL 54 · UNSUPPORTED 592. Twin holds 152 (non-vacuous 136). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -149,7 +149,7 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 | print | 1 | · | · | · | · | · | 1 | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 6 | · | · | · | 1 | 2 | · | · |
-| reactive | 114 | 27 | · | 5 | · | 65 | 17 | · | · |
+| reactive | 115 | 27 | · | 5 | · | 65 | 18 | · | · |
 | refinement | 57 | · | · | · | · | 25 | 32 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
@@ -607,7 +607,7 @@ none
 - `type-state-codes/e-type-081-partial-match-render-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (812)
+### UNSUPPORTED (813)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1226,6 +1226,7 @@ none
 - `reactive/server-fn-ambient-identity-clean` — twin · bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
 - `reactive/server-fn-authority-wholly-server-error` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `reactive/server-fn-rawvar-read-error` — twin · bootstrap-unsupported: a client call of `saveOrder`: the client decodes the server's answer strictly against the function's success type (§57.4, S451 R10), and `saveOrder` declares none and its returns do not prove one (the
+- `reactive/tape-append-on-returned-tape-rt` — twin · bootstrap-unsupported: `.append(…)` on a local sequence is not in the bootstrap — Core has no edit of a local (write a new value: `let t = …`)
 - `reactive/throttle-leading` — twin · parse-reject: E-PARSE-TRAILING: unexpected `s` after the expression
 - `reactive/throttle-trailing-commit` — twin · parse-reject: E-PARSE-TRAILING: unexpected `s` after the expression
 - `reactive/write-not-in-logic-context-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
