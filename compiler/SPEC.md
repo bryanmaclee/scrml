@@ -16716,6 +16716,14 @@ The `if=` attribute is a structural conditional. Its value is a condition (§42.
   A quoted condition there is the condition expression, as everywhere; an `if=` value the compiler cannot
   lower — there or anywhere, a bare `if` with no condition included — is **E-CG-003**, never an ungated
   render. "Anything it reads" includes a cell read inside a function the condition calls (`if=isAdmin()`).
+  **impl#1 divergence — re-evaluation in lifted markup.** impl#1 re-evaluates a lifted condition only
+  where it re-evaluated the pre-S469 display toggle: in a reconciled row's per-item effect (the sole row
+  root, or a condition reading the row), in an `if … lift` arm's own effect, or else in the render that
+  builds the element plus a subscription to each `@cell` named in the attribute text. A position that
+  placement misses — a cell read only inside a called function outside a row, a value-indexed
+  `@cell == row.field` whose row field changes under the same key, a body local re-read later in a keyed
+  row — is NOT re-evaluated: a guard revoked there stays open. Tracked as
+  [[g-lift-gate-placement-inherits-main-staleness-s469]].
   *(S469 — until [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]] closed, impl#1 lowered every
   lifted position except the sole root of a reconciled `for … lift` row to a `display: none` toggle — the
   element stayed in the DOM, its listeners reachable — and wrote a call or quoted `if=` value as a plain

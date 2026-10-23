@@ -65,3 +65,14 @@ the one mechanism `<each>` rows use) instead of a `style.display` toggle. Primar
 - [x] F-C: mutated local array/object behave inline; 24 browser cases pass (all fail on main); nothing to file.
 - [x] F-D: _scrml_ifrow_apply in the lift chunk — lifted-if page stripped gzip 7,453 -> 4,303 B (main 4,016);
       runtime-size-ratchet §4.
+
+## Round 5 (review of 5e18bc99e — FIX, re-scoped)
+
+- [x] main's evaluation placement is the oracle: A sole row root / B row-reading per-item effect / C LIVE arm effect /
+      D at build + main's subscriptions; swap instead of display. All classifiers / own effects / snapshots /
+      keyed->plain fallback removed. show= at B/C/D.
+- [x] kept: call-ref/quoted read, E-CG-003 bare if, component @ fix, bind guard, lifted <each> root, owner-tree
+      release (mount_track'd subscriptions/buckets; arm render scope via typeof-guarded calls).
+- [x] ifrow runtime chunk; ratchet §4 three shapes (lift if 4,186 / each row if 8,245 / lift no-if 4,016 = main).
+- [x] stale-on-main positions: browser test.failing (21), pack KNOWN_FAIL (36); gap g-lift-gate-placement-inherits-main-staleness-s469.
+- [x] H1–H3 + M1b visible sets equal main's at every step (hidden absent); H4 refused as on main; M1a ReferenceError (main too).
