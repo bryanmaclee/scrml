@@ -182,6 +182,14 @@ jobs:
       - name: Snippet gate (every public-cited .scrml still compiles)
         if: ${{ !cancelled() }}
         run: bun scripts/snippet-gate.js
+      # S469 — the claim gate (scripts/claim-gate.js), BLOCKING. Every ```scrml fence in the public
+      # surface (scripts/claim-gate-surface.js) compiles — ruled documents with the bootstrap, the rest
+      # with impl#1 — and the surface floor holds (a new README / NERDME / DESIGN / docs/**.md page
+      # with scrml in it must be gated or excused with a reason). Dated pre-S469 articles and the two
+      # release announcements are bannered and excused file by file (S469 "Banner + exempt").
+      - name: Claim gate (every public scrml fence compiles; the surface floor)
+        if: ${{ !cancelled() }}
+        run: bun scripts/claim-gate.js
       # ABSOLUTE floor (NOT differential): every shipped showcase PROGRAM (examples/* + multi-file
       # example/benchmark apps) must build on HEAD. corpus-emit-differential is base-vs-head and treats
       # compile-failure as DATA, so a program broken since before the baseline is invisible to it — that
@@ -549,16 +557,6 @@ jobs:
       - name: Bootstrap severity table (tracking; report staleness)
         continue-on-error: true
         run: bun scripts/gen-bootstrap-severity.ts --check
-      # S469 — the claim gate (scripts/claim-gate.js): every ```scrml fence in the public surface
-      # (README, NERDME, DESIGN, tutorial, docs/articles, docs/adopter, docs/lin.md, docs/external-js.md,
-      # docs/website/*.md) compiles — ruled documents with the bootstrap, the rest with impl#1 — plus
-      # the surface floor (a new public page with scrml in it must be gated or listed). TRACKING, not
-      # blocking: it FAILS on main today (33 impl#1 blocks in dated articles + two website announces,
-      # docs/changes/s469-docs-migrate-3/progress.md). Promote it into `checks` (and gate.needs) once
-      # `bun scripts/claim-gate.js` exits 0 on main. snippet-gate is already blocking, in `checks`.
-      - name: Claim gate (tracking; fails on main until the dated articles are dispositioned)
-        continue-on-error: true
-        run: bun scripts/claim-gate.js
 
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   # windows — NON-BLOCKING (continue-on-error; NOT a required check). Surfaces OS-path-separator

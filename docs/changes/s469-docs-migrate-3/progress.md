@@ -33,3 +33,10 @@ Branch `s469-docs-migrate-3`, cut from origin/main 29b6320ad. Follows #1499 (mig
 ## Findings (bootstrap, not fixed here)
 - No compile-time `rule=` check on a single-declaration engine (`@door = .Open` from `.Closed` compiles; checked at run time via the edges), and a variant with no state-child compiles silently.
 - Refinement types fail at parse in openers / struct fields / parameters, with a cascade (refinement.scrml pin is 6 codes).
+
+## Round 2 (owner ruling S469 "Banner + exempt")
+- [x] Banner on the 8 dated docs/articles pieces + the v0.2.0 / v0.3.0 docs/website announcements; prose and code untouched.
+- [x] Excused file by file in SURFACE_UNGATED; docs/articles stays in the surface (kickstarter + new articles gated). teej_baiting_tweet.md and x-snippet-zod-calibration have no scrml fences and were not bannered.
+- [x] Windows: claim-gate + snippet-gate normalise discovered paths to `/`; A7 + round-3 tests updated.
+- [x] claim-gate on this tree (origin/main had nothing newer): 18 passed, 73 skipped, 36 snippet, 24 spec-ahead, 0 failed (151); exit 0, also with --strict.
+- [x] Promoted: claim-gate is a step in `checks` (blocking via `gate`); the tracking step is removed. The narrow ruled-docs step is not needed.
