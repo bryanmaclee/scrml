@@ -1782,7 +1782,7 @@ Most apps need ZERO middleware code. The common 80% is single attributes on `<pr
 
 For the remaining 20%, a `function handle(request, resolve)` is the onion-model escape hatch. Code before `resolve()` is pre-middleware; code after is post. `resolve()` MUST be called exactly once per execution path that runs the route.
 
-<!-- gate: spec-ahead [E-ASSIGN-POSITION, E-BOOTSTRAP-UNSUPPORTED, E-PARSE-EXPECTED, E-PARSE-EXPR, E-PARSE-ITEM, E-PARSE-TYPE, E-SCOPE-001, E-TYPE-STRUCT-CONTEXT, E-TYPE-UNKNOWN] — the bootstrap has no middleware handle(), function-typed parameters, templates in logic or host Request / Response types yet -->
+<!-- gate: spec-ahead [E-ASSIGN-POSITION, E-BOOTSTRAP-UNSUPPORTED, E-PARSE-EXPECTED, E-PARSE-EXPR, E-PARSE-TYPE, E-SCOPE-001, E-TYPE-STRUCT-CONTEXT, E-TYPE-UNKNOWN] — the bootstrap has no middleware handle(), function-typed parameters or host Request / Response types yet -->
 ```scrml
 <program log="structured" headers="strict">
 
