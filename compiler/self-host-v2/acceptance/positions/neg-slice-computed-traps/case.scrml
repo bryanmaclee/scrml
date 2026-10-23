@@ -1,0 +1,18 @@
+// Appendix D.1: a negative COMPUTED slice position traps (E-INDEX-OUT-OF-RANGE-RT) — the click's
+// handler stops at the trap, so the cell keeps its value; the program compiles cleanly.
+<program>
+    let <s:string="hello"/>
+    let <n:int=1/>
+    let <out:string="start"/>
+    function keep() {
+        @out = @s.slice(@n)
+    }
+    function cut() {
+        @out = @s.slice(0 - @n)
+    }
+    <main>
+        <button id="ok" onclick=keep()>ok</button>
+        <button id="go" onclick=cut()>go</button>
+        <p id="out">${@out}</p>
+    </main>
+</program>

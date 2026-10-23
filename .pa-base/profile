@@ -72,7 +72,7 @@ GATE:   tests-as-gate (stable infra) + runtime-verify (codegen) + types (BLOCKIN
     found only because bryan asked. The probe diffs merged-since-epoch against the `@review` markers in
     `docs/pr-reviews.md`. DETECTION not control — never blocks a merge, deliberately NOT in CI (§8 cry-wolf).
     PA STATES THE OWED COUNT in the boot report. Watch the carve-out rate: →100% = the floor is decorative.
-  - ADOPTER-ISSUE channel (S262, MANDATORY at boot 0.6, both profiles): `gh issue list --repo bryanmaclee/scrml --state open`.
+  - ADOPTER-ISSUE channel (S262, MANDATORY at boot 0.6, both profiles): `gh issue list --repo scrml-lang/scrml --state open`.
     GitHub issues = the adopter->compiler bug route (pjoliver11/assetManagement, the real-world shakedown app, files
     version-stamped reproducers here). NOT the handOffs/incoming/ inbox — a SECOND inbound channel. Un-named by the contract
     until S262 => 4 adopter issues sat unabsorbed up to 5 days (#27/#29/#81/#82), absent from known-gaps AND the delta-log;

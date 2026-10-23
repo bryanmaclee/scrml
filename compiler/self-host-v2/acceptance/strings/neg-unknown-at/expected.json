@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-strings-neg-unknown-at",
+  "description": "E-STRING-METHOD-UNKNOWN: `at` on a string.",
+  "language-version": "1.0",
+  "spec": "Appendix D.1",
+  "rationale": "D.1 \"Not in the table: refused\" lists `at`.",
+  "expect": {
+    "codes": [
+      "E-STRING-METHOD-UNKNOWN"
+    ],
+    "codeCounts": {
+      "E-STRING-METHOD-UNKNOWN": 1
+    }
+  }
+}

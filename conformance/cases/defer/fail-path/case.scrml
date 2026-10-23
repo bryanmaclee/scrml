@@ -11,7 +11,7 @@ ${
         if (amount <= 0) {
             fail SaveError.Rejected("non-positive")
         }
-        return "saved " + amount
+        return `saved ${amount}`
     }
 
     function go() {

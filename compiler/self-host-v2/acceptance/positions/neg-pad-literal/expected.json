@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-positions-neg-pad-literal",
+  "description": "E-POSITION-NEGATIVE: `padStart(-3, …)` and `padEnd(-3)` — one report each.",
+  "language-version": "1.0",
+  "spec": "Appendix D.1",
+  "rationale": "D.1 (derived: the no-negatives ruling applied to a width).",
+  "expect": {
+    "codes": [
+      "E-POSITION-NEGATIVE"
+    ],
+    "codeCounts": {
+      "E-POSITION-NEGATIVE": 2
+    }
+  }
+}

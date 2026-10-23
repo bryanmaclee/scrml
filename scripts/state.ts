@@ -183,7 +183,11 @@ function gapMarkersFrom(text: string) {
     const attrs = new Map<string, string>();
     for (const pair of m[1].trim().split(/\s+/)) {
       const eq = pair.indexOf("=");
-      if (eq > 0) attrs.set(pair.slice(0, eq), pair.slice(eq + 1));
+      // FIRST occurrence wins (S469 hygiene). The bag is split on whitespace, so prose inside a
+      // prov=/locus= value can carry its own `key=` token: g-component-raw-body-angle-spacing-
+      // dropped-s462's prov quotes `<pre id="c">a`, and last-wins read that entry's id as `"c">a`.
+      // The real attributes always come first; the merge driver's gapIdCounts already reads the first.
+      if (eq > 0 && !attrs.has(pair.slice(0, eq))) attrs.set(pair.slice(0, eq), pair.slice(eq + 1));
     }
     const id = attrs.get("id");
     const sev = attrs.get("sev");
@@ -251,18 +255,31 @@ export function gapCountsFromTokens(tokens: { id: string; sev: string; status: s
   // which marker-granular counting DOUBLE-COUNTS. Dedup to one token per id before
   // counting. A same-id pair with DIFFERING sev/status is a genuine integrity error
   // (which is the entry's real state?) — throw loud, mirroring this file's other
-  // silent-omission guards (a same-id pair that fully agrees is collapsed silently).
+  // silent-omission guards.
+  // S469 hygiene: an AGREEING pair now throws too. It used to collapse silently, and the
+  // ledger quietly grew five duplicated ids, three of them one section copied in twice by a
+  // merge (#1256), which a silent collapse can never surface. One entry, one marker.
   const byId = new Map<string, { id: string; sev: string; status: string }>();
   const conflicts: string[] = [];
+  const dupes: string[] = [];
   for (const t of tokens) {
     const prev = byId.get(t.id);
     if (prev) {
       if (prev.status !== t.status || prev.sev !== t.sev) {
         conflicts.push(`    ${t.id}: sev=${prev.sev}/${t.sev} status=${prev.status}/${t.status}`);
+      } else {
+        dupes.push(`    ${t.id}: sev=${t.sev} status=${t.status} (the markers agree)`);
       }
-      continue; // dedup: first marker wins for counting
+      continue;
     }
     byId.set(t.id, t);
+  }
+  if (dupes.length > 0 && conflicts.length === 0) {
+    throw new Error(
+      `state.ts: ${dupes.length} gap id(s) carry DUPLICATE @gap markers —\n${dupes.join("\n")}\n` +
+      `  One entry, one marker. If it is one entry, delete the extra marker; if two entries share an\n` +
+      `  id, rename one; if a section was copied in twice (a merge leftover), delete the copy.`,
+    );
   }
   if (conflicts.length > 0) {
     throw new Error(
@@ -443,6 +460,25 @@ function findAnchorSpan(text: string, name: string): AnchorSpan | null {
   return { betweenStart, betweenEnd, current: text.slice(betweenStart, betweenEnd) };
 }
 
+/**
+ * STRAY ANCHOR GUARD (S469 hygiene). `findAnchorSpan` reads the FIRST START and the FIRST END, so a
+ * second START or END marker anywhere else in the file is invisible to --write and --check. That is
+ * how a stray half gap-counts table (eleven interleaved HIGH/MED/LOW rows from three different
+ * regenerations, closed by its own `@generated:gap-counts END`) sat at known-gaps.md ~L663 from the
+ * S462-era merges until a PA ruling deleted it in 22090f367: every gate passed over it. A START/END
+ * marker must occur exactly once per section; this returns a description of each violation.
+ * EXPORTED for the unit test.
+ */
+export function strayAnchors(text: string, name: string): string[] {
+  const out: string[] = [];
+  for (const kind of ["START", "END"]) {
+    const re = new RegExp(`<!--\\s*@generated:${escapeRe(name)}\\s+${kind}\\b[^>]*-->`, "g");
+    const lines = [...text.matchAll(re)].map((m) => text.slice(0, m.index).split("\n").length);
+    if (lines.length > 1) out.push(`${lines.length} ${kind} markers (lines ${lines.join(", ")})`);
+  }
+  return out;
+}
+
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -466,11 +502,31 @@ function regenInText(text: string, sec: GenSection): { text: string; changed: bo
   return { text: next, changed: true };
 }
 
+// Refuse to regenerate or compare while any section has a second START or END marker (see
+// strayAnchors). Exit 1, the same code as a stale section: the doc is out of shape, fix the doc.
+function refuseStrayAnchors(): void {
+  const problems: string[] = [];
+  for (const sec of GEN_SECTIONS) {
+    for (const p of strayAnchors(readFileSync(sec.file, "utf8"), sec.name)) {
+      problems.push(`@generated:${sec.name} in ${rel(sec.file)}: ${p}`);
+    }
+  }
+  if (problems.length === 0) return;
+  console.error("state: STRAY @generated anchor(s) — refusing to record or compare.\n");
+  for (const p of problems) console.error(`  ${p}`);
+  console.error(
+    `\n  Each section needs exactly one START and one END marker. A second one is almost always a\n` +
+      `  merge leftover (a stray copy of the generated block); delete the stray copy by hand.`,
+  );
+  process.exit(1);
+}
+
 // ── WRITE mode (Fork 3B) ─────────────────────────────────────────────────────
 function runWrite(): number {
   // The write path is where a hollow value becomes PERMANENT — guard it first.
   refuseDegenerateProjection();
   refuseUnparsedDeltaEntries();
+  refuseStrayAnchors();
   // Group sections by file so each file is read/written once (idempotent across multiple sections).
   const byFile = new Map<string, GenSection[]>();
   for (const s of GEN_SECTIONS) {
@@ -573,6 +629,7 @@ function refuseDegenerateProjection(): void {
 function runCheck(): number {
   refuseDegenerateProjection();
   refuseUnparsedDeltaEntries();
+  refuseStrayAnchors();
   const stale: string[] = [];
   const missing: string[] = [];
   const ok: string[] = [];

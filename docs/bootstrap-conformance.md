@@ -11,26 +11,26 @@ Scope: **1807 of 1807 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 241 | 13.3% |
+| PASS | 246 | 13.6% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 75 | 4.2% |
+| FAIL | 66 | 3.7% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 675 | 37.4% |
-| UNSUPPORTED | 816 | 45.2% |
+| UNSUPPORTED | 820 | 45.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 316; of those, 241 hold (76.3%). Runtime half executed on the bootstrap for 95 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 312; of those, 246 hold (78.8%). Runtime half executed on the bootstrap for 95 case(s).
 
-- **Vacuous** passes: 20 of 241 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **221**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 35 of 75; the other 40 are implemented checks that answered wrong.
+- **Vacuous** passes: 20 of 246 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **226**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 35 of 66; the other 31 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 494 · parse-reject 322.
+UNSUPPORTED by reason: bootstrap-unsupported 503 · parse-reject 317.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **797** — PASS 141 · FAIL 61 · UNSUPPORTED 595. Twin holds 141 (non-vacuous 125). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **797** — PASS 146 · FAIL 52 · UNSUPPORTED 599. Twin holds 146 (non-vacuous 130). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -109,7 +109,7 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 | components | 68 | · | · | 1 | · | 65 | 2 | · | · |
 | condition | 36 | 18 | · | 5 | · | 8 | 5 | · | · |
 | control-flow | 75 | 15 | · | 3 | · | 20 | 37 | · | · |
-| defer | 51 | 11 | · | 3 | · | 4 | 33 | · | · |
+| defer | 51 | 12 | · | 2 | · | 4 | 33 | · | · |
 | derived | 6 | · | · | 1 | · | 5 | · | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 34 | 7 | · | · | · | 11 | 16 | · | · |
@@ -124,21 +124,21 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 | foreign | 16 | · | · | · | · | 7 | 9 | · | · |
 | form-for | 16 | · | · | · | · | · | 16 | · | · |
 | forms | 66 | 12 | · | · | · | 49 | 5 | · | · |
-| hostmethod | 1 | · | · | · | · | · | 1 | · | · |
+| hostmethod | 1 | · | · | 1 | · | · | · | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
 | lifecycle | 56 | 16 | · | 1 | · | 32 | 7 | · | · |
 | linear | 15 | · | · | 2 | · | · | 13 | · | · |
 | loop | 8 | · | · | · | · | 3 | 5 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
-| markup-handler | 89 | 11 | · | 5 | · | 36 | 37 | · | · |
+| markup-handler | 89 | 11 | · | 2 | · | 36 | 40 | · | · |
 | match-block | 18 | · | · | · | · | 9 | 9 | · | · |
 | match-codes | 25 | 4 | · | 2 | · | · | 19 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
-| match-leave | 45 | 15 | · | 1 | · | 9 | 20 | · | · |
+| match-leave | 45 | 15 | · | · | · | 9 | 21 | · | · |
 | md | 18 | · | · | 7 | · | 3 | 8 | · | · |
 | meta | 66 | · | · | · | · | 1 | 65 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
-| module | 45 | 2 | · | 13 | · | 8 | 22 | · | · |
+| module | 45 | 6 | · | 9 | · | 8 | 22 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
 | own-value-type | 12 | 12 | · | · | · | · | · | · | · |
@@ -155,7 +155,7 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
 | server-db | 91 | 10 | · | · | · | 19 | 62 | · | · |
-| server-fn | 26 | · | · | 7 | · | 9 | 10 | · | · |
+| server-fn | 26 | · | · | 6 | · | 9 | 11 | · | · |
 | sql | 20 | 2 | · | · | · | 9 | 9 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | 1 | · | · | · | 24 | 2 | · | · |
@@ -163,7 +163,7 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 32 | 3 | · | 1 | · | 3 | 25 | · | · |
 
-### FAIL (75)
+### FAIL (66)
 
 - `components/post-ce-residual-component-reject` (codes; not in the bootstrap: E-COMPONENT-035)
   - missing E-COMPONENT-035
@@ -192,8 +192,6 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 - `defer/deferred-server-call-completes` (twin · codes+runtime)
   - forbidden family E-DEFER-* fired: E-DEFER-UNHANDLED-FAILABLE
   - runtime: no artifact — the compile reported an error (E-DEFER-UNHANDLED-FAILABLE)
-- `defer/fail-path` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-OPERATOR-OPERAND-TYPE)
 - `defer/scope-redeclare-with-defer-neg` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-DEFER-LATER-SHADOW
 - `derived/e-derived-server-only-reach-fn-path` (twin · twin-extra-error)
@@ -231,6 +229,8 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
   - severity: E-THROW-NOT-IN-SCRML did not fire (expected error)
 - `fn/plain-arrow-clean` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-TYPE-STRUCT-CONTEXT
+- `hostmethod/substring-match-typed` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-STRING-METHOD-UNKNOWN, E-TYPE-STRUCT-CONTEXT)
 - `lifecycle/cleanup-error-non-function` (codes; not in the bootstrap: E-LIFECYCLE-004)
   - missing E-LIFECYCLE-004
 - `linear/must-use-unread-neg` (twin · twin-extra-error)
@@ -238,22 +238,14 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 - `linear/must-use-unread-pos` (twin · codes; not in the bootstrap: E-MU-001)
   - missing E-MU-001
   - severity: E-MU-001 did not fire (expected error)
-- `markup-handler/inline-block-handler-assign-led-order` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-OPERATOR-OPERAND-TYPE)
-- `markup-handler/inline-block-handler-in-engine-state-child-call-led` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-OPERATOR-OPERAND-TYPE)
 - `markup-handler/s437-r4-dangling-else-engine-neg` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
   - missing E-STMT-UNEXPECTED-TOKEN
 - `markup-handler/s437-r4-dangling-else-top-neg` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
   - missing E-STMT-UNEXPECTED-TOKEN
-- `markup-handler/s457-user-function-named-event-pos` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-OPERATOR-OPERAND-TYPE)
 - `match-codes/e-match-012-tnot-missing-not-arm-pos` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-TYPE-031
 - `match-codes/e-type-026-match-in-markup-pos` (twin · codes; not in the bootstrap: E-TYPE-026)
   - missing E-TYPE-026
-- `match-leave/stmt-arm-braced-break-continue-loop` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-OPERATOR-OPERAND-TYPE)
 - `md/heading-ids-page-wide` (runtime)
   - dom (whole-tree) mismatch: expected "<section id=\"setup\">Author-owned id.</section><div id=\"a\"><div><h1 id=\"setup-1\">Setup</h1><h2 id=\"setup-2\">Setup</h2><h2 id=\"快速入门\">快速入门</h2></div></div><div id=\"b\"><div><h2 id=\"setup-3\">Setup</h2></div></div>" got "<section id=\"setup\">Author-owned…
   - domAnchored: selector #a h1: no match
@@ -291,10 +283,6 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
   - missing E-EXPORT-003
 - `module/e-export-003-attr-distinct-clean` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-PROGRAM-MISSING
-- `module/e-import-003-import-top-of-logic-clean` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-TYPE-UNKNOWN
-- `module/e-import-004-name-exported-clean` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-TYPE-UNKNOWN
 - `module/e-import-004-name-not-exported-reject` (twin · codes; not in the bootstrap: E-IMPORT-004)
   - missing E-IMPORT-004
 - `module/e-import-004-stdlib-name-exported-clean` (twin · twin-extra-error)
@@ -305,12 +293,8 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
   - missing E-IMPORT-004
 - `module/e-import-005-bare-specifier-reject` (twin · codes; not in the bootstrap: E-IMPORT-005)
   - missing E-IMPORT-005
-- `module/e-import-005-relative-specifier-clean` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-TYPE-UNKNOWN
 - `module/e-import-006-missing-file-reject` (twin · codes; not in the bootstrap: E-IMPORT-006)
   - missing E-IMPORT-006
-- `module/e-import-006-present-file-clean` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-TYPE-UNKNOWN
 - `module/e-import-pinned-invalid-reject` (twin · codes; not in the bootstrap: E-IMPORT-PINNED-INVALID)
   - missing E-IMPORT-PINNED-INVALID
 - `parse-variant/error-invalid-payload` (twin · runtime)
@@ -344,8 +328,6 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
   - runtime: no artifact — the compile reported an error (E-TYPE-080)
 - `server-fn/cell-assign-failable-recovery-value` (twin · runtime)
   - runtime: no artifact — the compile reported an error (E-TYPE-080)
-- `server-fn/cell-assign-failable-success-then-read` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-OPERATOR-OPERAND-TYPE, E-TYPE-080)
 - `server-fn/e-route-002-neg` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-ERROR-002, E-SCOPE-001, E-SQL-004
 - `server-fn/e-route-002-pos` (twin · twin-extra-error)
@@ -366,7 +348,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (241)
+### PASS / CODES-ONLY (246)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -440,6 +422,7 @@ none
 - `defer/propagate-path` — PASS · TWIN
 - `defer/return-value-before-deferred` — PASS · TWIN
 - `defer/unhandled-failable-neg` — PASS · TWIN
+- `defer/value-arm-site-neg` — PASS · TWIN
 - `element-refusal/code-raw-style-pos` — PASS
 - `element-refusal/pre-raw-script-pos` — PASS
 - `element-refusal/raw-comment-script-pos` — PASS
@@ -541,7 +524,11 @@ none
 - `match-leave/stmt-arm-braced-fail-propagates` — PASS · TWIN
 - `match-leave/stmt-arm-braced-return-leaves-fn` — PASS · TWIN
 - `middleware/ratelimit-invalid-unit-pos` — PASS
+- `module/e-import-003-import-top-of-logic-clean` — PASS · TWIN
+- `module/e-import-004-name-exported-clean` — PASS · TWIN
 - `module/e-import-004-stdlib-subpath-name-clean` — PASS · TWIN
+- `module/e-import-005-relative-specifier-clean` — PASS · TWIN
+- `module/e-import-006-present-file-clean` — PASS · TWIN
 - `module/e-import-008-plain-import-clean` — PASS · TWIN · VACUOUS
 - `own-value-type/base-type-neg` — PASS
 - `own-value-type/base-type-pos` — PASS
@@ -610,7 +597,7 @@ none
 - `type-state-codes/e-type-081-partial-match-render-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (816)
+### UNSUPPORTED (820)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -659,7 +646,7 @@ none
 - `auth/auth-graph-002-pos` — bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `auth/auth-graph-003-neg` — bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `auth/auth-graph-003-pos` — bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
-- `auth/auth-graph-004-neg` — bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
+- `auth/auth-graph-004-neg` — bootstrap-unsupported: `lift` is in the bootstrap only as the LAST statement of a `match` / `!{}` arm block (§18.5: `.B :> { log(); lift 2 }`) — a `lift` anywhere else (a nested block, a markup or `for` value) is not in the
 - `auth/auth-graph-004-pos` — bootstrap-unsupported: `<program title=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `auth/i-auth-redirect-unresolved-pos` — bootstrap-unsupported: `<program auth="required">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated
 - `auth/nested-helper-block-shadowed-import-sort-neg` — twin · bootstrap-unsupported: `.log(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `toUpp
@@ -751,15 +738,15 @@ none
 - `control-flow/ctrl-012-default-logic-non-leading-residual-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/ctrl-012-default-logic-prose-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/ctrl-013-braceless-for-of-head-neg` — twin · bootstrap-unsupported: a `for` used as a value (the value form, §49.6) is not in the bootstrap yet — write the loop as a statement in a function and return what it builds
-- `control-flow/ctrl-021-value-form-sugar-lift-less-branch-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
-- `control-flow/ctrl-022-value-form-no-else-renders-nothing-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
-- `control-flow/ctrl-023-value-form-sugar-bound-position-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
-- `control-flow/ctrl-024-value-form-sugar-bound-no-else-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
-- `control-flow/ctrl-025-arm-body-statement-is-side-effect-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
-- `control-flow/ctrl-026-arm-body-nested-value-form-decl-pos` — twin · bootstrap-unsupported: a `for` used as a value (the value form, §49.6) is not in the bootstrap yet — write the loop as a statement in a function and return what it builds
-- `control-flow/ctrl-027-arm-body-tilde-read-and-recovery-pos` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
-- `control-flow/ctrl-028-arm-body-tilde-read-orphan-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
-- `control-flow/ctrl-029-value-form-sugar-markup-branch-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
+- `control-flow/ctrl-021-value-form-sugar-lift-less-branch-pos` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
+- `control-flow/ctrl-022-value-form-no-else-renders-nothing-pos` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
+- `control-flow/ctrl-023-value-form-sugar-bound-position-pos` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
+- `control-flow/ctrl-024-value-form-sugar-bound-no-else-pos` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
+- `control-flow/ctrl-025-arm-body-statement-is-side-effect-pos` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
+- `control-flow/ctrl-026-arm-body-nested-value-form-decl-pos` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
+- `control-flow/ctrl-027-arm-body-tilde-read-and-recovery-pos` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
+- `control-flow/ctrl-028-arm-body-tilde-read-orphan-neg` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
+- `control-flow/ctrl-029-value-form-sugar-markup-branch-pos` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
 - `control-flow/ctrl-switch-forbidden-attr-expr-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `control-flow/ctrl-switch-forbidden-fn-body-pos` — twin · bootstrap-unsupported: member access `.Busy` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `control-flow/ctrl-switch-forbidden-logic-block-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `switch` (statements at logic-block level are not in bootstrap slice M2)
@@ -768,14 +755,14 @@ none
 - `control-flow/if-on-match-render-gate-absent-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/if-on-match-render-gate-mounts-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/lift-two-in-value-arm-e-lift-002-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
-- `control-flow/markup-if-arm-reads-rerender-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `{`
-- `control-flow/markup-statement-not-rendered-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `{`
+- `control-flow/markup-if-arm-reads-rerender-pos` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
+- `control-flow/markup-statement-not-rendered-neg` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
 - `control-flow/s437-r5-braced-else-line-comment-top-logic` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `if` (statements at logic-block level are not in bootstrap slice M2)
-- `control-flow/s437-r5-value-form-if-else-line-comment` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
+- `control-flow/s437-r5-value-form-if-else-line-comment` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
 - `defer/ambiguous-lead-arm-payload-neg` — twin · bootstrap-unsupported: constructing the payload variant `M.A(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / 
 - `defer/ambiguous-lead-neg` — twin · bootstrap-unsupported: an index read `xs[i]` is in the bootstrap on a value of tape type (`T[…]`) — this value's type is not known to be one; annotate it
 - `defer/array-literal-lead` — twin · bootstrap-unsupported: `.forEach(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `t
-- `defer/control-flow-in-value-arms-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
+- `defer/control-flow-in-value-arms-neg` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
 - `defer/control-flow-inner-loop-ok` — twin · bootstrap-unsupported: a loop inside a deferred body is not in the bootstrap yet — move the loop into a function and call it from the `defer`
 - `defer/control-flow-neg` — twin · bootstrap-unsupported: a `defer` inside a loop body is not in the bootstrap yet — move the cleanup out of the loop, or into a function the loop calls
 - `defer/cps-after-last-continuation` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -784,6 +771,7 @@ none
 - `defer/deferred-host-error-runs-rest` — twin · bootstrap-unsupported: the built-in type `asIs` (§14.1.2) is not in the bootstrap — its type system has no unresolved-value type; give the value a declared type
 - `defer/duplicate-function-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `1`
 - `defer/duplicate-function-no-defer-ok` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `1`
+- `defer/fail-path` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `saved `
 - `defer/function-hoist-across-defer` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `"H"`
 - `defer/hoist-structural` — twin · bootstrap-unsupported: member access `.kind` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `defer/hoist-structural-twin` — twin · bootstrap-unsupported: member access `.kind` on a value that is not a struct or an instance is not in bootstrap slice M2
@@ -803,7 +791,6 @@ none
 - `defer/tilde-across-defer` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `~`
 - `defer/unbraced-arm-neg` — twin · bootstrap-unsupported: a `defer` inside a loop body is not in the bootstrap yet — move the cleanup out of the loop, or into a function the loop calls
 - `defer/unsupported-site-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `D`
-- `defer/value-arm-site-neg` — twin · bootstrap-unsupported: a `{ … }` arm with statements, or a leaving arm (`return`, `fail`), in a `match` whose value is used — Core's `match` arm is one expression; compute the value before the `match`, or use the `match` as
 - `defer/yield-in-defer-neg` — twin · bootstrap-unsupported: an unannotated parameter `gen` — bootstrap slice M2 needs `gen: Type` (Core parameters are typed)
 - `element-refusal/fn-return-script-pos` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `<`
 - `element-refusal/handler-arrow-markup-script-pos` — bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
@@ -861,7 +848,7 @@ none
 - `engine/phase-advance` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `engine/rule-violation-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `engine/rule-violation-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
-- `engine/s437-braceless-else-in-effect-bodies` — twin · bootstrap-unsupported: `effect` on the state-child `<Idle>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
+- `engine/s437-braceless-else-in-effect-bodies` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
 - `engine/self-target-ontransition-pos` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `engine/self-write-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `engine/self-write-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
@@ -917,8 +904,8 @@ none
 - `fn/arrow-body-reject` — twin · bootstrap-unsupported: the argument of `.map(…)` must be an arrow function of one parameter, `x => …` (the bootstrap has no other function value)
 - `fn/async-decl-reject` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `fn/dom-mutation-reject` — twin · bootstrap-unsupported: `.createElement(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string meth
-- `fn/lift-local-accumulator-clean` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `~`
-- `fn/lift-outer-accumulator-reject` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `~` (statements at logic-block level are not in bootstrap slice M2)
+- `fn/lift-local-accumulator-clean` — twin · bootstrap-unsupported: `lift` is in the bootstrap only as the LAST statement of a `match` / `!{}` arm block (§18.5: `.B :> { log(); lift 2 }`) — a `lift` anywhere else (a nested block, a markup or `for` value) is not in the
+- `fn/lift-outer-accumulator-reject` — bootstrap-unsupported: `lift` is in the bootstrap only as the LAST statement of a `match` / `!{}` arm block (§18.5: `.B :> { log(); lift 2 }`) — a `lift` anywhere else (a nested block, a markup or `for` value) is not in the
 - `fn/nondeterministic-call-reject` — twin · bootstrap-unsupported: `build()` reads the clock (`Date.now()`, directly or through a function it calls) — here (an initializer, markup, or an attribute value) that is not in the bootstrap; its host-call surface is a `funct
 - `fn/reactive-read-clean` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `fn/reactive-write-reject` — twin · bootstrap-unsupported: `@counter = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@counter.f = …`)
@@ -957,7 +944,6 @@ none
 - `forms/validator-applies-min-on-string-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `@` (statements at logic-block level are not in bootstrap slice M2)
 - `forms/validator-applies-pattern-on-number-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `@` (statements at logic-block level are not in bootstrap slice M2)
 - `forms/validator-applies-typed-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `@` (statements at logic-block level are not in bootstrap slice M2)
-- `hostmethod/substring-match-typed` — twin · bootstrap-unsupported: `.substring(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods 
 - `input/input-001-neg` — bootstrap-unsupported: `<keyboard>` is a scrml structural element (§36 input state), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `input/input-001-pos` — bootstrap-unsupported: `<keyboard>` is a scrml structural element (§36 input state), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `lifecycle/cleanup-error-call-expression` — parse-reject: E-PARSE-EXPECTED: expected `}`, found `closeConnection`
@@ -985,6 +971,8 @@ none
 - `loop/loop-005-break-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `for` (statements at logic-block level are not in bootstrap slice M2)
 - `loop/loop-005-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
 - `loop/loop-006-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `outer` (statements at logic-block level are not in bootstrap slice M2)
+- `markup-handler/inline-block-handler-assign-led-order` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found ``
+- `markup-handler/inline-block-handler-in-engine-state-child-call-led` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found ``
 - `markup-handler/inline-block-handler-in-match-arm` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `markup-handler/multi-stmt-handler-assign-led-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `=` in the tag `<button`
 - `markup-handler/multi-stmt-handler-attr-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `;` after the expression
@@ -1019,11 +1007,12 @@ none
 - `markup-handler/s457-unquoted-assign-read-whole` — twin · parse-reject: E-PARSE-TAG: unexpected `=` in the tag `<button`
 - `markup-handler/s457-unquoted-member-chain-condition` — twin · bootstrap-unsupported: member access `.ok` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `markup-handler/s457-unquoted-operator-non-handler-neg` — twin · parse-reject: E-PARSE-TAG: unexpected `+` in the tag `<p`
+- `markup-handler/s457-user-function-named-event-pos` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `ev`
 - `markup-handler/s462-handler-if-else-template-cell-false` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `x `
 - `markup-handler/s462-handler-if-else-template-cell-true` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `x `
 - `markup-handler/s462-handler-while-body-if-else` — twin · parse-reject: E-LOOP-WHILE-RETIRED: `while` is not a scrml loop — write `for (cond) { … }`: a `for` with a condition head runs while the condition is true (§49.1, §49.4.1)
 - `match-block/empty-wildcard-clear` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `match-block/inline-markup-match` — twin · bootstrap-unsupported: member access `.Grid` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-block/inline-markup-match` — twin · bootstrap-unsupported: `lift` is in the bootstrap only as the LAST statement of a `match` / `!{}` arm block (§18.5: `.B :> { log(); lift 2 }`) — a `lift` anywhere else (a nested block, a markup or `for` value) is not in the
 - `match-block/member-access-complete-clean` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
 - `match-block/member-access-nonexhaustive` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
 - `match-block/member-access-subset-dead-arm` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
@@ -1050,7 +1039,7 @@ none
 - `match-codes/e-type-024-enum-subject-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
 - `match-codes/e-type-024-struct-subject-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
 - `match-codes/e-type-025-asis-subject-pos` — twin · bootstrap-unsupported: the built-in type `asIs` (§14.1.2) is not in the bootstrap — its type system has no unresolved-value type; give the value a declared type
-- `match-leave/argument-match-arm-labelled-break-outer-neg` — twin · bootstrap-unsupported: a `{ … }` arm with statements, or a leaving arm (`return`, `fail`), in a `match` whose value is used — Core's `match` arm is one expression; compute the value before the `match`, or use the `match` as
+- `match-leave/argument-match-arm-labelled-break-outer-neg` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `n=`
 - `match-leave/argument-match-arm-return-with-lambda-neg` — twin · bootstrap-unsupported: `.forEach(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `t
 - `match-leave/arm-body-ends-at-line-break-neg` — twin · parse-reject: E-PARSE-ARM: expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `"orphan"`
 - `match-leave/bare-break-continue-arm-no-loop-neg` — twin · bootstrap-unsupported: a `break` arm (§18.2 leave statement) needs a loop, and loops are not in the bootstrap
@@ -1060,7 +1049,7 @@ none
 - `match-leave/dpa068-nested-match-bare-return` — twin · bootstrap-unsupported: a `{ … }` arm with statements, or a leaving arm (`return`, `fail`), in a `match` whose value is used — Core's `match` arm is one expression; compute the value before the `match`, or use the `match` as
 - `match-leave/dpa068-stmt-bare-break-continue` — twin · bootstrap-unsupported: a `continue` arm (§18.2 leave statement) needs a loop, and loops are not in the bootstrap
 - `match-leave/given-arm-body-lowered` — twin · parse-reject: E-PARSE-ARM: expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `given`
-- `match-leave/given-arm-in-expression-position-match` — twin · parse-reject: E-PARSE-ARM: expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `given`
+- `match-leave/given-arm-in-expression-position-match` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `s=`
 - `match-leave/given-arm-in-lambda-body-reads-param-no-false-scope-error` — twin · bootstrap-unsupported: `.join(…)` on a value whose type the compiler cannot resolve — a built-in method needs a receiver of a known type (a `string` or a tape); give it one (`: string`, `: T[…]`)
 - `match-leave/given-arm-lambda-param-no-false-scope-error` — twin · bootstrap-unsupported: `.join(…)` on a value whose type the compiler cannot resolve — a built-in method needs a receiver of a known type (a `string` or a tape); give it one (`: string`, `: T[…]`)
 - `match-leave/given-arm-legacy-arrow-keeps-body` — twin · parse-reject: E-PARSE-ARM: expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `given`
@@ -1068,7 +1057,8 @@ none
 - `match-leave/given-arm-undeclared-name-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
 - `match-leave/multi-scrutinee-stmt-arm-braced-return-leaves-fn` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `,`
 - `match-leave/return-match-arm-propagate` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
-- `match-leave/returned-multi-match-braced-leave-and-inner-break` — twin · bootstrap-unsupported: a `{ … }` arm with statements, or a leaving arm (`return`, `fail`), in a `match` whose value is used — Core's `match` arm is one expression; compute the value before the `match`, or use the `match` as
+- `match-leave/returned-multi-match-braced-leave-and-inner-break` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
+- `match-leave/stmt-arm-braced-break-continue-loop` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `n=`
 - `match-leave/value-arm-leave-word-in-string-not-a-leave` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `fail `
 - `md/data-led-href-guarded` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `md/fence-shell-interp-inert` — parse-reject: E-PARSE-EXPECTED: expected `}`, found `:`
@@ -1080,7 +1070,7 @@ none
 `
 - `md/interp-unclosed-quote-in-code-span` — parse-reject: E-PARSE-EXPECTED: expected `}`, found ``
 - `md/slot-hostile-values-are-text` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
-- `md/slot-regex-literal-quote` — twin · bootstrap-unsupported: `.replace(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `t
+- `md/slot-regex-literal-quote` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `/'/g`
 - `md/slot-text-reactive` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `meta/emit-single-quote-inside-attr-clean` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/emit-single-quoted-attr-reject` — parse-reject: E-PARSE-ITEM: unexpected text at program level
@@ -1222,7 +1212,7 @@ none
 - `protect/sse-yield-strip` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/strip-info-select-star` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/w-protect-005-null-body-static` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `raw-content/lift-raw-body-displays-as-text` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `{`
+- `raw-content/lift-raw-body-displays-as-text` — twin · bootstrap-unsupported: an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function
 - `raw-content/match-arm-raw-body-displays-as-text` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `reactive/debounce-on-server` — twin · parse-reject: E-PARSE-TRAILING: unexpected `ms` after the expression
 - `reactive/debounce-trailing-commit` — twin · parse-reject: E-PARSE-TRAILING: unexpected `s` after the expression
@@ -1346,7 +1336,7 @@ none
 - `server-db/sql-handled-hoisted-loop-nested-read-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/sql-handled-hoisted-loop-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/sql-handled-in-condition-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `server-db/sql-handled-lift-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `server-db/sql-handled-lift-rt` — twin · bootstrap-unsupported: `lift` is in the bootstrap only as the LAST statement of a `match` / `!{}` arm block (§18.5: `.B :> { log(); lift 2 }`) — a `lift` anywhere else (a nested block, a markup or `for` value) is not in the
 - `server-db/sql-handled-match-scrutinee-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/sql-handled-split-write-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/sql-hoisted-loop-allow-list-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1361,6 +1351,7 @@ none
 - `server-db/sql-hoisted-loop-write-between-iterations-rt` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/sql-missing-db-e-sql-004-neg` — twin · bootstrap-unsupported: a client call of `getUsers`: the client decodes the server's answer strictly against the function's success type (§57.4, S451 R10), and `getUsers` declares none and its returns do not prove one (the t
 - `server-fn/branch-declared-server-fn-routes-to-server` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `fn`
+- `server-fn/cell-assign-failable-success-then-read` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `loaded:`
 - `server-fn/cell-assign-independent-writes-batched` — twin · parse-reject: E-PARSE-EXPECTED: expected `{`, found `:`
 - `server-fn/cell-assign-read-after-write` — twin · parse-reject: E-PARSE-EXPECTED: expected `{`, found `:`
 - `server-fn/cell-assign-successive-writes-ordered` — twin · parse-reject: E-PARSE-EXPECTED: expected `{`, found `:`

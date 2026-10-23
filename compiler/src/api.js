@@ -67,6 +67,7 @@ import { PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
 import { runNRBatch } from "./name-resolver.ts";
 import { runTCBatch } from "./tag-canonicalizer.ts";
 import { runSYMBatch } from "./symbol-table.ts";
+import { setRawBodyWalkFloor } from "./engine-body-reader.ts";
 import { setBPPOverrides, getBPPOverrides } from "./codegen/compat/parser-workarounds.js";
 import { clearProjectRootCache, resolveProjectRoot } from "./codegen/chunk-namespace.ts";
 import { resetMarkupValueExprIdCounter } from "../native-parser/translate-expr.js";
@@ -3474,7 +3475,12 @@ function _compileScrmlImpl(options = {}) {
   // §14.8.9 — start this compile with an empty protect-flow registry (a prior
   // compile that threw mid-CG must not leak its per-file records into this one).
   takeProtectRegistry();
-  const cgResult = stage("CG", () => _runCG({
+  // S469 (SECURITY, hardening) — during codegen, an engine / `<match>` body parse the type
+  // system's failable walk never read is refused, never lowered (engine-body-reader.ts).
+  setRawBodyWalkFloor(true);
+  let cgResult;
+  try {
+  cgResult = stage("CG", () => _runCG({
     files: metaFiles,
     // s440-bootstrap-css-theme-t3 — the CSS sub-seam of CG (pipeline-seam.ts `CSS`): `generateCss`
     // itself unless a bootstrap stylesheet emitter is swapped in (identity pick → byte-identical).
@@ -3539,6 +3545,9 @@ function _compileScrmlImpl(options = {}) {
     debugPerf,
     log,
   }));
+  } finally {
+    setRawBodyWalkFloor(false);
+  }
   // S462 — one seam for every ES-module emitter (server, `kind="tool"`, library):
   // a stdlib type with no run-time value (`:struct`) is erased from its `scrml:`
   // import by declared kind, so the module links (see eraseStdlibTypeOnlyImports).

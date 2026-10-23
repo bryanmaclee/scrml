@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-positions-neg-slice-literal",
+  "description": "E-POSITION-NEGATIVE: `s.slice(-1)` — no position counts from the end.",
+  "language-version": "1.0",
+  "spec": "Appendix D.1",
+  "rationale": "Ruled S469: \"`slice(-1)` is refused (a literal at compile time; a computed one traps at run time, the PA reading)\".",
+  "expect": {
+    "codes": [
+      "E-POSITION-NEGATIVE"
+    ],
+    "codeCounts": {
+      "E-POSITION-NEGATIVE": 1
+    }
+  }
+}

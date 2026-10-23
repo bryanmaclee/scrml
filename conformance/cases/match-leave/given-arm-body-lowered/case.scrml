@@ -26,7 +26,9 @@ ${
     function go() {
         @a = decl("al")
         @b = ret("bo")
-        @c = "" + stmt(5) + stmt(not)
+        const present = stmt(5)
+        const absent = stmt(not)
+        @c = `${present}${absent}`
         @d = decl(not)
     }
 }

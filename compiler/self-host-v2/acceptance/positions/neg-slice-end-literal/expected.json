@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-positions-neg-slice-end-literal",
+  "description": "E-POSITION-NEGATIVE: `s.slice(0, -2)`.",
+  "language-version": "1.0",
+  "spec": "Appendix D.1",
+  "rationale": "As ruled S469; §34 row: \"`s.slice(-1)`, `s.slice(0, -2)`\".",
+  "expect": {
+    "codes": [
+      "E-POSITION-NEGATIVE"
+    ],
+    "codeCounts": {
+      "E-POSITION-NEGATIVE": 1
+    }
+  }
+}

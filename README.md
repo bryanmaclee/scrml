@@ -385,7 +385,7 @@ scrml is not on npm. You run it from a clone.
 curl -fsSL https://bun.sh/install | bash
 
 # Get the compiler and its dependencies
-git clone https://github.com/bryanmaclee/scrml.git
+git clone https://github.com/scrml-lang/scrml.git
 cd scrml
 bun install
 

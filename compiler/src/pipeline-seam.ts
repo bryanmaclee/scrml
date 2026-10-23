@@ -312,10 +312,13 @@ export const PARSE_REENTRY_FILES: readonly string[] = [
   "compiler/src/api.js",                        // STDLIB-EXPORT-SEED: _parseStdlibExports
   "compiler/src/component-expander.ts",
   "compiler/src/type-system.ts",
-  "compiler/src/codegen/emit-engine.ts",
   "compiler/src/codegen/emit-error-boundary.ts",
   "compiler/src/codegen/emit-logic.ts",
-  "compiler/src/codegen/emit-match.ts",
+  // S469 (SECURITY, §19.4.3) — the ONE parse of an engine body / a `<match>` arm body kept as
+  // raw text (moved here from codegen/emit-engine.ts and codegen/emit-match.ts): cached on the
+  // body's owner, walked by the type system's failable check and lowered by codegen.
+  "compiler/src/engine-body-reader.ts",
+  "compiler/src/arm-body-reader.ts",
   // S430 §19.16 `defer` — parses text-carried arm / handler bodies (and, via the
   // native parser, lambda / on-mount text) into statement trees so the defer
   // checker reasons about STRUCTURE, never text.

@@ -9,10 +9,10 @@
   "homepage": "https://scrml.dev",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bryanmaclee/scrml.git"
+    "url": "https://github.com/scrml-lang/scrml.git"
   },
   "bugs": {
-    "url": "https://github.com/bryanmaclee/scrml/issues"
+    "url": "https://github.com/scrml-lang/scrml/issues"
   },
   "keywords": [
     "scrml",

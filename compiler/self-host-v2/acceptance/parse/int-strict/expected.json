@@ -1,0 +1,32 @@
+{
+  "id": "acceptance-parse-int-strict",
+  "description": "`int.parse` reads exactly an optional `-` and ASCII digits within ±(2^53−1); `\"\"`, `\" 42\"`, `\"+5\"`, `\"12px\"`, `\"0x1F\"`, `\"1_000\"`, `\"1.5\"`, `\"1e3\"` and 2^53 are `not`.",
+  "language-version": "1.0",
+  "spec": "§14.13.4",
+  "rationale": "Ruled S469 \"conversions: strict whole-string parse\": \"No trim, no `+`, no `0x`; `\\\"12px\\\"` → `not`.\"",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#a",
+        "text": "42"
+      },
+      {
+        "selector": "#b",
+        "text": "-7"
+      },
+      {
+        "selector": "#c",
+        "text": "not not not not"
+      },
+      {
+        "selector": "#d",
+        "text": "not not not not"
+      },
+      {
+        "selector": "#e",
+        "text": "int not"
+      }
+    ]
+  }
+}

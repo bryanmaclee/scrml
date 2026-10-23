@@ -1,0 +1,5 @@
+// Appendix D.1 (derived): a negative literal pad width.
+<program>
+    let <s:string="ab"/>
+    <main><p>${@s.padStart(-3, "x")}${@s.padEnd(-3)}</p></main>
+</program>

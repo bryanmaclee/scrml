@@ -1,0 +1,18 @@
+// §14.13.4: `int.parse(s)` is strict and whole-string — an optional `-`, ASCII digits; everything else is `not`.
+<program>
+    let <a:int | not=(int.parse("42"))/>
+    let <b:int | not=(int.parse("-007"))/>
+    function show(x: int | not) -> string {
+        return match x {
+            not :> "not"
+            else :> "int"
+        }
+    }
+    <main>
+        <p id="a">${@a}</p>
+        <p id="b">${@b}</p>
+        <p id="c">${show(int.parse(""))} ${show(int.parse(" 42"))} ${show(int.parse("+5"))} ${show(int.parse("12px"))}</p>
+        <p id="d">${show(int.parse("0x1F"))} ${show(int.parse("1_000"))} ${show(int.parse("1.5"))} ${show(int.parse("1e3"))}</p>
+        <p id="e">${show(int.parse("9007199254740991"))} ${show(int.parse("9007199254740992"))}</p>
+    </main>
+</program>

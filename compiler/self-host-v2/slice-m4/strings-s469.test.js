@@ -66,14 +66,17 @@ describe("B — string methods are typed member calls", () => {
     expect(d?.message).toContain("cannot resolve");
   });
   test("an unknown method, or one on a receiver that is not provably a string, is refused BY NAME", () => {
-    expect(diag(prog(S, `        <p>\${@s.replace("a", "b")}</p>`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("`.replace(…)`");
+    // s469 (S469 "more string methods admitted" — "Anything not admitted is refused"): an unknown
+    // method on a string is E-STRING-METHOD-UNKNOWN (Appendix D.1), naming the nearest admitted form
+    expect(diag(prog(S, `        <p>\${@s.substring(1)}</p>`), "E-STRING-METHOD-UNKNOWN")?.message).toContain("`.substring(…)`");
+    expect(codes(prog(S, `        <p>\${@s.substring(1)}</p>`))).toEqual(["E-STRING-METHOD-UNKNOWN"]);
     expect(codes(prog(`    let <n:int=1/>`, `        <p>\${@n.trim()}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(prog(`    let <m:string | not=not/>`, `        <p>\${@m.trim()}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(prog(S + `\n    function f() { return "a" }`, `        <p>\${f().trim()}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("code points (runtime): charAt / slice / split(\"\") never cut an astral character in half", async () => {
     await load(prog(`    let <e:string="😀é😀"/>`,
-      `        <p id="a">\${@e.charAt(1)}</p>\n        <p id="b">\${@e.slice(-1)}</p>\n        <p id="c">\${@e.split("").length}</p>\n        <p id="d">\${@e.length}</p>`));
+      `        <p id="a">\${@e.charAt(1)}</p>\n        <p id="b">\${@e.slice(@e.length - 1)}</p>\n        <p id="c">\${@e.split("").length}</p>\n        <p id="d">\${@e.length}</p>`));
     expect($("#a").textContent).toBe("é");
     expect($("#b").textContent).toBe("😀");
     expect($("#c").textContent).toBe("3");
@@ -202,9 +205,11 @@ describe("strings × loops — a range over `s.length`, `for (ch of s)` and `cha
     expect($("#cr").textContent).toBe("3");
     expect($("#co").textContent).toBe("3");
   });
-  test("the loops lane's `s[i]` refusal on a string still stands", () => {
-    const d = diag(prog(`    let <s:string="ab"/>`, `        <p>\${@s[0]}</p>`), "E-BOOTSTRAP-UNSUPPORTED");
-    expect(d?.message).toContain("`s[i]` on a `string`");
+  test("s469: `s[i]` on a string is ruled (§66.12.8 rule 6) — the code point at `i`, a `string` (runtime)", async () => {
+    expect(codes(prog(`    let <s:string="ab"/>`, `        <p>\${@s[0]}</p>`))).toEqual([]);
+    expect(codes(prog(`    let <s:string="ab"/>\n    <t:int=(@s[0])/>`, `        <p>\${@t}</p>`))).toEqual(["E-TYPE-031"]);
+    await load(prog(`    let <s:string="a😀b"/>`, `        <p id="i">[\${@s[1]}][\${@s[2]}]</p>`));
+    expect($("#i").textContent).toBe("[😀][b]");
   });
 });
 
@@ -300,7 +305,7 @@ describe("C — tape functions return a NEW tape; JavaScript's names are refused
   test("a JavaScript name on a value that is not a tape is not E-TAPE-JS-METHOD (it is simply not in the bootstrap)", () => {
     // (a `push` on a reactive place is still read as a write by the value-position rule — pre-existing, by name)
     const cs = codes(prog(S, `        <p>\${@s.push(1)}</p>`));
-    expect(cs).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(cs).toContain("E-STRING-METHOD-UNKNOWN");   // s469: on a string, an unknown method is D.1's refusal
     expect(cs).not.toContain("E-TAPE-JS-METHOD");
   });
   test("append / prepend are the grant-named edits, checked against the grants", () => {

@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-arms-neg-lift-statement-arm",
+  "description": "E-BOOTSTRAP-UNSUPPORTED: a `lift` in a statement-position arm yields to nothing.",
+  "language-version": "1.0",
+  "spec": "§18.5",
+  "rationale": "§18.5: \"In a STATEMENT position a block arm yields nothing and needs no `lift`.\"",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

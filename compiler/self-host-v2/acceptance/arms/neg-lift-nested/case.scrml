@@ -1,0 +1,26 @@
+// §18.5: the bootstrap reads `lift` only as an arm block's LAST statement.
+<program>
+    type LoadError:enum = { NotFound(id: string), Timeout }
+    let <out:string=""/>
+    let <n:int=0/>
+    function load(id: string)! LoadError {
+        if (id == "x") fail LoadError.NotFound(id)
+        if (id == "y") fail LoadError.Timeout
+        return id
+    }
+    function v() {
+        @out = load("x") !{
+            .NotFound(m) :> {
+                if (m == "x") {
+                    lift "x"
+                }
+                lift m
+            },
+            .Timeout :> "to",
+        }
+    }
+    <main>
+        <button id="v" onclick=v()>v</button>
+        <p id="out">${@out}</p>
+    </main>
+</program>

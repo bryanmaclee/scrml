@@ -87,7 +87,13 @@ ${
     export type AHandled:struct = { subject: AExpr, how: AHow }
     // One arm. `legacy`: written with a deprecated `=>` / `->` separator
     // (W-MATCH-ARROW-LEGACY — the `!{}` arms share the match rule, §19).
-    export type AArm:struct = { nid: int, span: ASpan, pat: APat, body: AArmBody, legacy: boolean }
+    // s469 — `lifted`: the arm is a `{ … }` block whose LAST statement was written
+    // `lift <expr>` (§18.5, RULED S469 "block arms yield with `lift`"). The
+    // block then ends in `Eval(expr)` — the arm's value — and the flag records
+    // that it was yielded explicitly; a value-position block arm of two or more
+    // statements whose last is a BARE expression (not lifted) is
+    // E-ARM-TAIL-VALUE (analyze). The bootstrap reads `lift` nowhere else.
+    export type AArm:struct = { nid: int, span: ASpan, pat: APat, body: AArmBody, legacy: boolean, lifted: boolean }
     // `.V` / `::V` with its positional binders (`parens`: written `(…)`),
     // or the wildcard (`_` / `else`, §19 alias note).
     // s452: `PWhole` — the wildcard carrying one binder, `_ err` (§18.6.1, the
