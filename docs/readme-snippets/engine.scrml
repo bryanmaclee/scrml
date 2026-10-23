@@ -1,0 +1,21 @@
+// engine.scrml — README "What changed", item 2: an engine is a `single` declaration.
+// SPEC §66.19.6. The older dialect wrote it as `<engine for=Phase initial=.Idle>`.
+<program>
+
+type Phase:enum = { Idle, Loading, Done, Failed }
+
+<phase:Phase=.Idle single>
+    <Idle    rule=.Loading : "Ready">
+    <Loading rule=(.Done | .Failed) : "Loading…">
+    <Done    rule=.Idle : "Done">
+    <Failed  rule=(.Loading | .Idle) : "Failed — retry?">
+</>
+
+function load() { @phase = .Loading; }
+
+<main>
+    <p><*phase/></p>
+    <button onclick=load()>Load</button>
+</main>
+
+</program>

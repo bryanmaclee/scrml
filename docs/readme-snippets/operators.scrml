@@ -1,0 +1,15 @@
+// operators.scrml — README "What changed", item 5: operators take numbers, conditions take booleans.
+// The older dialect accepted `@label + @count`, `@count + "1"` and `if=@count`.
+<program>
+
+let <count:int=0/>
+<label="items: "/>
+
+<next:int=(@count + 1)/>
+
+<main>
+    <button onclick={ @count = @count + 1; }>Add</button>
+    <p if=(@count > 0)>${@label}${@count} (next: ${@next})</p>
+</main>
+
+</program>
