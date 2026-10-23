@@ -82,6 +82,27 @@ happy-dom. Baseline 41 → 27.
   same. The onIdle timer key is likewise `<token>$game::__idle`. 9/9; assertions unchanged.
 - Baseline 27 → 17.
 
+## Step 7 — soft-nav (7 FIXED class b; 1 REAL BUG found, class c, filed)
+
+`browser-navigate-soft-nav.test.js` (7 failing):
+- 6 × "stays reactive / re-renders after the swap": the harness wrote/read cells through the bare
+  runtime accessors with bare names (`_scrml_reactive_set("count", 5)`) → un-namespaced phantom
+  cell since BUG-6; the program's `<token>$count` never changed, so every region read "frozen".
+  Now keyed through `chunkCellKey`. The soft-nav swap/rebind/teardown product behavior is CORRECT.
+- 1 × `§20.8.2 step 3`: fixture `onchange=pick(event)` is now E-EVENT-UNBOUND (§5.2.3); the inline
+  compile ignored errors and mounted half-emitted output (`ReferenceError: event is not defined`).
+  Fixture → `pick()` (pick never used the event). `compileInline` now THROWS on any compile error so a
+  stale fixture fails by name, not by symptom (a strengthening).
+- Exposing correctly-keyed accessors broke finding #5's "load-bearing proof", which called the bare
+  `_scrml_ssr_seed_apply(false)`. The chunk's initial-load apply is the SCOPED wrapper
+  (`_scrml_ssr_seed_apply_scoped(_scrml_cs_key, …)`); the proof now drives that.
+- **REAL BUG (class c):** the runtime's REHYDRATE path (`_scrml_rehydrate_region`) still calls the
+  bare `_scrml_ssr_seed_apply(true)` → on soft nav a route's SSR seed is written to un-namespaced
+  phantom cells; route cells are never re-seeded; the #5 shell skip is vacuous. Filed
+  `g-soft-nav-rehydrate-seed-apply-unscoped` (MED) with an executed known-red repro test
+  (`[gap g-soft-nav-rehydrate-seed-apply-unscoped] …`), added to the baseline. NOT security-class.
+- Baseline 17 → 11 (−7 fixed, +1 known-red repro).
+
 ## Classified, NOT fixed — class c, ALREADY FILED
 
 - `g-each-peritem-markup-value-ternary` (3) and `g-emit-lift-markup-text-interp` (4): `ON ${@.label}` /

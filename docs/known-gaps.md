@@ -31,10 +31,16 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 4 |
-| MED | 679 | 8 |
+| MED | 680 | 8 |
 | LOW | 468 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-soft-nav-rehydrate-seed-apply-unscoped — on a soft navigation the fetched route's SSR seed is applied UN-namespaced: `_scrml_rehydrate_region` calls the bare `_scrml_ssr_seed_apply(true)`, so every non-shell seed key lands in a phantom cell `name` while the program's real cell is `<token>$name` — route cells are never re-seeded on soft nav, and the shell-cell skip (navigate-wave1b #5) is vacuous — `NEW S469; MED; open (pre-existing on main since BUG-6 chunk namespacing)`
+
+<!-- @gap id=g-soft-nav-rehydrate-seed-apply-unscoped sev=MED status=open locus=compiler/src/runtime-template.js(_scrml_rehydrate_region — `_scrml_ssr_seed_apply(true)` is the unscoped core; the chunk's own initial-load apply goes through `_scrml_cs_ssr_seed_apply` → `_scrml_ssr_seed_apply_scoped(_scrml_cs_key, …)`, compiler/src/codegen/index.ts cellScopeWrapper "ssrApply") prov=dispatch:s469-browser-suite-health -->
+
+Found by S469 browser-suite-health while repairing `browser-navigate-soft-nav.test.js`, whose harness read cells through the bare runtime accessors (un-namespaced keys) and so could not see this. **Repro (executed, happy-dom, main `0a2d747d3`):** the known-red test `finding #5 … > [gap g-soft-nav-rehydrate-seed-apply-unscoped] the rehydrate seed-apply keys route cells into the chunk namespace (no phantom bare cell)` in `compiler/tests/browser/browser-navigate-soft-nav.test.js` mounts the `SHELL5` shell (`<program db=…>` + server-authority `@accounts` + `<outlet>`), soft-navigates to a route whose SSR seed is `{ accounts: […], routeNote: "from-route-seed" }`, then reads the store: the UN-namespaced key `routeNote` holds `"from-route-seed"` (it should be `undefined`) and the chunk's `<token>$routeNote` does not. `accounts` is skipped only because the shell set is keyed by the bare name; the "mutated shell cell survives" assertion beside it therefore passes with or without the skip. **Cost:** an adopter with a same-chunk soft nav whose target route seeds a cell sees the previous route's value (silent stale data, no diagnostic); the #5 shell protection has no test that can fail. **Fix shape (not taken — impl#1 frozen except bootstrap/security, S435):** the rehydrate must apply the seed with the key fn of the chunk that owns the swapped region (e.g. the chunk registers its scoped apply alongside its rehydrator, and `_scrml_rehydrate_region` calls that instead of the bare core). Gate: that test going green — the S313 name-set gate (`compiler/tests/browser/FAILURE-BASELINE.json`) then demands it be pruned.
 
 ### g-impl1-duplicate-function-silently-overrides-s469 — impl#1 accepts two `function` declarations of one name at file scope with exit 0 and no diagnostic, and the later one wins: `function pick(n: int) -> int { return 1; }` then a second `pick` returning `2` compiles, and `pick(0)` is `2` — `NEW S469 (owner: file as a gap); MED; open`
 
