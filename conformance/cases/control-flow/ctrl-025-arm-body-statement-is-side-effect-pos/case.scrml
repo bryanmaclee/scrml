@@ -14,7 +14,7 @@ ${
     }
 
     function statementLiftWithSugarElse() {
-        const label = if (@n > 0) { note("c"); lift "pos" } else { "neg"; }
+        const label = if (@n > 0) { note("c"); lift "pos" } else { "neg" }
         return label
     }
 
