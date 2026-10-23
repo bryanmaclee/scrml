@@ -145,3 +145,34 @@ describe("an <each> that IS the lifted root goes through the shared <each> lower
     expect(r.js).not.toMatch(/style\.display\s*=/);
   });
 });
+
+describe("S469 round 2 — show=, the top-level bare `if`, and a component's `@` refs in lifted markup", () => {
+  test("lifted `show=` is a tracking display toggle, not a plain attribute", () => {
+    const row = compile(`<on> = true\n<xs> = [1]\n<div>\${ for (x of @xs) { lift <span><b show=@on>x</b></span> } }</div>\n`);
+    expect(row.errors).toEqual([]);
+    expect(row.js).not.toMatch(/setAttribute\("show"/);
+    expect(row.js).toMatch(/_scrml_effect\(\(\) => \{\n\s*let x = _scrml_resolve_item\([^\n]*\n[^\n]*\n\s*_scrml_lift_el_\w+\.style\.display = \(_scrml_cs_reactive_get\("on"\)\) \? "" : "none";/);
+    const bare = compile(`<on> = true\n<div>\${ lift <span><b show=@on>x</b></span> }</div>\n`);
+    expect(bare.errors).toEqual([]);
+    expect(bare.js).toMatch(/_scrml_effect\(function\(\) \{ _scrml_lift_el_\w+\.style\.display = \(_scrml_cs_reactive_get\("on"\)\) \? "" : "none"; \}\);/);
+  });
+
+  test("a bare `show` in lifted markup is E-CG-003", () => {
+    const r = compile(`<div>\${ lift <span><b show>x</b></span> }</div>\n`);
+    expect(r.errors).toContain("E-CG-003");
+  });
+
+  test("a top-level bare `<b if>` is E-CG-003 (it rendered ungated with no diagnostic)", () => {
+    const r = compile(`<div><b if>x</b></div>\n`);
+    expect(r.errors).toContain("E-CG-003");
+    expect(r.messages.join("\n")).toMatch(/has no condition/);
+  });
+
+  test("a component body's `@ok` (if= / class: / attribute) lowers to the cell inside lifted markup, not a bare `ok`", () => {
+    const r = compile(`<ok> = true\n<xs> = [1]\n\${ const Pill = <span class:on=@ok title=@ok><b if=@ok>x</b></span> }\n<div>\${ for (x of @xs) { lift <div><Pill/></div> } }</div>\n<div>\${ lift <div><Pill/></div> }</div>\n`);
+    expect(r.errors).toEqual([]);
+    expect(r.js).not.toMatch(/\(ok\)|, ok\)|!!\(ok\)/);
+    expect(r.js).toMatch(/classList\.toggle\("on", !!\(_scrml_cs_reactive_get\("ok"\)\)\)/);
+    expect(r.js).toMatch(/setAttribute\("title", _scrml_cs_reactive_get\("ok"\)\)/);
+  });
+});

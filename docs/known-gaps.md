@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 262 | 4 |
-| MED | 667 | 7 |
+| MED | 669 | 7 |
 | LOW | 467 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -26135,10 +26135,11 @@ Closing it is newly-rejecting (measure the corpus). ~~When it closes, an `if=` i
 lift parse) alike: a `for … lift` row root, a nested element at any depth, one root of a multi-root row (the
 swap moves the node in the row's `_scrml_group_of` array), the root of a non-loop `if … lift` / bare `lift`, a
 markup value (a function returning markup, a ternary arm, a markup-typed `const`), a component in a row. The
-element is built once; the comment holds its place while false; the trigger per context is unchanged (a
-live-keyed per-item render-gate effect in a row, the S103 O(2) `_scrml_reactive_subscribe_when` for a
-value-indexed predicate — now following the row's live value when it reads the row —, the LIVE arm effect,
-otherwise the cell subscriptions). Also closed on the way: a call-ref `if=allowed(@pw)` and a quoted
+element is built once; the comment holds its place while false; the swap runs in a TRACKING render-gate
+effect (a live-keyed per-item one in a row, disposed with the row; the arm's own effect in an `if … lift`
+arm; its own effect elsewhere) — except a value-indexed `@cell == v` predicate in a row, which keeps the
+S103 O(2) `_scrml_reactive_subscribe_when` bucket and a live-keyed effect that follows `v` (round 2: round 1
+kept `@name`-token cell subscriptions outside rows — see below). Also closed on the way: a call-ref `if=allowed(@pw)` and a quoted
 `if="…"` in lifted markup were written as a plain `if` ATTRIBUTE (no gate at all); a bare `if` / an unreadable
 value kind is now E-CG-003 (gated false); `_scrml_ifrow_apply(` ships the `reconciliation` chunk for a non-loop
 lift (emit-client.ts post-emit gate). Pins: `compiler/tests/browser/lift-if-render-gate-s469.browser.test.js`, `compiler/tests/unit/lift-if-render-gate-s469.test.js`, the security-failable-pack `n23` family (62 shapes: 59 FAIL + 3 crashes on main → 61 PASS + 1
@@ -26150,7 +26151,77 @@ element's direct listener returns early (`isConnected === false`). The narrowing
 `lift` markup (re-measured S469: `lift <p>${@user.name}<button onclick=${ @out = @user.name }>` over
 `User | not` compiles clean) — that is [[g-etype046-blind-in-explicit-lift-markup-s462]], kept open there.
 
+**Round 2 (review of `f2226103b`)** (branch `s469-lift-if-render-gate` round 2):
+- **F1 (HIGH, fail-open in round 1):** outside a reconciled row the gate was re-run by
+  `_scrml_reactive_subscribe` on the `@name` tokens found in the attribute TEXT, so `if=isAdmin()` (the cell read
+  inside the function), `if=(isAdmin() && true)` — in a bare lift, an `if … lift` arm, a `for` over a non-reactive
+  iterable — stayed open after the cell revoked it. Every non-row gate is now its own tracking render-gate effect;
+  the text reader is gone. Pack `n23` "indirect" / "indirect and": 14 FAIL on `f2226103b` → PASS.
+- **F2 (MED):** a removed row's gate effect and value-bucket registration stayed alive (bucket fires per two `@sel`
+  writes grew 3, 8, 12, 16 over empty/re-add cycles; a leaked updater swapped content open inside the detached
+  row). The gate effect now disposes itself (queued) when the row's key no longer resolves and releases its
+  bucket. Browser churn test: 3 per cycle over 10 cycles of 100 rows.
+- **F4 (LOW):** a lifted `bind:` input → cell listener lacked the detached guard; a held, gated-off input
+  dispatching `input` wrote the cell. Guarded (`guardDetachedListener`).
+- Lifecycle: these gates keep the element and its state across off → on — filed as
+  [[g-row-and-lift-if-gate-not-memoryless-s469]]; SPEC §17.1 says so.
+
 Found while making the Q18 premise true by effect ordering (S462 round 7). `${ for (x of @xs) { lift <li><div if=@user><button onclick={ @out = @user.name }>…</button></div></li> } }` emits `_scrml_lift_el_N.style.display = (@user) ? "" : "none"` (and the S293/W-LIFT-TIER0 deferred value-indexed and multi-root forms are display toggles too): the button stays connected while `@user` is `not`, so a programmatic `.click()` (or any non-user dispatch) runs the handler. TODAY no false acceptance results, because the §42.3.5 walk does not check explicit `lift` markup at all (the pre-existing coverage hole noted in presence-narrowing.ts `expandCheckPieces`) — neither the handler nor `${@user.name}` there is judged. When that hole closes (newly-rejecting), the walk must treat a `lift`-row `if=` as `show=` (no narrowing for children or handlers) unless the lowering becomes structural. `<each>` per-row `if=` IS structural (`_scrml_ifrow_apply` swap, a render-gate effect since round 7).
+
+
+### g-row-and-lift-if-gate-not-memoryless-s469 — an `if=` gate in an `<each>` row or in lifted markup keeps the SAME element (its state, its live inner bindings) across false → true; §6.7.2 says an `if=` scope destroys on false and re-mounts memorylessly — `NEW S469; MED; open`
+<!-- @gap id=g-row-and-lift-if-gate-not-memoryless-s469 sev=MED status=open locus=compiler/src/codegen/emit-lift.js(emitLiftIfGate)+compiler/src/codegen/emit-each.ts(renderTemplateChildToJs if= swap)+compiler/src/runtime-template.js(_scrml_ifrow_apply) prov=review:s469-lift-if-render-gate-round-1(F3);empirical:S469(browser lift-if-render-gate-s469 "built once, re-mounted": the same button node returns) -->
+
+Filed by the review of `f2226103b` (F3). The row and lifted gates are the element⇄comment swap
+(`_scrml_ifrow_apply`): the element is built once, so on re-show an input still holds its typed value and the
+element's inner bindings (text / class / attribute effects, nested lists) were never disposed — they kept
+updating the detached element while it was hidden. §6.7.2 / §6.7.2.1 make an `if=`-conditional element a
+lifecycle SCOPE: destroy on false, and on re-mount re-run every bare expression and restart every `<timer>` /
+`<poll>` "exactly as if mounting for the first time". The top-level `if=` (the `<template>` mount / unmount
+controller) does that; rows and lifted markup do not. Not a visibility hole — the element is absent while
+false and its listeners return early when detached — a lifecycle divergence, stated in SPEC §17.1 as an
+impl#1 divergence. Fix direction: give the swap a mount scope — rebuild the element on false → true (the factory
+already exists) and dispose its bindings on true → false — or rule that rows / lifted gates are a separate,
+state-keeping form and say so in §6.7.2.
+
+### g-toplevel-bare-if-renders-ungated-s469 — a top-level bare `<b if>` (no condition) rendered the element ungated, as a plain `if` attribute, with no diagnostic — `NEW S469; HIGH; RESOLVED S469`
+<!-- @gap id=g-toplevel-bare-if-renders-ungated-s469 sev=HIGH status=resolved locus=compiler/src/codegen/emit-html.ts(the §17.1 mount gate: isGateableIfValue false → fell through to the attribute path) prov=review:s469-lift-if-render-gate-round-1 -->
+
+Found by the review of `f2226103b`. `<div><b if>A</b></div>` emitted `<b if>A</b>` — rendered, no gate, exit 0
+(fail-open: a guard written without its condition). **RESOLVED S469** (branch `s469-lift-if-render-gate` round 2): a lowercase-tag `if` the gate
+cannot read is **E-CG-003** and the element is not emitted, as in lifted markup and `<each>` rows. A quoted or
+expression value is unaffected (it parses as `expr`); `if=true` / `if=false` are E-SCOPE-001 already. Still
+not covered: `if` on a CAPITAL-initial component tag, whose own path owns its mount. Pin:
+`compiler/tests/unit/lift-if-render-gate-s469.test.js`.
+
+### g-component-cell-ref-in-lift-bare-name-s469 — a component whose body names a cell as a bare attribute value (`if=@ok`, `class:on=@ok`, `title=@ok`) lowered it to the bare name `ok` when used inside lifted markup — `ReferenceError: ok is not defined` at run time — `NEW S469; MED; RESOLVED S469`
+<!-- @gap id=g-component-cell-ref-in-lift-bare-name-s469 sev=MED status=resolved locus=compiler/src/codegen/emit-lift.js(variable-ref attribute values: the text fallback stripped the `@`) prov=review:s469-lift-if-render-gate-round-1 -->
+
+Found by the review of `f2226103b`. A component body expanded into lifted markup reaches emit-lift without the
+attribute's expression node; the variable-ref fallback passed the name with its `@` stripped, so `if=@ok` became
+`(ok)` (and `class:on=@ok`, `title=@ok`, an `on…=@handler` likewise). At top level the same component was correct.
+**RESOLVED S469** (branch `s469-lift-if-render-gate` round 2): the text fallback keeps the `@` (liftConditionValue, the class: and value-attribute
+sites). Pins: browser `lift-if-render-gate-s469` "a component whose body reads `@ok`", unit (no bare `ok`).
+
+### g-timer-in-gated-element-keeps-ticking-s469 — a `<timer>` inside a top-level `if=`-gated element keeps running after the gate closes — `NEW S469; MED; open`
+<!-- @gap id=g-timer-in-gated-element-keeps-ticking-s469 sev=MED status=open locus=searched:compiler/src/codegen/emit-event-wiring.ts(the if= mount controller)+compiler/src/runtime-template.js(timers chunk; _scrml_unmount_scope)—not-traced prov=review:s469-lift-if-render-gate-round-1;empirical:S469 -->
+
+Found by the review of `f2226103b`; reproduced S469 (happy-dom, pruned runtime):
+`<on> = true <n> = 0 <div id="g" if=@on><timer interval=20>${ @n = @n + 1 }</timer></div>` — `@n` = 4 when
+`@on` goes false, the element is unmounted (`#g` absent), and `@n` = 10 120 ms later. §6.7.2 step order destroys a
+scope's timers on false (and §6.7.2.1 restarts them on re-mount); the `<outlet>` route-region teardown does stop its
+timers (browser-navigate-soft-nav M1 Phase 4), the `if=` scope does not. A side effect that keeps running after its
+guard closed. Not in the lifted-markup lane (a top-level gate). Fix direction: register the timer's stop with the
+mount scope it is created in (`_scrml_active_mount_scope` / `_scrml_register_cleanup`), as the outlet region does.
+
+### g-lift-show-attr-written-as-plain-attribute-s469 — `show=` in lifted markup was written as a plain `show` attribute: no toggle, the element always visible — `NEW S469; MED; RESOLVED S469`
+<!-- @gap id=g-lift-show-attr-written-as-plain-attribute-s469 sev=MED status=resolved locus=compiler/src/codegen/emit-lift.js(emitCreateElementFromMarkup / emitSetAttrs: no `show` branch) prov=review:s469-lift-if-render-gate-round-1 -->
+
+Found by the review of `f2226103b`: `${ lift <b show=@on>x</b> }` emitted `setAttribute("show", …)`. §17.2:
+`show=` hides with `display: none` while false. **RESOLVED S469** (branch `s469-lift-if-render-gate` round 2): `emitLiftShowBinding` — the same
+condition reader as `if=` (liftConditionValue: cell / expression / call / quoted; a bare `show` is E-CG-003), a
+tracking display toggle (a live-keyed per-item effect in a row). Pins: browser "`show=` in lifted markup" (row,
+bare lift, `if … lift` arm, a cell read through a function), unit.
 
 ### g-stdlib-auth-diagnostics-nondeterministic-under-load-s462 — `stdlib/auth/index.scrml` produced DIFFERENT diagnostics between two compiles of the same tree when the corpus measurement ran under parallel load, on both the base and the head tree (cause not traced) — `NEW S462; LOW; open`
 <!-- @gap id=g-stdlib-auth-diagnostics-nondeterministic-under-load-s462 sev=LOW status=open locus=searched:stdlib/auth/index.scrml,compiler/src/api.js(per-compilation state reset between in-process compiles — not traced) prov=review:s462-narrowing-round5;empirical:s462-narrowing-ends-on-write-corpus-measure -->
@@ -26903,13 +26974,11 @@ Still as described on main (S464). The test scans whole outputs that include the
 
 ### g-lift-group-non-single-if-rerender-loses-input-state-s462 — a reactive markup lift group that is NOT a single `if` / if-chain (a bare `${ lift … }` group, a `for` group with mixed reads, …) still re-renders its whole body on every read change, so an `<input>` inside loses focus and typed text — `NEW S462; LOW; open (pre-existing, not a regression)`
 <!-- @gap id=g-lift-group-non-single-if-rerender-loses-input-state-s462 sev=LOW status=open locus=compiler/src/codegen/emit-reactive-wiring.ts:907(emitLiftGroup — the plain group's `_scrml_effect` clears the placeholder and re-runs the block; only emitLiftIfChainGroup :1015 gets the arm-selector + LIVE per-binding effects) prov=review:s462-markup-if-stale-render -->
-> **S469 — still open, not covered by the lifted render gate** (`s469-lift-if-render-gate`). Re-executed: in a bare
-> `${ lift <div><input id="f"><b if=@ok>…</b><span>${@n}</span></div> }` group a flip of `@ok` (and a write of `@n`)
-> still replaces `#f`, losing its typed text. The gate keeps the group's tracking of its condition exactly as the
-> display toggle's initial call did — deliberately: making that read untracked would leave a deep write
-> (`@u.ok = false`, which no cell subscription sees) to nothing, and the group re-render is what applies it today
-> (pinned by the browser test's deep-write case). Inside an `if … lift` arm (LIVE mode) the gate is its own effect
-> and the input keeps its state (pinned). The fix direction below is unchanged.
+> **S469 — narrowed for `if=`, still open otherwise** (`s469-lift-if-render-gate` round 2). A lifted `if=` is now
+> its own tracking effect, so a gate FLIP no longer re-renders a plain group (pinned: a bare `${ lift … }` keeps a
+> sibling input's node and value across flips, and a deep write `@u.ok = false` still closes the gate). Any other
+> reactive read in the group (`${@n}` in the same body) still re-renders the whole body and replaces the input —
+> re-executed. The fix direction below is unchanged.
 
 Recorded by s462-markup-if-stale-render, which fixed the single-`if` / if-chain shape (arm selector + LIVE mode: per-binding effects, listeners and input state kept while the arm stays) and deliberately left every other group byte-identical to base. Located-not-traced, not re-executed S464 (the shape is the documented pre-#1397 behaviour of the plain group). The brief's own requirement for the chain — "A full re-render is acceptable only if it provably keeps listeners and input state" — is unmet for the other group shapes. Fix direction: extend LIVE per-binding updates (or a keyed body diff) to the plain group, so a read change updates the binding in place.
 

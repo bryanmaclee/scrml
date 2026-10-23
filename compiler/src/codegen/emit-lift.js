@@ -764,6 +764,59 @@ function emitLiftIfGate(lines, elVar, exprJS, rawText) {
   return curVar;
 }
 
+// The condition of a lifted `if=` / `show=`, lowered from any value kind the markup
+// parser gives it: a cell or expression, a call (`if=allowed(@pw)`), or a QUOTED
+// condition — still an expression (§17.1 `if="@n >= 3"`), never a string (a
+// non-empty string is truthy). A variable-ref keeps its `@` in the text fallback: a
+// component body expanded into lifted markup reaches here without its expression
+// node, and the bare name (`ok`) was a ReferenceError (S469 round 2). Any other kind
+// is E-CG-003 and the condition is `false`.
+function liftConditionValue(val, attrName, tag, attr, node) {
+  if (val && (val.kind === "variable-ref" || val.kind === "expr")) {
+    const raw = val.kind === "variable-ref" ? (val.name || "") : (val.raw || "");
+    return { exprJS: emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx()), rawText: raw };
+  }
+  if (val && val.kind === "call-ref") {
+    const rawArgs = val.argExprNodes
+      ? val.argExprNodes.map(n => emitExprField(n, "", liftExprCtx())).join(", ")
+      : (val.args || []).map(a => emitExprField(null, a.trim(), liftExprCtx())).join(", ");
+    return { exprJS: `${emitExprField(null, val.name, liftExprCtx())}(${rawArgs})`, rawText: `${val.name}(${(val.args || []).join(", ")})` };
+  }
+  if (val && val.kind === "string-literal") {
+    const q = String(val.value ?? "").trim();
+    const interp = /^\$\{([\s\S]*)\}$/.exec(q);
+    const rawText = interp ? interp[1].trim() : q;
+    return { exprJS: rawText === "" ? "false" : emitExprField(null, rawText, liftExprCtx()), rawText };
+  }
+  recordRefusedLowering(new CGError(
+    "E-CG-003",
+    `E-CG-003: the \`${attrName}=\` on this \`<${tag || "element"}>\` in lifted markup has ` +
+    (val && val.kind ? `a value of kind "${String(val.kind)}"` : `no condition`) +
+    `, so the compiler cannot apply it. It is refused rather than rendered ungated (§17.1 / §17.2). ` +
+    `Write the condition as \`${attrName}=@cell\`, \`${attrName}=fn(…)\` or \`${attrName}=(expression)\`.`,
+    (attr && attr.span) ?? (node && node.span) ?? { start: 0, end: 0 },
+  ), node ?? attr);
+  return { exprJS: "false", rawText: "" };
+}
+
+// §17.2 — `show=` in lifted markup: the element stays mounted and is hidden with
+// `display: none` while the condition is false (a visibility toggle, not a gate —
+// `if=` removes). Before S469 round 2 lifted markup wrote it as a plain `show`
+// attribute: no toggle, the element always visible. The update is a tracking effect
+// (a live-keyed per-item one in a reconciled row), chosen as emitLiftIfGate chooses.
+function emitLiftShowBinding(lines, elVar, exprJS) {
+  const stmt = `${elVar}.style.display = (${exprJS}) ? "" : "none";`;
+  if (currentLiftReconcileCtx()) {
+    for (const l of maybeWrapLiftPerItemEffect([stmt])) lines.push(l);
+    return;
+  }
+  if (_liftLiveActive() && _jsReadsAnyName(exprJS, _liftLiveArmNames())) {
+    lines.push(stmt);
+    return;
+  }
+  lines.push(`_scrml_effect(function() { ${stmt} });`);
+}
+
 // ---------------------------------------------------------------------------
 // Bug 73 (sibling-gap #2 of Bug 64) — Tier-0 per-item EVENT HANDLER live-keying.
 //
@@ -1484,17 +1537,12 @@ function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "", mount = null) {
     if (attr && attr.quoted === true && refuseStaticAttrWrite(attr.name, attr.value, null, tag, attrs)) continue;
     // §17.1.1 (S469 review F4) — see refuseUnloweredElseChain; the refusal fails the compile.
     if (attr && refuseUnloweredElseChain(attr.name, "in lifted markup", null)) continue;
-    if (attr.value === null && attr.name === "if") {
-      // §17.1 — a bare `if` names no condition: refused, and the element gated off
-      // rather than rendered ungated (fail closed).
-      recordRefusedLowering(new CGError(
-        "E-CG-003",
-        `E-CG-003: the \`if\` on this \`<${tag || "element"}>\` in lifted markup has no condition, so the ` +
-        `compiler cannot gate the element. It is refused rather than rendered ungated (§17.1). Write the ` +
-        `condition as \`if=@cell\`, \`if=fn(…)\` or \`if=(expression)\`.`,
-        { start: 0, end: 0 },
-      ), attr);
-      gateIf("false", "");
+    if (attr.value === null && (attr.name === "if" || attr.name === "show")) {
+      // §17.1 / §17.2 — a bare `if` / `show` names no condition: refused, and the
+      // element gated off / hidden rather than rendered ungated (fail closed).
+      liftConditionValue(null, attr.name, tag, null, attr);
+      if (attr.name === "if") gateIf("false", "");
+      else emitLiftShowBinding(lines, elVar, "false");
     } else if (attr.value === null) {
       // Boolean attribute
       lines.push(`${elVar}.setAttribute(${JSON.stringify(attr.name)}, "");`);
@@ -1525,6 +1573,9 @@ function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "", mount = null) {
       // expression as an `if` attribute; S88–S469 toggled `style.display`, which
       // left the element and its listeners in the DOM while the condition was false).
       gateIf(emitExprField(null, attr.value, liftExprCtx()), attr.value);
+    } else if (attr.name === "show") {
+      // §17.2 — a display toggle (emitLiftShowBinding); it was written as a plain attribute.
+      emitLiftShowBinding(lines, elVar, emitExprField(null, attr.value, liftExprCtx()));
     } else if (attr.name.startsWith("class:")) {
       // §5.5.2 conditional class directive — see the parity branch in
       // emitCreateElementFromMarkup for the value-kind-AST equivalent.
@@ -1812,48 +1863,15 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       }
     }
 
-    // §17.1 — `if=` is a render gate, not a display toggle (see emitLiftIfGate):
-    // the element is returned / appended as the element⇄comment tracked node.
-    // Every value kind an `<each>` row reads is read here too (renderTemplateChildToJs):
-    // a cell, an expression, a call (`if=allowed(@pw)`), a quoted literal. Any other
-    // kind is refused and the element gated off — never written as an `if` attribute
-    // and rendered ungated (fail closed, §17.1.2.3).
-    if (name === "if") {
-      let exprJS;
-      let rawText;
-      if (val && (val.kind === "variable-ref" || val.kind === "expr")) {
-        const raw = val.kind === "variable-ref"
-          ? (val.name || "").replace(/^@/, "")
-          : (val.raw || "");
-        exprJS = emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx());
-        rawText = val.kind === "variable-ref" ? (val.name || "") : (val.raw || "");
-      } else if (val && val.kind === "call-ref") {
-        const rawArgs = val.argExprNodes
-          ? val.argExprNodes.map(n => emitExprField(n, "", liftExprCtx())).join(", ")
-          : (val.args || []).map(a => emitExprField(null, a.trim(), liftExprCtx())).join(", ");
-        exprJS = `${emitExprField(null, val.name, liftExprCtx())}(${rawArgs})`;
-        rawText = `${val.name}(${(val.args || []).join(", ")})`;
-      } else if (val && val.kind === "string-literal") {
-        // A QUOTED condition is still a condition expression (§17.1: `if="@n >= 3"`),
-        // never a string — a non-empty string is truthy, so reading it as one would
-        // render the element whatever the condition says. A whole-value `${…}` is
-        // the same expression.
-        const q = String(val.value ?? "").trim();
-        const interp = /^\$\{([\s\S]*)\}$/.exec(q);
-        rawText = interp ? interp[1].trim() : q;
-        exprJS = rawText === "" ? "false" : emitExprField(null, rawText, liftExprCtx());
-      } else {
-        recordRefusedLowering(new CGError(
-          "E-CG-003",
-          `E-CG-003: the \`if=\` on this \`<${tag}>\` in lifted markup has a value of kind ` +
-          `"${String(val?.kind)}", so the compiler cannot gate the element. It is refused rather than rendered ` +
-          `ungated (§17.1). Write the condition as \`if=@cell\`, \`if=fn(…)\` or \`if=(expression)\`.`,
-          attr.span ?? node.span ?? { start: 0, end: 0 },
-        ), node);
-        exprJS = "false";
-        rawText = "";
-      }
-      _returnVar = emitLiftIfGate(lines, elVar, exprJS, rawText);
+    // §17.1 `if=` (a render gate, emitLiftIfGate: the element is returned / appended
+    // as the element⇄comment tracked node) and §17.2 `show=` (a display toggle,
+    // emitLiftShowBinding). Both read their condition with liftConditionValue — every
+    // value kind an `<each>` row reads; any other kind is refused (E-CG-003) and the
+    // element gated off / hidden, never written as a plain attribute (fail closed).
+    if (name === "if" || name === "show") {
+      const { exprJS, rawText } = liftConditionValue(val, name, tag, attr, node);
+      if (name === "if") _returnVar = emitLiftIfGate(lines, elVar, exprJS, rawText);
+      else emitLiftShowBinding(lines, elVar, exprJS);
       continue;
     }
 
@@ -1872,8 +1890,9 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       const className = name.slice(6);
       let condExpr;
       if (val.kind === "variable-ref") {
-        const rawRef = (val.name || "").replace(/^@/, "");
-        condExpr = emitExprField(val.exprNode, rawRef, liftExprCtx());
+        // The text fallback keeps the `@` (see liftConditionValue): a component body
+        // expanded into lifted markup arrives without its expression node.
+        condExpr = emitExprField(val.exprNode, val.name || "", liftExprCtx());
       } else if (val.kind === "expr") {
         const raw = val.raw ?? "";
         condExpr = emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx());
@@ -1938,8 +1957,10 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       // (no `.advance` / no assign); it stays a plain handler ref. Engine
       // transitions arrive as `call-ref` (`.advance(.X)`) or `expr` (`@e = .X` /
       // `@e.advance(.X)`), handled below. No engine path needed here.
-      const varName = (val.name || "").replace(/^@/, "");
-      const rewritten = emitExprField(val.exprNode, varName, liftExprCtx());
+      // The text fallback keeps the `@` (see liftConditionValue): a component body
+      // expanded into lifted markup arrives without its expression node, and the bare
+      // name was a ReferenceError at run time (S469 round 2).
+      const rewritten = emitExprField(val.exprNode, val.name || "", liftExprCtx());
       if (liftEventName(name) !== null) {
         const eventName = liftEventName(name);
         // Bug 73 — per-item handler live-keying. A bare cell ref (`onclick=@cell`)

@@ -2940,6 +2940,22 @@ export function generateHtml(
       // own emission path owns its mount lifecycle; `if=` on it is a separate arc.
       // ---------------------------------------------------------------------
       const ifAttrCheck = attrs.find((a: any) => a.name === "if");
+      // §17.1 (S469 round 2) — an `if` the gate cannot read (a bare `<b if>`: no
+      // condition) is refused, and the element is not emitted. It used to fall
+      // through to the plain attribute path: rendered ungated, no diagnostic.
+      if (ifAttrCheck && !isGateableIfValue(ifAttrCheck.value) && !/^[A-Z]/.test(tag)) {
+        errors.push(new CGError(
+          "E-CG-003",
+          `E-CG-003: the \`if\` on this \`<${tag}>\` has ` +
+          (ifAttrCheck.value && ifAttrCheck.value.kind && ifAttrCheck.value.kind !== "absent"
+            ? `a value of kind "${String(ifAttrCheck.value.kind)}"`
+            : "no condition") +
+          `, so the compiler cannot gate the element. It is refused rather than rendered ungated (§17.1). ` +
+          `Write the condition as \`if=@cell\`, \`if=fn(…)\` or \`if=(expression)\`.`,
+          ifAttrCheck.span ?? node.span ?? { start: 0, end: 0 },
+        ));
+        return;
+      }
       if (
         ifAttrCheck &&
         isGateableIfValue(ifAttrCheck.value) &&

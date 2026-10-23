@@ -459,3 +459,78 @@ describe("S469 round 2 — F4: a gated-off bind:value input writes nothing", () 
     expect(get("t")).toBe("live");
   });
 });
+
+describe("S469 round 2 — a component whose body reads `@ok` works inside lifted markup", () => {
+  for (const [name, wrap] of [
+    ["a `for … lift` row", (c) => `\${ for (x of @xs) { lift <div>${c}</div> } }`],
+    ["a bare lift", (c) => `\${ lift <div>${c}</div> }`],
+  ]) {
+    test(`${name}: if=@ok / class:on=@ok / title=@ok in the component body read the cell`, async () => {
+      const errors = [];
+      const oe = console.error;
+      console.error = (...a) => errors.push(a.map(String).join(" "));
+      let app;
+      try {
+        app = compileAndMount(`<ok> = true
+<xs> = [1]
+\${ const Pill = <span class="pill" class:on=@ok title=@ok><b class="g" if=@ok>x</b></span> }
+<div id="out">${wrap(`<Pill/>`)}</div>
+`);
+        await flush();
+      } finally {
+        console.error = oe;
+      }
+      expect(app.errors).toEqual([]);
+      expect(app.clientJs).not.toMatch(/\(ok\)|, ok\)/);
+      expect(errors.filter((e) => /ReferenceError/.test(e))).toEqual([]);
+      const pill = document.querySelector("#out .pill");
+      expect(pill.classList.contains("on")).toBe(true);
+      expect(pill.getAttribute("title")).toBe("true");
+      await expectReactiveGate(app, { cell: "ok", off: false, on: true, sel: "#out b.g", openCount: 1, startsOpen: true });
+    });
+  }
+});
+
+describe("S469 round 2 — `show=` in lifted markup is a display toggle (it was written as a plain attribute)", () => {
+  for (const [name, wrap] of [
+    ["a `for … lift` row", (b) => `\${ for (x of @xs) { lift <span>${b}</span> } }`],
+    ["a bare lift", (b) => `\${ lift <span>${b}</span> }`],
+    ["an `if … lift` arm", (b) => `\${ if (true) { lift <span>${b}</span> } }`],
+  ]) {
+    test(`${name}: hidden while false, shown while true, the element stays mounted`, async () => {
+      const app = compileAndMount(`<on> = false
+<xs> = [1]
+\${ function visible() { return @on } }
+<div id="out">${wrap(`<b class="s" show=visible()>x</b>`)}</div>
+`);
+      expect(app.errors).toEqual([]);
+      expect(app.clientJs).not.toMatch(/setAttribute\("show"/);
+      await flush();
+      const el = document.querySelector("#out b.s");
+      expect(el.style.display).toBe("none");
+      for (const v of [true, false, true]) {
+        await set("on", v);
+        expect(document.querySelector("#out b.s")).toBe(el);
+        expect(el.style.display).toBe(v ? "" : "none");
+      }
+    });
+  }
+});
+
+describe("S469 round 2 — a gate flip does not re-render a plain lift group", () => {
+  test("a bare `${ lift … }`: a sibling input keeps its node and value across flips", async () => {
+    const app = compileAndMount(`<ok> = true
+<div id="out">\${ lift <div><input id="field"><b class="g" if=@ok>x</b></div> }</div>
+`);
+    expect(app.errors).toEqual([]);
+    await flush();
+    const field = document.querySelector("#field");
+    field.value = "typed";
+    for (const v of [false, true, false, true]) {
+      await set("ok", v);
+      expect(count("#out b.g")).toBe(v ? 1 : 0);
+      expect(document.querySelector("#field")).toBe(field);
+      expect(field.value).toBe("typed");
+    }
+  });
+});

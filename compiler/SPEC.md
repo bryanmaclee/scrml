@@ -16528,10 +16528,20 @@ The `if=` attribute is a structural conditional. Its value is a condition (§42.
   a function returning markup, a ternary arm) at every position: the root of a `for … lift` row, one root
   of a multi-root row, an element nested at any depth, the root of a non-loop `if … lift` or bare `lift`.
   A quoted condition there is the condition expression, as everywhere; an `if=` value the compiler cannot
-  lower there is **E-CG-003**, never an ungated render. *(S469 — until
-  [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]] closed, impl#1 lowered every lifted position
-  except the sole root of a reconciled `for … lift` row to a `display: none` toggle — the element stayed in
-  the DOM, its listeners reachable — and wrote a call or quoted `if=` value as a plain attribute, ungated.)*
+  lower — there or anywhere, a bare `if` with no condition included — is **E-CG-003**, never an ungated
+  render. "Anything it reads" includes a cell read inside a function the condition calls (`if=isAdmin()`).
+  *(S469 — until [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]] closed, impl#1 lowered every
+  lifted position except the sole root of a reconciled `for … lift` row to a `display: none` toggle — the
+  element stayed in the DOM, its listeners reachable — and wrote a call or quoted `if=` value as a plain
+  attribute, ungated.)*
+  **impl#1 divergence — lifecycle (not visibility).** Inside an `<each>` row and inside lifted markup
+  (every position above, an `if … lift` arm included), impl#1 builds the element ONCE and swaps it with a
+  placeholder: while `expr` is false the element is absent from the DOM, but on false → true the SAME
+  element returns, with its state (an input's typed value, focus history, child nodes) and its inner
+  bindings, which stayed live while it was detached. That is not §6.7.2's lifecycle scope, which destroys
+  on false and re-mounts memorylessly; a top-level `if=` (the mount/unmount template) does follow §6.7.2.
+  Tracked as [[g-row-and-lift-if-gate-not-memoryless-s469]]; until it closes, only the top-level form may
+  be relied on for re-mount-from-scratch semantics.
 
 **Worked example:**
 ```scrml

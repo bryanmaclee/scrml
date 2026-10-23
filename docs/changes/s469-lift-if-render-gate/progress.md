@@ -29,3 +29,14 @@ the one mechanism `<each>` rows use) instead of a `style.display` toggle. Primar
       base tree lives elsewhere), 12 genVar renumbering in shared modules, 4 gate-flag only (conformance
       for-lift-per-item-if-reactive), 6 display-toggle → swap (todomvc, 12-snippets-slots, trucking invoices /
       load-detail, rust-orders, odin-filebrowser). 0 compile-outcome / diagnostic / syntax changes.
+
+## Round 2 (review of f2226103b — FIX)
+
+- [x] F5: pack family renamed n22 -> n23 (sibling lane adds n22).
+- [x] F1: every non-row lifted gate is a tracking render-gate effect; the `@name`-token subscriptions are gone;
+      value-indexed (rows only) decided by detectPredicateShapeBind alone. Pack n23 +indirect guards, +for over a literal.
+- [x] F2: row gate effects self-dispose (queued) when the key no longer resolves; the value bucket is released.
+- [x] F4: lifted bind: input listener guarded (guardDetachedListener).
+- [x] F3: SPEC §17.1 states the lifecycle divergence; gap g-row-and-lift-if-gate-not-memoryless-s469.
+- [x] (a) top-level bare `<b if>` -> E-CG-003 (resolved); (b) component `@ok` in lift -> cell (resolved);
+      (c) timer under a gated element keeps ticking (filed, open); (d) lifted show= -> display toggle (resolved).
