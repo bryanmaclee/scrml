@@ -50,3 +50,19 @@ All 5 `Bug 60 — nested compound render-by-tag …` cases failed at COMPILE: `<
 E-TYPE-031 (unknown validator predicate; §55.1 vocabulary closed since d894e1a04, which migrated the
 unit twin to `pattern(/^[^@]+@[^@]+$/)` but not this browser file). Same migration applied; 5/5 pass.
 Baseline pruned (48 → 43).
+
+## Step 4 — i174 (FIXED, class b — stale harness accessor keys)
+
+`i174 (browser) §2` read/wrote cells through the BARE global accessors with bare names. Since BUG-6
+chunk namespacing (#180) the store key is `<token>$name`, so `get("name")` was `undefined` and
+`set("name", …)` wrote a cell nothing subscribed to. Now keys via `chunkCellKey(clientJs)` (the
+helper the other browser files use). 6/6 pass; assertions unchanged. Baseline 43 → 41.
+
+## Classified, NOT fixed — class c, ALREADY FILED
+
+- `g-each-peritem-markup-value-ternary` (3) and `g-emit-lift-markup-text-interp` (4): `ON ${@.label}` /
+  `Saved ${@cell}` render `ONalpha` / `Savedhello` — the lift/markup-value emitter emits
+  `createTextNode("ON")` (space before the interpolation dropped). Reproduced on main (scratch:
+  `<p>${ @f ? <span>HI ${@n}</span> : "" }</p>` → `createTextNode("HI")`; plain markup keeps
+  `HELLO `). Filed: `g-ast-markup-text-interp-adjacent-space-dropped` (MED, ruling-gated
+  whitespace-model call) and `g-lift-path-drops-whitespace-around-interpolation-s462` (LOW).

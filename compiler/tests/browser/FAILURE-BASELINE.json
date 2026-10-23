@@ -2,7 +2,7 @@
   "_comment": "GENERATED — the browser tier's documented failure NAME SET. Regenerate with `bun scripts/browser-baseline.ts --write`; verify with `--check`. Timings and counts are deliberately excluded (non-deterministic / uninformative). A name LEAVING this list is as much a failure as one joining it: prune it in the same commit that fixes the test.",
   "tier": "compiler/tests/browser",
   "recordedAt": "2026-08-02",
-  "count": 43,
+  "count": 41,
   "failures": [
     "M1 — an <each> list in a swapped region RE-RENDERS > a swapped-in each re-renders after a list change",
     "M1 — an if= mount/unmount controller in a swapped region RE-EVALUATES > a swapped-in if= mounts on true and unmounts on false (not frozen)",
@@ -35,8 +35,6 @@
     "g-emit-lift-markup-text-interp §2 — post-mount render (real module-init order) > THE bug (item 4+5): the markup text child renders the cell VALUE, not the literal `${@cell}`",
     "g-emit-lift-markup-text-interp §2 — post-mount render (real module-init order) > item 4 reactivity: mutating the cell updates the rendered text",
     "g-emit-lift-markup-text-interp §2 — post-mount render (real module-init order) > item 5 ternary: renders span+value when true, empty when false, re-renders on toggle",
-    "i174 (browser) §2 — type-then-clear executed DOM > CANARY: type into the field, then Clear — the visible field clears",
-    "i174 (browser) §2 — type-then-clear executed DOM > programmatic @name write updates a dirty field's .value",
     "navigate-wave1c — an ENGINE route loaded cross-chunk renders + transitions > first cross-chunk visit: the initial arm renders after the swap, and a variant transition re-renders",
     "navigate-wave1c — cross-chunk soft navigation loads the chunk + swaps > the swapped route's reactivity works AFTER the cross-chunk swap (@cell + <each> re-render)",
     "navigate-wave1c — finding #5: a MUTATED reactive shell cell survives a cross-chunk nav > the injected route chunk's eager boot + seed-apply does NOT reset a mutated shell cell",
