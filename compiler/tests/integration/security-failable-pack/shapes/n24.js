@@ -79,13 +79,15 @@ const STATUS = {
   number: { deny: "401", ok: "200", alts: "401 | 403", other: "500" },
   string: { deny: `"denied"`, ok: `"ok"`, alts: `"denied" | "locked"`, other: `"error"` },
   mixed: { deny: "401", ok: "200", alts: `"denied" | 401 | 403`, other: "500" },
+  negative: { deny: "-1", ok: "200", alts: "-2 | -1", other: "-3" },
+  "negative-spaced": { deny: "-1", ok: "200", alts: "-2 | - 1", other: "-3" },
 };
-const ALT_ARMS = (k, sep, ind) => [
-  `${STATUS[k].alts} :> "rejected"${sep[0]}`,
-  `${STATUS[k].other} :> "rejected"${sep[1]}`,
-  `_ :> "LOGGED IN"${sep[2]}`,
+const ALT_ARMS = (k, sep, ind, ar = ":>") => [
+  `${STATUS[k].alts} ${ar} "rejected"${sep[0]}`,
+  `${STATUS[k].other} ${ar} "rejected"${sep[1]}`,
+  `_ ${ar} "LOGGED IN"${sep[2]}`,
 ].map((l) => ind + l).join("\n");
-const ALT_PAGE = (k, pos, sep) => {
+const ALT_PAGE = (k, pos, sep, ar = ":>") => {
   const { deny, ok } = STATUS[k];
   const head = `type AuthErr:enum = { Denied }
 <msg> = "init"
@@ -108,7 +110,7 @@ const ALT_PAGE = (k, pos, sep) => {
   if (pos === "cell") return `${head}    function login(p) {
         @st = code(p)
         @msg = match @st {
-${ALT_ARMS(k, sep, "            ")}
+${ALT_ARMS(k, sep, "            ", ar)}
         }
     }
 }
@@ -116,7 +118,7 @@ ${tail}`;
   if (pos === "call argument") return `${head}    function login(p) {
         @st = code(p)
         @msg = pass(match @st {
-${ALT_ARMS(k, sep, "            ")}
+${ALT_ARMS(k, sep, "            ", ar)}
         })
     }
 }
@@ -125,14 +127,27 @@ ${tail}`;
   return head.replace(`<msg> = "init"\n`, "") + `    function login(p) { @st = code(p) }
 }
 const <msg> = match @st {
-    0 :> "init"${sep[0]}
-${ALT_ARMS(k, sep, "    ")}
+    0 ${ar} "init"${sep[0]}
+${ALT_ARMS(k, sep, "    ", ar)}
 }
 ${tail}`;
 };
-for (const k of Object.keys(STATUS)) {
+for (const k of ["number", "string", "mixed"]) {
   for (const pos of ["cell", "call argument", "derived cell"]) {
     for (const [sn, sep] of SPELLINGS) shapes.push([`literal alternation ${k} deny-list, ${pos} (${sn} arms)`, ALT_PAGE(k, pos, sep)]);
+  }
+}
+
+// S469 r4 (final review of 6f35fa4bb, F1) — a NEGATIVE later alternate (`-2 | -1 :>`, `-2 | - 1 :>`)
+// lost its sign and the alternates before it (`=== 1`), so a denied status of -1 fell to the
+// default-ALLOW arm; with the deprecated `->` arrow too (the raw text joins it as `- >`).
+// Measured on 6f35fa4bb: the `:>` shapes FAIL at the call-argument position, the `->` shapes at
+// the `@cell` / call-argument / derived positions; all PASS after the fix.
+for (const k of ["negative", "negative-spaced"]) {
+  for (const ar of [":>", "->"]) {
+    for (const pos of ["cell", "call argument", "derived cell"]) {
+      for (const [sn, sep] of SPELLINGS) shapes.push([`literal alternation ${k} deny-list ${ar}, ${pos} (${sn} arms)`, ALT_PAGE(k, pos, sep, ar)]);
+    }
   }
 }
 export default shapes;
