@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
-| MED | 680 | 8 |
+| MED | 681 | 8 |
 | LOW | 470 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -145,6 +145,91 @@ ${
 ```
 
 emits `if (_scrml_match_4 === 2) return "low";` — the `1` alternate is gone, so `@k = 1` reads `"hi"`. Mechanism (number heads): the expression parser's line split (`splitMatchArms`) does not start an arm at a literal head, so the first two lines arrive as ONE raw arm `1 | 2 :> "low" 3 :> "mid"`; `splitMultiArmString` registers `2 :>` (a standalone number before an arrow) as an arm start and slices from there, dropping `1 |`. Variant alternations are guarded (`isAlternate`), literal ones are not. A STRING alternation is worse: `"a" | "b" :> "low"` (then `"c" :> "mid"`, `_ :> "hi"`) emits `=== "b"` only in BOTH the newline and the comma spelling, on base and on this branch — the first alternate is dropped even when the arm arrives alone. Measured: the number case as a comma list is correct (each arm arrives as its own raw arm); `const v = match …` with the number arms lowers `=== 1 || === 2` correctly. The reviewer of 2f9176de0 probed other positions and did not reproduce it; `@cell = match …` (a reactive assignment, the raw-arm path) is the position. Not fixed (S435: impl#1 non-security bugs stay gaps unless ruled).
+
+### g-impl1-match-primitive-cell-subject-e-type-025-s469 — a `match` on a reactive cell of a primitive type (`<k>: string`, `number`, `int`, `bool`, or an inferred `<k> = "a"`) is refused as E-TYPE-025 "Cannot match on `asIs`-typed subject" in the statement, `const v =`, derived `const <n>`, cell-initializer and markup `${}` positions, although §18.16 says `match` SHALL accept `string`, `number` and `boolean` values — `NEW S469; MED; open (valid program refused)`
+
+<!-- @gap id=g-impl1-match-primitive-cell-subject-e-type-025-s469 sev=MED status=open locus=compiler/src/type-system.ts(checkMatchDiagnostics — the E-TYPE-025 subject check: an `@cell` subject of a primitive type resolves to `asIs`) prov=dispatch:s469-impl1-arm-commas(r3 test matrix, measured);spec:§18.16,§18.8,§14.13.6 -->
+
+**SPEC.** §18.16 (Literal Match Arms): "`match` SHALL accept values of type `string`, `number`, and `boolean`", and its normative statements repeat it per type ("`match` SHALL accept `string`-typed values" / "`number`-typed values" / "`boolean`-typed values"). §14.13.6 spells the integer and boolean types `int` and `bool`; `int` is a refinement of `number` (S404) and an `int` is a `number` wherever a `number` is expected (§14.13). §18.8's E-TYPE-025 rule is about `asIs` (and `unknown`, §7.5.2) subjects only: "A `match` SHALL NOT be valid over `asIs`-typed values." No SPEC text makes a primitive-typed CELL an `asIs` subject, so each refusal below is a valid program rejected.
+
+**Measured S469 (s469-impl1-arm-commas r3, branch head 6f35fa4bb).** Subject `@k`, a cell declared `<k>: T = v`. Each arm list is `<literal> :> "x"` then `_ :> "y"`; the refused codes are the only Error-severity diagnostics:
+
+| position | `string` | `number` | `int` | `bool` | `number \| string` |
+|---|---|---|---|---|---|
+| statement `match @k { … }` in a function | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | ok |
+| `const v = match @k { … }` in a function | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | ok |
+| derived `const <n> = match @k { … }` | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | ok |
+| cell initializer `<n> = match @k { … }` | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | ok |
+| markup `<p>${match @k { … }}</p>` | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | ok |
+| `@n = match @k { … }` in a function | ok | ok | ok | ok | ok |
+| `@n = f(match @k { … })` (call argument) | ok | ok | ok | ok | ok |
+| `return match k { … }` (`k` a typed parameter) | ok | ok | ok | ok | ok |
+
+Repros, one per refused position (`T` / `v` / `L` = `string` / `"a"` / `"a"`, `number` / `1` / `1`, `int` / `1` / `1`, `bool` / `true` / `true`):
+
+```scrml
+// statement
+<k>: T = v
+<n> = ""
+${
+  function go() {
+    match @k {
+      L :> { @n = "x" }
+      _ :> { @n = "y" }
+    }
+  }
+}
+<button onclick=go()>go</>
+<p>${@n}</>
+```
+
+```scrml
+// const v = match
+<k>: T = v
+<n> = ""
+${
+  function go() {
+    const v = match @k {
+      L :> "x"
+      _ :> "y"
+    }
+    @n = v
+  }
+}
+<button onclick=go()>go</>
+<p>${@n}</>
+```
+
+```scrml
+// derived const cell
+<k>: T = v
+const <n> = match @k {
+  L :> "x"
+  _ :> "y"
+}
+<p>${@n}</>
+```
+
+```scrml
+// cell initializer
+<k>: T = v
+<n> = match @k {
+  L :> "x"
+  _ :> "y"
+}
+<p>${@n}</>
+```
+
+```scrml
+// markup ${}
+<k>: T = v
+<p>${match @k {
+  L :> "x"
+  _ :> "y"
+}}</p>
+```
+
+An untyped cell with an inferred primitive (`<k> = "a"`) is refused the same way in markup. A typed LOCAL (`const s: string = "a"; match s { … }`) and a typed PARAMETER (`function go(s: string) { match s { … } }`) are accepted, so the refusal is specific to an `@cell` subject. The two positions that accept the cell (`@n = match`, the call argument) lower through the expression parser's raw-arm path, which does not run this subject check. Fails closed (the build fails), but on valid code. A union-typed cell (`number | string`) is accepted in every position (the round-3 alternation matrix uses it to stay clear of this gap). Owed: resolve a primitive-typed cell subject to its declared or inferred type in `checkMatchDiagnostics`. Not fixed (S435: impl#1 non-security bugs stay gaps).
 
 ### g-impl1-nested-inline-value-match-in-raw-arm-invalid-logic-s469 — an expression-position `match` whose arm body is another multi-line value `match` (`@n = match @a { .X :> match @b {⏎ .X :> 1⏎ .Y :> 2⏎ }⏎ .Y :> 3 }`) fails as E-CODEGEN-INVALID-LOGIC (a compiler-defect code), in both arm spellings and on base — `NEW S469; MED; open (fails closed)`
 
