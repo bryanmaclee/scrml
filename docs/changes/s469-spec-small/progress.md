@@ -26,3 +26,11 @@ and `compiler/src/cli.js`.
 - [x] E-STMT-NO-EFFECT RULED for the bootstrap (rule 9, §34 row); E-STMT-SPLIT-CONTINUATION minted (rule 5, new §34 row, not yet emitted). severity.scrml current (no bootstrap emitter yet).
 - [x] g-bootstrap-newline-sensitive-rules-remain-s469 rewritten: each item → its ruling, owed to build.
 - [x] xfail case `conformance/cases/block-grammar/s469-statement-needs-semicolon-neg` pins g-dpa063-termination-unbuilt-impl1-legacy → status=carried (bootstrap: PASS). `-impl1-native` NOT pinned: the conformance runner has only the impl1-ts adapter (default parser), so no case can reach `--parser=scrml-native`; left open with the carried note. docs/bootstrap-conformance.md regenerated.
+
+## Round 3 (fidelity review of e5048fb0c — FIX)
+
+- [x] §18.2 leave-stmt "Extent" rewritten (operand ends at the arm's `,` / the list's `}`; line break whitespace, rules 4/8/10).
+- [x] The two match-leave cases (arm-body-ends-at-line-break-neg, expr-arm-continuation-joins) RELABELLED impl#1-legacy (rationale; expectations kept) and excluded from the bootstrap with `dialect.s66` — rewriting them to the ruled reading would fail on impl#1, which still refuses arm commas.
+- [x] `return; f();` examples in the E-STMT-NO-EFFECT row and §40.8; §17.6 `;`-less `lift` alternative removed; SPEC-INDEX Quick Lookup rewritten (regen preserves it).
+- [x] R7 INTERIM row + §40.8 note; R6 note at §7.4; rule 8 break/continue/fail sentence labelled; native parser retired (Status + gap resolved as moot); E-STMT-MISSING-SEMICOLON row narrowed (probed); gap g-scrml-fix-semicolon-arm-comma-rule-unbuilt-s469 filed; nits (on mount, effect=${}, §39 arm head).
+- [x] scripts/state.ts recentSessions pages through the whole log until 8 anchors (no 600 cap).

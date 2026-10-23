@@ -15,8 +15,8 @@ Scope: **1809 of 1809 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 51 | 2.8% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 679 | 37.5% |
-| UNSUPPORTED | 861 | 47.6% |
+| NOT-TWINNED | 681 | 37.6% |
+| UNSUPPORTED | 859 | 47.5% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,15 +26,15 @@ Scope: **1809 of 1809 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 29 of 51; the other 22 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 504 · parse-reject 357.
+UNSUPPORTED by reason: bootstrap-unsupported 504 · parse-reject 355.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **795** — PASS 118 · FAIL 37 · UNSUPPORTED 640. Twin holds 118 (non-vacuous 106). Every twin verdict above is included in the bucket table.
-- `dialect.s66` overrides: 0 replace a twin's expectations · 6 exclude a case.
+Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 118 · FAIL 37 · UNSUPPORTED 638. Twin holds 118 (non-vacuous 106). Every twin verdict above is included in the bucket table.
+- `dialect.s66` overrides: 0 replace a twin's expectations · 8 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (679 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (681 cases; a case counts once per distinct reason):
 
 - 107 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 74 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -56,12 +56,12 @@ NOT-TWINNED by reason (679 cases; a case counts once per distinct reason):
 - 10 — engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
 - 10 — rhs-decl: non-literal initializer needs a type (CTX — O35)
 - 9 — rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
+- 8 — excluded by dialect.s66
 - 8 — rhs-decl: initializer not parsed by impl#1
 - 8 — rhs-decl: object literal needs a struct type (CTX)
 - 8 — theme-body: `…` body (§66.17 — blocked on O17)
 - 6 — engine-simple: engine in a nested / markup position (O38 / nested engine)
 - 6 — engine-simple: nested engine (→ enum-valued child field, structural)
-- 6 — excluded by dialect.s66
 - 6 — program-wrap: impl#1 reads the restructured file differently (+E-FOREIGN-LANG-IN-PROGRAM) — not restructured, no `…` unwrapped
 - 6 — program-wrap: top-level prose (a `…` body reads it as code — §4.18.1 / S441)
 - 5 — engine-simple: engine without a bare-variant `…`
@@ -134,7 +134,7 @@ NOT-TWINNED by reason (679 cases; a case counts once per distinct reason):
 | match-block | 18 | · | · | · | · | 9 | 9 | · | · |
 | match-codes | 25 | · | · | 1 | · | · | 24 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
-| match-leave | 45 | · | · | · | · | 9 | 36 | · | · |
+| match-leave | 45 | · | · | · | · | 11 | 34 | · | · |
 | md | 18 | · | · | 7 | · | 3 | 8 | · | · |
 | meta | 66 | · | · | · | · | 1 | 65 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
@@ -536,7 +536,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (861)
+### UNSUPPORTED (859)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -999,7 +999,6 @@ none
 - `match-codes/e-type-026-match-in-logic-neg` — twin · parse-reject: E-MATCH-ARM-SEPARATOR: Expected `,` between two arms — insert `,` after the arm before this one. An arm list is a comma list: a `,` after every arm, block arms included, the trailing one optional (`{ 
 - `match-leave/argument-match-arm-labelled-break-outer-neg` — twin · parse-reject: E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after ```. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newlin
 - `match-leave/argument-match-arm-return-with-lambda-neg` — twin · bootstrap-unsupported: `.forEach(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `t
-- `match-leave/arm-body-ends-at-line-break-neg` — twin · parse-reject: E-PARSE-ARM: unexpected `;` after the arm's `return`
 - `match-leave/bare-break-continue-arm-no-loop-neg` — twin · bootstrap-unsupported: a `break` arm (§18.2 leave statement) needs a loop, and loops are not in the bootstrap
 - `match-leave/decl-arm-propagate` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
 - `match-leave/decl-multi-scrutinee-arm-braced-return-leaves-fn` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `,`
@@ -1016,7 +1015,6 @@ none
 - `match-leave/dpa068-stmt-bare-break-continue` — twin · bootstrap-unsupported: a `continue` arm (§18.2 leave statement) needs a loop, and loops are not in the bootstrap
 - `match-leave/dpa068-stmt-bare-fail` — twin · parse-reject: E-MATCH-ARM-SEPARATOR: Expected `,` between two arms — insert `,` after the arm before this one. An arm list is a comma list: a `,` after every arm, block arms included, the trailing one optional (`{ 
 - `match-leave/dpa068-stmt-bare-return` — twin · parse-reject: E-MATCH-ARM-SEPARATOR: Expected `,` between two arms — insert `,` after the arm before this one. An arm list is a comma list: a `,` after every arm, block arms included, the trailing one optional (`{ 
-- `match-leave/expr-arm-continuation-joins` — twin · parse-reject: E-MATCH-ARM-SEPARATOR: Expected `,` between two arms — insert `,` after the arm before this one. An arm list is a comma list: a `,` after every arm, block arms included, the trailing one optional (`{ 
 - `match-leave/failable-stmt-arm-braced-fail-propagates` — twin · parse-reject: E-MATCH-ARM-SEPARATOR: Expected `,` between two arms — insert `,` after the arm before this one. An arm list is a comma list: a `,` after every arm, block arms included, the trailing one optional (`{ 
 - `match-leave/failable-stmt-arm-braced-return-leaves-fn` — twin · parse-reject: E-MATCH-ARM-SEPARATOR: Expected `,` between two arms — insert `,` after the arm before this one. An arm list is a comma list: a `,` after every arm, block arms included, the trailing one optional (`{ 
 - `match-leave/given-arm-body-lowered` — twin · parse-reject: E-PARSE-ARM: unexpected `given` in an arm — an arm holds one expression or a `{ … }` block
@@ -1400,7 +1398,7 @@ none
 - `type-state-codes/e-value-function-stored-neg` — twin · bootstrap-unsupported: member access `.size` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `type-state-codes/e-value-function-stored-pos` — twin · bootstrap-unsupported: `.double(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `to
 
-### NOT-TWINNED (679)
+### NOT-TWINNED (681)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1830,10 +1828,12 @@ none
 - `match-block/value-form-block-arm-derived-reactive` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `match-block/value-form-derived` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `match-identifier/giti-016` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
+- `match-leave/arm-body-ends-at-line-break-neg` — excluded (dialect.s66): impl#1-legacy newline shape (S469, dpa-073 F5): pins how impl#1 ends an arm body at a line break in a comma-less arm list with no `;` — a shape the bootstrap refuses by construction (E-MATCH-ARM-SEPARATOR / E-STMT-MI
 - `match-leave/dpa068-engine-msg-arm-bare-return-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `match-leave/engine-msg-arm-break-continue-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `match-leave/engine-msg-arm-inner-loop-and-default-param-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `match-leave/engine-msg-arm-return-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- `match-leave/expr-arm-continuation-joins` — excluded (dialect.s66): impl#1-legacy newline shape (S469, dpa-073 F5): pins impl#1's rule-2 continuation of an arm body in a comma-less arm list — a shape the bootstrap refuses by construction (E-MATCH-ARM-SEPARATOR). Kept unmigrated so im
 - `match-leave/given-arm-in-derived-match` — not mechanical: rhs-decl: type `number | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: initializer extent could not be verified against impl#1's 
 - `match-leave/top-level-given-guard-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `given-guard` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `match-leave/top-level-if-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `if-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
