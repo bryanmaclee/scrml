@@ -436,7 +436,10 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     // a second form, no build-time signal" class the issue was filed on), not a
     // regression; the reactive fix for the nested case is deferred (§17.1, routed
     // to bryan). Aggregate 43 -> 80 (this warning did not exist before #409).
-    "W-IF-IN-EACH": 37,
+    // S469 — W-IF-IN-EACH RETIRED: every per-row `if=` (nested, multi-root root, sole
+    // root) is now the reactive element⇄comment swap, so the 37 nested status-pill
+    // `if=`s are live and the warning has no trigger (SPEC §34, struck row).
+    // Aggregate 314 -> 277.
     // g-interp-in-raw-content (ss11 item 1, SPEC §4.17): the new
     // W-INTERP-IN-RAW-CONTENT warning-lint fires on the three `${...}` interpolations
     // authored inside `<code>` raw-content bodies — these ship the LITERAL

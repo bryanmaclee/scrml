@@ -220,13 +220,12 @@ describe("each-multi-root §1 — codegen root-count gate", () => {
     expect(api.count(".ia")).toBe(1);
   });
 
-  test("PRESERVED: a conditional (`if=`) root counts toward N and stays a CREATE-TIME decision", async () => {
-    // emit-each.ts ~:860 gates the append on the predicate at CREATE time only.
-    // A reused group does not gain or lose roots on later reconciles — that
-    // limitation predates #141 and is deliberately NOT changed here. The
-    // fragment form composes with it correctly: the fragment carries however
-    // many roots actually got appended, and a 1-node fragment behaves exactly
-    // like the single-Node return.
+  test("a conditional (`if=`) root of a multi-root item is REACTIVE both ways and survives reorder (S469)", async () => {
+    // S469 (g-each-peritem-if-multiroot-deferred): the gated root is ALWAYS one node of
+    // the group — the element or its placeholder comment — and the per-row render-gate
+    // effect swaps them in place; `_scrml_ifrow_apply` also replaces the node in the
+    // group's array, so a reorder moves the node that is actually in the DOM. Before
+    // S469 the append was gated once, at create time: a revoked guard kept the element.
     const src = `\${
   <rows> = [ { id: 1, label: "a", flag: true }, { id: 2, label: "b", flag: false } ]
 }
@@ -240,11 +239,19 @@ describe("each-multi-root §1 — codegen root-count gate", () => {
     const { errors, clientJs } = compileToOutputs(src, "if-root");
     expect(errors).toEqual([]);
     expect(clientJs).toContain("return _scrml_item_frag;");
-    // The conditional append is still gated, and still emitted at create time.
-    expect(clientJs).toMatch(/if \(r\.flag\) _scrml_item_frag\.appendChild\(/);
+    expect(clientJs).toMatch(/= _scrml_ifrow_apply\(_scrml_cur_\d+, _scrml_el_\d+, _scrml_ph_\d+, \(r\.flag\)\);/);
+    expect(clientJs).not.toMatch(/if \(r\.flag\) _scrml_item_frag\.appendChild\(/);
     const api = await compileAndLoad(src, "if-root-run");
-    expect(api.count(".always")).toBe(2);
-    expect(api.count(".maybe")).toBe(1);
+    expect(orderOf(".cond")).toEqual(["always:Aa", "maybe:Ma", "always:Ab"]);
+    // Revoke a, grant b, and reorder — same keys, so both groups are reused.
+    api.set("rows", [ { id: 2, label: "b", flag: true }, { id: 1, label: "a", flag: false } ]);
+    expect(orderOf(".cond")).toEqual(["always:Ab", "maybe:Mb", "always:Aa"]);
+    // Reorder back with both granted: the swapped-in nodes move with their groups.
+    api.set("rows", [ { id: 1, label: "a", flag: true }, { id: 2, label: "b", flag: true } ]);
+    expect(orderOf(".cond")).toEqual(["always:Aa", "maybe:Ma", "always:Ab", "maybe:Mb"]);
+    // Delete a: its whole group goes, including the swapped-in node.
+    api.set("rows", [ { id: 2, label: "b", flag: false } ]);
+    expect(orderOf(".cond")).toEqual(["always:Ab"]);
   });
 
   test("Tier-0 multi-`lift` (SPEC §10.8) no longer returns `.firstChild`", () => {

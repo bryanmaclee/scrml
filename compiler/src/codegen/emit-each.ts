@@ -1233,46 +1233,6 @@ function emitEachInterpExprToJs(
   }
 }
 
-// GH #409 — does a per-row `if=` condition reference the iteration item? Only an
-// item-referencing condition is the W-IF-IN-EACH footgun: its per-row truth value
-// depends on data that a same-key reconcile mutates, yet the nested `if=` gate is
-// create-time only. A condition rooted purely in OUTER state re-evaluates through
-// the each render fn's collection effect, so it is deliberately NOT warned.
-//
-// `itemNames` = every in-scope item binding: the `as X` iter var PLUS any
-// `as (k, v)` destructure names (a map/set entry destructure gives a synthetic
-// iter var that never appears in source, so the destructure names are the only
-// user-visible item handle — S239 FN-3). A match is `@.` (contextual item sigil)
-// or any item name as a STANDALONE identifier (not a `.member` suffix, not a
-// substring of a longer name). Quoted string literals are stripped FIRST so an
-// item-name-shaped WORD or an `@.` SUBSTRING inside a string does not false-fire
-// (S239 FP-1 / FP-2 — e.g. `if=(@label == "it works")`, `"user@.x.com"`).
-// GH #409 — the in-scope item binding names for the current each item body: the
-// `as X` iter var plus any `as (k, v)` destructure names (the reconcile ctx is
-// pushed for the item render, so it is live at the per-item `if=` site).
-function _eachItemBindingNames(iterVarName: string): string[] {
-  const rec = currentEachReconcileCtx();
-  const destr = rec && rec.iterVar === iterVarName ? rec.destructure : null;
-  return destr ? [iterVarName, destr[0], destr[1]] : [iterVarName];
-}
-
-function _eachIfCondReferencesItem(rawCond: string, itemNames: string[]): boolean {
-  if (!rawCond) return false;
-  // Strip "…" and '…' string literals (escape-aware) so their interiors are
-  // never scanned for item refs. Template literals are left intact — their
-  // `${…}` interiors legitimately reference state.
-  const code = rawCond
-    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-    .replace(/'(?:[^'\\]|\\.)*'/g, "''");
-  if (code.includes("@.")) return true;
-  for (const name of itemNames) {
-    if (!name) continue;
-    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (new RegExp(`(^|[^\\w$.])${esc}(?![\\w$])`).test(code)) return true;
-  }
-  return false;
-}
-
 // ---------------------------------------------------------------------------
 // §17.1.2 — `if=` on an `<each>` positioned INSIDE another each's row
 // (g-nested-each-if-guard-dropped-s469).
@@ -1364,22 +1324,28 @@ function _rowScopeNames(enclosingIterVar: string | null): Set<string> {
 }
 
 /**
- * Lower the `if=` of a structural `<each>` that sits inside a row to a JS condition
- * evaluated in the row's scope. Returns null when the node carries no `if=`.
+ * Lower the `if=` of a structural `<each>` or `<match>` that sits inside a row to a JS
+ * condition evaluated in the row's scope. Returns null when the node carries no `if=`.
+ * (`element` only names the element in the refusal.)
  *
  * Fails CLOSED: an `if=` value this cannot lower is refused (E-CG-003) and the gate
  * is emitted as `false` — never dropped.
  */
-function lowerRowScopedEachIfGate(node: any, enclosingIterVar: string | null): string | null {
+export function lowerRowScopedEachIfGate(
+  node: any,
+  enclosingIterVar: string | null,
+  element: "each" | "match" = "each",
+): string | null {
   const ifVal = node?.ifCond;
   if (!ifVal) return null;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { ifGateConditionFields, lowerMountToggleCondition } = require("./if-gate-condition.ts") as typeof import("./if-gate-condition.ts");
+  const gated = element === "match" ? "dispatched arm" : "list";
   const refuse = (why: string): string => {
     recordRefusedLowering(new CGError(
       "E-CG-003",
-      `E-CG-003: the \`if=\` on this \`<each>\` inside an \`<each>\` row ${why}, so the compiler cannot gate the ` +
-      `list. It is refused rather than emitted ungated (§17.1.2). Write the condition as \`if=@cell\`, ` +
+      `E-CG-003: the \`if=\` on this \`<${element}>\` inside an \`<each>\` row ${why}, so the compiler cannot gate the ` +
+      `${gated}. It is refused rather than emitted ungated (§17.1.2). Write the condition as \`if=@cell\`, ` +
       `\`if=fn(…)\` or \`if=(expression)\`.`,
       ifVal.span ?? node.span ?? { start: 0, end: 0 },
     ), node);
@@ -1629,15 +1595,27 @@ function renderTemplateChildToJs(
     // element, then gate its append on the lowered predicate below (the each
     // render-fn re-runs on collection change, so the conditional re-evaluates).
     let ifCond: string | null = null;
-    let ifRaw = "";        // GH #409 — pre-lowering condition text (item-ref detection)
-    let ifSpan: any = null; // GH #409 — span for the W-IF-IN-EACH warning
     for (const attr of attrs) {
       if (attr && String(attr.name ?? "") === "if") {
         const v = attr.value;
         const raw = v && v.kind === "expr" ? String(v.raw ?? "")
           : v && v.kind === "variable-ref" ? String(v.name ?? "")
+          : v && v.kind === "call-ref" ? `${v.name}(${(v.args ?? []).join(", ")})`
           : v && v.kind === "string-literal" ? JSON.stringify(String(v.value ?? "")) : "";
-        if (raw) { ifCond = lowerEachExpr(raw, iterVarName); ifRaw = raw; ifSpan = attr.span ?? null; }
+        if (raw) {
+          ifCond = lowerEachExpr(raw, iterVarName);
+        } else {
+          // §17.1 — fail CLOSED: an `if=` whose value this cannot read is refused, and
+          // the element is gated off, never rendered ungated.
+          recordRefusedLowering(new CGError(
+            "E-CG-003",
+            `E-CG-003: the \`if=\` on this \`<${tagName}>\` inside an \`<each>\` row has a value of kind ` +
+            `"${String(v?.kind)}", so the compiler cannot gate the element. It is refused rather than rendered ` +
+            `ungated (§17.1). Write the condition as \`if=@cell\`, \`if=fn(…)\` or \`if=(expression)\`.`,
+            attr.span ?? (child as any).span ?? { start: 0, end: 0 },
+          ), child as { span?: unknown });
+          ifCond = "false";
+        }
         continue;                                 // conditional, not a setAttribute
       }
       renderTemplateAttrToJs(attr, iterVarName, _iterIdxName, elVar, lines, indent, engineCtx, child);
@@ -1770,67 +1748,34 @@ function renderTemplateChildToJs(
     // self-closing: no body.
 
     if (ifCond) {
-      if (isItemRoot && isSoleItemRoot) {
-        // g-each-tier1-if-reactive-structural (SPEC §17.1) — a per-row `if=` on
-        // the SOLE item root is REACTIVE + STRUCTURAL: the reconcile-tracked node
-        // is ALWAYS present — EITHER the element (cond true) OR a placeholder
-        // COMMENT (cond false). Exactly ONE node is appended (root-count stays 1),
-        // and a per-item effect swaps element⇄comment in place, transplanting
-        // `_scrml_key`, so an in-place condition flip OR a same-key reconcile
-        // adds/removes the row (was a create-time-only gate). The initial `_cur`
-        // is the correct node for the create-time condition; `_scrml_ifrow_apply`
-        // is a NO-OP while `_cur` already matches, so the synchronous first effect
-        // run inside createFn does NOT transplant a not-yet-assigned key.
-        const phVar = `_scrml_ph_${nextLocalId()}`;
-        const curVar = `_scrml_cur_${nextLocalId()}`;
-        lines.push(`${indent}const ${phVar} = _scrml_g.document.createComment("scrml-if-row");`);
-        lines.push(`${indent}let ${curVar} = (${ifCond}) ? ${elVar} : ${phVar};`);
-        lines.push(`${indent}${fragmentVar}.appendChild(${curVar});`);
-        for (const _l of maybeWrapEachPerItemEffect(
-          [`${indent}${curVar} = _scrml_ifrow_apply(${curVar}, ${elVar}, ${phVar}, (${ifCond}));`],
-          iterVarName, indent, true,
-        )) lines.push(_l);
-      } else {
-        // DEFERRED — decision (b). A per-row `if=` that is NOT the sole item root
-        // (multi-root item ⇒ a `_scrml_group` with a static ordered array) keeps
-        // the create-time gate: a naive element⇄comment swap would leave the
-        // head's `_scrml_group[idx]` stale (reorder/delete would act on the wrong
-        // node → leak/mis-move), and a member→head back-pointer to patch it would
-        // be a reconcile-core change this arc deliberately avoids. Also the branch
-        // for a NESTED (non-item-root) `if=` child, which was — and stays —
-        // create-time (out of scope for the per-row-if reactive surface). The
-        // multi-root+per-row-if shape is a filed known gap
-        // (W-EACH-PERITEM-IF-MULTIROOT-DEFERRED, docs/known-gaps.md).
-        if (isItemRoot) {
-          lines.push(`${indent}// W-EACH-PERITEM-IF-MULTIROOT-DEFERRED: multi-root item + per-row if= — create-time gate (reactive swap would leave _scrml_group stale). See docs/known-gaps.md.`);
-        } else if (_eachIfCondReferencesItem(ifRaw, _eachItemBindingNames(iterVarName))) {
-          // g-each-nested-peritem-if-not-reactive (GH #409, adopter assetManagement)
-          // — a per-row `if=` on a NESTED (non-item-root) element is a CREATE-TIME
-          // append gate: it is evaluated ONCE when the row is built and never
-          // re-runs on a same-key reconcile, so an ITEM-data-driven condition
-          // silently goes stale (the element is never re-added/removed). Only the
-          // SOLE-item-root `if=` is reactive today (§17.1). The sibling class/text
-          // bindings ARE reactive, which makes the frozen `if=` a silent footgun
-          // with no other build-time signal — surface it LOUDLY at compile.
-          // Scoped to item-referencing conditions: an outer-state-only `if=`
-          // re-evaluates through the each render fn's collection effect, so it is
-          // not this footgun. The reactive fix for the nested case is deferred
-          // §17.1 structural-reactivity design (see docs/known-gaps.md).
-          _eachBindSupportCtx?.errors?.push(new CGError(
-            "W-IF-IN-EACH",
-            `W-IF-IN-EACH: \`if=\` on a nested element inside \`<each>\` is evaluated ONCE when the ` +
-            `row is created and is NOT reactive — when the row's own data changes under the same key, ` +
-            `the element is never re-added or removed and silently goes stale. Only a per-row \`if=\` on ` +
-            `the each body's SOLE root element is reactive today (§17.1). For a per-row conditional, drive ` +
-            `visibility with a reactive \`class\` toggle instead (e.g. \`class=(cond ? "" : "hide")\` with a ` +
-            `\`.hide { display: none }\` rule). See SPEC §17.1.`,
-            ifSpan ?? { start: 0, end: 0 },
-            "warning",
-          ));
-          lines.push(`${indent}// each: nested per-row if= → create-time gate, NOT reactive (W-IF-IN-EACH, GH #409)`);
-        }
-        lines.push(`${indent}if (${ifCond}) ${fragmentVar}.appendChild(${elVar});`);
-      }
+      // §17.1 — a per-row `if=` is REACTIVE + STRUCTURAL wherever it sits in the row:
+      // the element is built once, and EITHER it (cond true) OR a placeholder COMMENT
+      // (cond false) is in the DOM. A per-row render-gate effect swaps one for the other
+      // in place (`_scrml_ifrow_apply`), so a flip of the condition — a row field, an
+      // outer row, or a cell outside the row — adds/removes the element in BOTH
+      // directions. The initial node is the correct one for the create-time condition,
+      // and `_scrml_ifrow_apply` is a no-op while it still matches, so the synchronous
+      // first effect run inside createFn moves nothing.
+      //
+      //   - the SOLE item root: the reconcile-tracked node; the swap transplants
+      //     `_scrml_key` (g-each-tier1-if-reactive-structural).
+      //   - a root of a MULTI-root item: a member of the item's node group; the swap
+      //     also replaces the node in the group's array (and moves the head's
+      //     `_scrml_group`), so a reorder / delete moves the live node
+      //     (g-each-peritem-if-multiroot-deferred, S469).
+      //   - a NESTED (non-root) element: not reconciler-tracked; a plain in-place swap
+      //     (g-each-nested-peritem-if-not-reactive, S469). Before S469 both of these
+      //     were a create-time append gate, which kept the element after its guard was
+      //     revoked — a fail-open guard.
+      const phVar = `_scrml_ph_${nextLocalId()}`;
+      const curVar = `_scrml_cur_${nextLocalId()}`;
+      lines.push(`${indent}const ${phVar} = _scrml_g.document.createComment("scrml-if-row");`);
+      lines.push(`${indent}let ${curVar} = (${ifCond}) ? ${elVar} : ${phVar};`);
+      lines.push(`${indent}${fragmentVar}.appendChild(${curVar});`);
+      for (const _l of emitRowGateEffectLines(
+        [`${indent}${curVar} = _scrml_ifrow_apply(${curVar}, ${elVar}, ${phVar}, (${ifCond}));`],
+        iterVarName, indent,
+      )) lines.push(_l);
     } else {
       lines.push(`${indent}${fragmentVar}.appendChild(${elVar});`);
     }
@@ -2106,9 +2051,42 @@ function renderTemplateChildToJs(
     const _rowScope: string[] = Array.isArray((child as any).rowScopeParams) ? (child as any).rowScopeParams : [];
     const _dispatchArgs = [mountVar, discriminant, ..._rowScope].join(", ");
     const _dispatchLine = `${indent}${dispatchFnName}(${_dispatchArgs});`;
-    for (const l of maybeWrapEachPerItemEffect([_dispatchLine], iterVarName, indent)) {
-      lines.push(l);
+    // §17.1.2 — the match's own `if=` (g-structural-if-inside-each-row-template-fails-open).
+    // A top-level `<match if=…>` is gated by the §17.1 mount controller (a `<template>` +
+    // marker); a row-scoped one has no static HTML, so its gate is the per-row dispatch
+    // effect itself. The condition is lowered by the ONE row-scoped if= lowering (the
+    // nested-each gate's, which calls the top-level controller's `lowerMountToggleCondition`)
+    // in THIS row's scope. True → dispatch; false → the dispatcher's per-mount teardown
+    // (emit-variant-guard `itemScopedTeardown`): the arm's wiring is disposed and its nodes
+    // removed, and the discriminant is not read — no arm is dispatched (§17.1.2.1). The
+    // effect read the condition, so it re-runs whenever it changes, both ways; it is a
+    // render-gate effect (R7-1), so a write that turns the condition false unmounts the arm
+    // before user effects run. An unlowerable `if=` is refused (E-CG-003) and gates false.
+    const _matchGate = lowerRowScopedEachIfGate(child, iterVarName, "match");
+    // The body holds code only (no comment): the enclosing-row re-resolve below scans it
+    // for the outer row names the condition reads, and a comment's text would be scanned too.
+    if (_matchGate !== null) {
+      lines.push(`${indent}// §17.1.2 — the if= on this <match>: while false no arm is dispatched and the mounted arm is torn down.`);
     }
+    const _body: string[] = _matchGate === null ? [_dispatchLine] : [
+      `${indent}if (!(${_matchGate})) {`,
+      `${indent}  __scrml_match_match_${nsId(matchId)}_teardown(${mountVar});`,
+      `${indent}} else {`,
+      `  ${_dispatchLine}`,
+      `${indent}}`,
+    ];
+    const _wrapped = maybeWrapEachPerItemEffect(_body, iterVarName, indent, _matchGate !== null);
+    if (_wrapped === _body && (_matchGate !== null || (child as any).enclosingEachEmpty === true)) {
+      // No live-keyed row ctx here — a match in an `<empty>` body. Its dispatcher is
+      // item-scoped (emit-match), so nothing at module scope re-dispatches it: the call
+      // runs in its own effect, which re-runs when the discriminant or the if= changes.
+      lines.push(`${indent}_scrml_mount_track(_scrml_effect(() => {`);
+      for (const l of enclosingResolvePreludeLines(_body.join("\n"), `${indent}  `)) lines.push(l);
+      for (const l of _body) lines.push("  " + l);
+      lines.push(_matchGate !== null ? `${indent}}, true));` : `${indent}}));`);
+      return;
+    }
+    for (const l of _wrapped) lines.push(l);
     return;
   }
 
@@ -2684,11 +2662,9 @@ function renderTemplateAttrToJs(
   // : "none"`) inline on `elVar`, resolving the condition against the iteration
   // item exactly as the sibling `class:` arm above does.
   //
-  // REACTIVE (wrapped in maybeWrapEachPerItemEffect), UNLIKE a nested per-row
-  // `if=` (which is create-time-frozen — W-IF-IN-EACH — because a reactive
-  // structural swap would leave `_scrml_group` stale). `show=` only toggles CSS
-  // `display`; it never adds or removes the element, so it has none of that
-  // group-staleness barrier and re-evaluates on in-place field mutation, matching
+  // REACTIVE (wrapped in maybeWrapEachPerItemEffect), like a per-row `if=` (the
+  // element⇄comment swap, S469). `show=` only toggles CSS `display`; it never adds
+  // or removes the element, and re-evaluates on in-place field mutation, matching
   // the Tier-0 top-level `show=` and the sibling `class:` binding.
   if (aName === "show") {
     let cond: string;
@@ -3651,6 +3627,24 @@ function enclosingResolvePreludeLines(codeForScan: string, indent: string): stri
     out.push(`${indent}if (${enc.iterVar} === null) return;`);
     for (const l of emitDestructureBindingLines(enc.destructure, enc.iterVar, indent)) out.push(l);
   }
+  return out;
+}
+
+/**
+ * §17.1 / §17.1.2 (S469) — the per-row RENDER-GATE effect a row-scoped `if=` runs in
+ * (a markup `if=` swap, a `<match if=…>` dispatch gate). Inside a live-keyed row this is
+ * `maybeWrapEachPerItemEffect(…, gate = true)` — the row item (and any outer row item
+ * the body reads) is re-resolved by key first. Where no row ctx is live (an `<empty>`
+ * body) the body still gets its own effect: a gate evaluated once is not a gate.
+ * `bodyLines` must be code only — the outer-row scan reads their text.
+ */
+function emitRowGateEffectLines(bodyLines: string[], iterVarName: string, indent: string): string[] {
+  const wrapped = maybeWrapEachPerItemEffect(bodyLines, iterVarName, indent, true);
+  if (wrapped !== bodyLines) return wrapped;
+  const out: string[] = [`${indent}_scrml_mount_track(_scrml_effect(() => {`];
+  for (const l of enclosingResolvePreludeLines(bodyLines.join("\n"), `${indent}  `)) out.push(l);
+  for (const l of bodyLines) out.push("  " + l);
+  out.push(`${indent}}, true));`);
   return out;
 }
 

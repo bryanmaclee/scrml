@@ -16521,6 +16521,17 @@ The `if=` attribute is a structural conditional. Its value is a condition (§42.
 - `if=expr` MAY appear on any HTML element, on a component, or on one of the three scrml-defined
   structural elements enumerated in §17.1.2 (`<engine>`, `<match>`, `<each>`). It SHALL NOT appear
   on a state object opener, nor on any other scrml-defined structural element (§17.1.2).
+- `if=` means the same thing wherever the element sits, including inside an `<each>` row template at any
+  depth (§17.1.2.3): the element is absent while `expr` is false, and `expr` is re-evaluated whenever
+  anything it reads changes, in both directions. *(PA correction S469 — a guard is never fail-open; see
+  §17.1.2.3.)* **Exception, Tier-0 lifted markup (impl#1 today, not the intended semantics):** inside
+  `${ … lift … }` markup only ONE position is a real render gate — the SOLE root of a reconciled
+  `for … lift` row whose condition is not the value-indexed `@cell == expr` shape (lowered to the same
+  element⇄comment swap). Every other `if=` in lifted markup — an element NESTED inside the lifted root, the
+  root of a non-loop `if … lift`, one root of a multi-root lift row, and a value-indexed sole root — is a
+  `display: none` toggle: the element stays in the DOM while `expr` is false. This exception is a defect
+  pending [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]], not a license; it closes when the
+  lift lowering adopts the structural swap.
 
 **Worked example:**
 ```scrml
@@ -16872,31 +16883,57 @@ stated only for `<engine>`.
   REJECTED** surface — `E-IF-IN-DISPATCHED-ARM` fires, on markup and on all three structural elements
   alike. This subsection widens `if=` ON the structural element, not inside its arms.
 
-#### 17.1.2.3 Position carve-out — NOT inside an `<each>` row template
+#### 17.1.2.3 Position — inside an `<each>` row template (honoured, reactive)
 
-**`if=` on a structural element positioned INSIDE an `<each>` row template is NOT honored, and this
-subsection's SHALL does not reach there.** Stated as a carve-out rather than left implicit because the
-failure is silent and it fails in the DANGEROUS direction.
+**`if=` inside an `<each>` row template SHALL be honoured exactly as it is everywhere else**, on every
+element §17.1 admits it on — the three structural elements of §17.1.2 and any HTML element or
+component — and at every position in the row: the sole item root, any root of a multi-root item, an
+element nested at any depth below a root, a nested `<each>`'s row, and an `<each>`'s `<empty>` body.
 
-Measured S302:
+- While the condition is false the element — for a structural element, its rendered output (§17.1.2) —
+  SHALL NOT be in the DOM. A `<match>`'s dispatched arm is unmounted (its wiring disposed), not hidden.
+- The condition SHALL be re-evaluated whenever anything it reads changes — a cell outside the row, the
+  row's own item, an enclosing row's item — in BOTH directions, including when a keyed or index-keyed
+  reconcile reuses the row's DOM. A row-scoped `if=` is never a create-time snapshot.
+- An `if=` value the compiler cannot lower in the row SHALL be a compile error (**E-CG-003**), never an
+  ungated render. A visibility guard fails closed.
 
-| position | behaviour |
-|---|---|
-| structural element in ordinary markup | gated correctly, reactively — the §17.1.2 surface |
-| markup `if=` on the ROW-ROOT of an `<each>` row | gated correctly (`_scrml_ifrow_apply`) |
-| markup `if=` on a NON-ROOT element inside a row template | emits nothing — fails **CLOSED** (never renders) |
-| **structural `if=` inside a row template** | emits nothing — fails **OPEN** (**never gated**) |
-
-The last two rows are the point: markup and structural are **not** consistent here, they fail in
-opposite directions. A fail-CLOSED miss is loud — the author sees content missing immediately. A
-fail-OPEN miss silently ships content the author wrote a predicate to withhold, and is invisible during
-development whenever that predicate is usually true.
-
-This is an inherited limitation of §17.1's row-template lowering, not a defect introduced by the §17.1.2
-widening — a per-row mount capability for non-root hosts is the deferred `W-EACH-PERITEM-IF-*` family
-(§17.7). The durable fix is ONE diagnostic covering markup and structural positions together; until it
-lands, an author placing a conditional inside a row template gets no signal on either path. Tracked as
-[[g-structural-if-inside-each-row-template-fails-open]].
+> **Provenance:** PA correction S469 (`s469-match-if-in-row`), under the owner's standing principle that
+> a guard is never fail-open — no fork, no ruling owed. Supersedes the S302 carve-out struck below and the
+> premise of the retired §34 `W-IF-IN-EACH` row (*"an outer-state-only condition re-evaluates through the
+> each render fn's collection effect"*), which was **false**: the collection effect does not re-run on an
+> outer cell, and a re-run reuses the keyed row, so an outer-state guard on a nested element stayed
+> rendered after it was revoked, with no diagnostic. **Direction of change:** newly-honouring — every
+> listed position was fail-open (a nested `<each if=>`, a `<match if=>`, a revoked nested / multi-root
+> markup `if=`) or fail-closed (a nested markup `if=` granted after row creation) before; impl#1 honours
+> all of them (emit-each.ts: `lowerRowScopedEachIfGate`, `emitRowGateEffectLines`, `_scrml_ifrow_apply`).
+> **Not covered here:** a markup `if=` inside Tier-0 lifted markup (`${ … lift … }`) — see the exception
+> in §17.1 (only the sole root of a reconciled `for … lift` row with a non-value-indexed condition is a
+> render gate on impl#1; the rest are `display` toggles), tracked as
+> [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]]. **And `<engine>` in a row:** an `<engine>`
+> inside an `<each>` row renders NOTHING on impl#1 today — no state body, `if=` or not, no diagnostic —
+> so it fails closed and "honoured" does not yet apply to it; whether an engine may sit in a row at all
+> (§51.0.A singleton) is ruling-gated, tracked as [[g-engine-inside-each-row-renders-nothing]].
+>
+> ~~**`if=` on a structural element positioned INSIDE an `<each>` row template is NOT honored, and this
+> subsection's SHALL does not reach there.** Stated as a carve-out rather than left implicit because the
+> failure is silent and it fails in the DANGEROUS direction.~~
+>
+> ~~Measured S302: structural element in ordinary markup — gated correctly, reactively; markup `if=` on
+> the ROW-ROOT of an `<each>` row — gated correctly (`_scrml_ifrow_apply`); markup `if=` on a NON-ROOT
+> element inside a row template — emits nothing, fails CLOSED (never renders); structural `if=` inside a
+> row template — emits nothing, fails OPEN (never gated).~~
+>
+> ~~The last two rows are the point: markup and structural are **not** consistent here, they fail in
+> opposite directions. A fail-CLOSED miss is loud — the author sees content missing immediately. A
+> fail-OPEN miss silently ships content the author wrote a predicate to withhold, and is invisible during
+> development whenever that predicate is usually true.~~
+>
+> ~~This is an inherited limitation of §17.1's row-template lowering, not a defect introduced by the §17.1.2
+> widening — a per-row mount capability for non-root hosts is the deferred `W-EACH-PERITEM-IF-*` family
+> (§17.7). The durable fix is ONE diagnostic covering markup and structural positions together; until it
+> lands, an author placing a conditional inside a row template gets no signal on either path. Tracked as
+> [[g-structural-if-inside-each-row-template-fails-open]].~~
 
 ---
 
@@ -28016,7 +28053,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | W-EACH-PROMOTABLE | §17.X (NEW per S130), §56 | Info-level lint: a `${ for (let x of @cell) { lift <markup/> } }` site is the Tier-0 iteration form per HU-1; the Tier-1 structural form `<each in=@cell as x>...</each>` (NEW SPEC §17.X) is more discoverable, composes with the `<empty>` sub-element + inferred `key=`, and is the canonical iteration shape per the S130 HU-1 ratifications. The lint message names the suggested mechanical promotion target (`<each in=@cell as x>...</each>`) and cross-refs the `bun scrml promote --each <file>[:line]` CLI helper (Landing 3 of the 5-landing iteration arc). Tier-0 form continues to compile cleanly; the lint is informational only. Mirrors the `I-MATCH-PROMOTABLE` (§56) pattern — declaration-site promotion lint along the case-analysis / iteration tier ladders. **Fires:** emitted by `compiler/src/lint-w-each-promotable.js` (Stage 6.4c in `api.js`); conservative fire conditions — for-stmt's iterable must contain a reactive `@cell` ref AND body must contain at least one `lift-expr`. (Catalog addition S130 HU-1 iteration Landing 1; cross-ref the §17.X NEW subsection introduced in Landing 2.) | Info |
 | W-EACH-BIND-ITEM-FIELD-DEFERRED | §5.4, §17.X (per S130) | Warning: a per-item `bind:*` directive inside a `<each>` body binds to an ITERATION-ITEM field (`bind:value=@.field` or `bind:value=@<iterVar>.field`) rather than an OUTER / shared reactive cell. Per §5.4 a `bind:*` on `<input>`/`<textarea>`/`<select>` generates a two-way binding (value side + write-back); the OUTER-cell case (`bind:value=@cell`) is wired via the shared `emitBindDirectiveBody` lowering (i175, GH adopter #175), but the item-field two-way path (write-back into the per-item element's own iteration value) is NOT yet lowered — the input renders and displays but does NOT write back. The compiler emits this warning INSTEAD of the pre-i175 silent `// deferred` comment so the adopter knows the write-back is inactive. Resolution: bind to an outer reactive cell (`bind:value=@cell`), or track the per-item edit through an event handler for now. **Fires:** emitted by `compiler/src/codegen/emit-each.ts` (`renderTemplateAttrToJs`, the `bind:*` branch) as `CGError(…, "warning")` → partitions into `result.warnings`. (Catalog addition i175 — per-item `bind:value` value-side wiring, GH adopter #175.) | Warning |
 | W-EACH-KEY-001 | §17.X (NEW per S130) | Info-level lint: a `<each in=@cell>` site has no inferable per-item key — items don't expose a `.id` field and no explicit `key=expr` was given. Per HU-1 Q5 ratification three legitimate causes are named in the message: (a) order-stable list (positional keying is appropriate); (b) items carry stable identity in a different field (e.g. `key=item.email`); (c) positional fallback is intentional — suppress via `key=__index__` (the canonical sentinel for "positional intentional"). The runtime defaults to positional keying when this lint fires; correctness is preserved. The `<each of=N>` form is NEVER warned because `key=@.` (the index itself) is the structurally-correct positional default. Inference heuristic — the source `@cell`'s declared type is looked up in the per-file typeRegistry; if it resolves to a struct with an `id` field, the inference succeeds silently. Adopters with `.id`-bearing items get zero-friction auto-keying. **Fires:** emitted by `compiler/src/lint-w-each-key.js` (Stage 6.4d in `api.js`). (Catalog addition S130 HU-1 iteration Landing 1; cross-ref the §17.X NEW subsection introduced in Landing 2.) | Info |
-| W-IF-IN-EACH | §17.1, §17.X (per S130) | Warning: a per-item `if=` directive on a NESTED (non-item-root) element inside a `<each>` body is compiled to a CREATE-TIME append gate — it is evaluated ONCE when the row is first built and is NOT reactive. When the row's own data later changes under the SAME key (a same-key reconcile), the gated element is never re-added or removed, so an item-data-driven condition silently goes stale. Per §17.1 only a per-row `if=` on the each body's SOLE structural item root is reactive today (lowered to the element⇄comment structural swap via `_scrml_ifrow_apply`); the nested case is a deliberately-deferred §17.1 reactive-surface extension (a naive nested swap needs a per-child anchor + a reconcile-core interaction the per-row-if arc avoids). The sibling `class`/`${…}` text bindings on the same row ARE reactive, which makes the frozen `if=` a silent footgun with no other build-time signal — this warning surfaces it at compile. **Scope:** fires only when the `if=` condition REFERENCES the iteration item (`@.field` or the bound iter var) — an outer-state-only condition re-evaluates through the each render fn's collection effect and is not warned. Does NOT fire for the reactive sole-item-root `if=`, nor for a top-level (`outside <each>`) `if=` (which is reactive). Resolution: for a per-row conditional, drive visibility with a reactive `class` toggle instead (`class=(cond ? "" : "hide")` with a `.hide { display: none }` rule), or lift the `if=` to the sole item root. **Fires:** emitted by `compiler/src/codegen/emit-each.ts` (`renderTemplateChildToJs`, the deferred nested-per-row-`if=` branch) as `CGError(…, "warning")` → partitions into `result.warnings`. (Catalog addition — GH adopter #409, assetManagement; per-row nested `if=` non-reactivity.) | Warning |
+| ~~W-IF-IN-EACH~~ | §17.1, §17.X (per S130) | **RETIRED S469 (PA correction).** Every per-row `if=` — the sole item root, a root of a multi-root item, a nested element — is lowered to the reactive element⇄comment swap (`_scrml_ifrow_apply`) in a per-row render-gate effect (§17.1.2.3), so the create-time gate this warned about no longer exists and the warning has no trigger; impl#1 no longer emits it. Its scope premise was also false: an outer-state-only condition did NOT re-evaluate through the collection effect, so the most dangerous case (a revoked outer-state guard) was the one it did not warn about. Original row, struck: ~~Warning: a per-item `if=` directive on a NESTED (non-item-root) element inside a `<each>` body is compiled to a CREATE-TIME append gate — it is evaluated ONCE when the row is first built and is NOT reactive. When the row's own data later changes under the SAME key (a same-key reconcile), the gated element is never re-added or removed, so an item-data-driven condition silently goes stale. Per §17.1 only a per-row `if=` on the each body's SOLE structural item root is reactive today (lowered to the element⇄comment structural swap via `_scrml_ifrow_apply`); the nested case is a deliberately-deferred §17.1 reactive-surface extension (a naive nested swap needs a per-child anchor + a reconcile-core interaction the per-row-if arc avoids). The sibling `class`/`${…}` text bindings on the same row ARE reactive, which makes the frozen `if=` a silent footgun with no other build-time signal — this warning surfaces it at compile. **Scope:** fires only when the `if=` condition REFERENCES the iteration item (`@.field` or the bound iter var) — an outer-state-only condition re-evaluates through the each render fn's collection effect and is not warned. Does NOT fire for the reactive sole-item-root `if=`, nor for a top-level (`outside <each>`) `if=` (which is reactive). Resolution: for a per-row conditional, drive visibility with a reactive `class` toggle instead (`class=(cond ? "" : "hide")` with a `.hide { display: none }` rule), or lift the `if=` to the sole item root. **Fires:** emitted by `compiler/src/codegen/emit-each.ts` (`renderTemplateChildToJs`, the deferred nested-per-row-`if=` branch) as `CGError(…, "warning")` → partitions into `result.warnings`. (Catalog addition — GH adopter #409, assetManagement; per-row nested `if=` non-reactivity.)~~ | — |
 | E-API-BASE-MISSING | §60.2, §60.9 | (S210 W2 — wired by the `<api>` parser, `api-primitive-a2-2026-06-20`.) An `<api>` declaration (SPEC §60) has no `base=` URL. Per §60.2 an `<api>` SHALL declare a `base=` URL — the base address of the external HTTP boundary it types — plus one or more endpoint declarations (`<api base="https://api.example.com"> name(Req?) -> METHOD "path" : ResponseT </api>`). Without `base=` the endpoints have no resolvable address. Fires once per `<api>` opener at parse time, anchored at the opener span. Emitted by the `block.name === "api"` dispatch in `compiler/src/ast-builder.js` (`case "markup"`). Resolution: add a `base="…"` string attribute to the opener. Partitions into `result.errors`. | Error |
 | E-API-METHOD-INVALID | §60.2, §60.9 | (S210 W2 — wired by the `<api>` parser, `api-primitive-a2-2026-06-20`.) An `<api>` endpoint declaration (SPEC §60.2) names an HTTP method that is not in the recognized set. Per §60.2 `http-method ::= GET | POST | PUT | PATCH | DELETE`. Fires once per offending endpoint line at parse time, anchored at the endpoint's source line. Emitted by the `block.name === "api"` dispatch in `compiler/src/ast-builder.js`. Resolution: use one of GET/POST/PUT/PATCH/DELETE. Partitions into `result.errors`. | Error |
 | E-API-RESPONSE-TYPE-UNDECLARED | §60.2, §60.9 | (S210 W2 — wired by the `<api>` parser, `api-primitive-a2-2026-06-20`.) An `<api>` endpoint declaration (SPEC §60.2) has a well-formed head (`name(Req?) -> METHOD "path"`) but omits its `: ResponseT` response type. Per §60.2 each endpoint SHALL declare a response type — the type argument to `parseVariant` (§41.13) that decodes the boundary response. Fires once per offending endpoint line at parse time, anchored at the endpoint's source line; the parser RECOVERS by recording the endpoint with a null response type (uniform node shape; W3 re-validates / resolves). Emitted by the `block.name === "api"` dispatch in `compiler/src/ast-builder.js`. Resolution: append `: SomeType` (e.g. `getUser(...) -> GET "/users/${id}" : User`). Partitions into `result.errors`. | Error |

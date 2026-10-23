@@ -2175,6 +2175,9 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
     for (let i = 0; i < _ns.length; i++) {
       _ns[i]._scrml_key = key;
       if (i > 0) _ns[i]._scrml_group_member = true;
+      // S469 — every node of a multi-root group knows its group's array, so a per-row
+      // if= swap (_scrml_ifrow_apply) can put the live node in its slot.
+      if (_ns.length > 1) _ns[i]._scrml_group_of = _ns;
     }
     if (_ns.length > 1) _ns[0]._scrml_group = _ns;
     return _ns[0];
@@ -2594,6 +2597,16 @@ function _scrml_ifrow_apply(cur, el, ph, on) {
   if (cur === want) return cur;
   want._scrml_key = cur._scrml_key;
   if (cur._scrml_group_member) want._scrml_group_member = true;
+  // S469 — a root of a MULTI-root item: replace the node in its group's array (and,
+  // for the head, move the array itself), so a later reorder / delete / replace of
+  // the group acts on the node that is actually in the DOM.
+  const grp = cur._scrml_group_of;
+  if (grp) {
+    const i = grp.indexOf(cur);
+    if (i >= 0) grp[i] = want;
+    want._scrml_group_of = grp;
+    if (cur._scrml_group) { want._scrml_group = cur._scrml_group; cur._scrml_group = undefined; }
+  }
   if (cur.parentNode) cur.parentNode.replaceChild(want, cur);
   return want;
 }
