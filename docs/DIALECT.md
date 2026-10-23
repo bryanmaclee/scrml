@@ -9,7 +9,7 @@ Owner rulings: scrml-support `user-voice-scrml.md`, S469, "public docs teach the
 | Gate | Checks | In CI |
 |---|---|---|
 | `bun scripts/snippet-gate.js` | every `.scrml` file under `docs/tutorial-snippets/`, `docs/readme-snippets/`, `docs/website/`; and that a fence under `<!-- snippet: path -->` is an exact copy of its file | yes (required) |
-| `bun scripts/claim-gate.js` | every other ` ```scrml ` fence in the public surface (README, NERDME, DESIGN, tutorial, `docs/articles/`, `docs/adopter/`, `docs/lin.md`, `docs/external-js.md`, `docs/website/*.md`) | not yet (`--report` to measure) |
+| `bun scripts/claim-gate.js` | every other ` ```scrml ` fence in the public surface (README, NERDME, DESIGN, tutorial, `docs/articles/`, `docs/adopter/`, `docs/lin.md`, `docs/external-js.md`, `docs/website/*.md`) | advisory: the `tracking` job runs it with `continue-on-error`, because it still fails on main (dated `docs/articles/` pieces and two `docs/website/` announcements in the older dialect); `--report` to measure |
 
 Both print per-mode counts: impl1 and bootstrap (ruled).
 

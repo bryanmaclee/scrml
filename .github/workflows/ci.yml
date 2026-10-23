@@ -549,6 +549,16 @@ jobs:
       - name: Bootstrap severity table (tracking; report staleness)
         continue-on-error: true
         run: bun scripts/gen-bootstrap-severity.ts --check
+      # S469 — the claim gate (scripts/claim-gate.js): every ```scrml fence in the public surface
+      # (README, NERDME, DESIGN, tutorial, docs/articles, docs/adopter, docs/lin.md, docs/external-js.md,
+      # docs/website/*.md) compiles — ruled documents with the bootstrap, the rest with impl#1 — plus
+      # the surface floor (a new public page with scrml in it must be gated or listed). TRACKING, not
+      # blocking: it FAILS on main today (33 impl#1 blocks in dated articles + two website announces,
+      # docs/changes/s469-docs-migrate-3/progress.md). Promote it into `checks` (and gate.needs) once
+      # `bun scripts/claim-gate.js` exits 0 on main. snippet-gate is already blocking, in `checks`.
+      - name: Claim gate (tracking; fails on main until the dated articles are dispositioned)
+        continue-on-error: true
+        run: bun scripts/claim-gate.js
 
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   # windows — NON-BLOCKING (continue-on-error; NOT a required check). Surfaces OS-path-separator
