@@ -389,8 +389,8 @@ jobs:
           node --check benchmarks/todomvc/dist/app.client.js
       # S313 (bryan RULED promote): the browser tier is assertable by its failure NAME SET, so it is
       # BLOCKING. `--check` exits 0 while the set is unchanged and 1 the moment a name joins or leaves.
-      # Placement is deliberate: AFTER the gauntlet step, which materialises benchmarks/todomvc/dist, so
-      # the script's two env-exclusions are moot here. NOT in pre-push: local environments vary more
+      # Placement is deliberate: AFTER the gauntlet step, which materialises benchmarks/todomvc/dist (S469:
+      # `pretest` now builds it too, so the script carries NO env-exclusions). NOT in pre-push: local environments vary more
       # than CI, and a local difference is what made the first recorded baseline wrong.
       - name: Browser tier failure NAME-SET gate (S313 — a regression here blocks)
         run: bun scripts/browser-baseline.ts --check
