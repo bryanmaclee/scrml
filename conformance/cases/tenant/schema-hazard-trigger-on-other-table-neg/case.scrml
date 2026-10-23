@@ -7,8 +7,8 @@
     // The trigger fires on a write the tenant floor never scopes (config has no tenant_id).
     ${
         function go() {
-            ?{`INSERT INTO config (k, v) VALUES ('a', 'b')`}.run()
-            return "ok"
+            ?{`INSERT INTO config (k, v) VALUES ('a', 'b')`}.run();
+            return "ok";
         }
     }
     <button onclick=${ go() }>go</button>

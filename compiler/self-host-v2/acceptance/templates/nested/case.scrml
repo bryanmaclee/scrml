@@ -2,7 +2,7 @@
 <program>
     let <n:int=7/>
     fn wrap(k: int) -> string {
-        return `<${`(${k})`}|${ "}" }|${ /* } ` */ k + 1 }>`
+        return `<${`(${k})`}|${ "}" }|${ /* } ` */ k + 1 }>`;
     }
     <main>
         <p id="out">${wrap(@n)}</p>

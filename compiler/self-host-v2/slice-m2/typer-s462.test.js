@@ -43,9 +43,9 @@ describe("rule 5 — every member of the set infers, unannotated, with no diagno
     ["a sequence literal of one type", "<r=([1, 2, 3])/>"],
     ["a chain through another inferred cell", "<q=(@b + 1)/>\n    <r=(@q * 2)/>"],
     ["a cell declared later (order does not matter)", "<r=(@later + 1)/>\n    <later=(@b * 3)/>"],
-    ["a call with a declared return", "fn tw(x: int) -> int { return x * 2 }\n    <r=(tw(@b))/>"],
-    ["a call with an inferred-and-proven return (params by annotation)", "function h(y: number) { if (y > 0) { return y } else { return 0 } }\n    <r=(h(@n))/>"],
-    ["a call whose proven return reads a cell", "function g() { return @b + 1 }\n    <r=(g())/>"],
+    ["a call with a declared return", "fn tw(x: int) -> int { return x * 2; }\n    <r=(tw(@b))/>"],
+    ["a call with an inferred-and-proven return (params by annotation)", "function h(y: number) { if (y > 0) { return y; } else { return 0; } }\n    <r=(h(@n))/>"],
+    ["a call whose proven return reads a cell", "function g() { return @b + 1; }\n    <r=(g())/>"],
   ]) {
     test(label, () => { expect(codes(BASE + "    " + decl)).toEqual([]); });
   }
@@ -76,10 +76,10 @@ describe("rule 5 — every member of the set infers, unannotated, with no diagno
 // ---------------------------------------------------------------------------
 describe("rule 6 — the inferred type is the base type", () => {
   test("`(1 + 2)` is an `int` cell any int may be written into", () => {
-    expect(codes("    let <k=(1 + 2)/>\n    function f() { @k = 7 }")).toEqual([]);
+    expect(codes("    let <k=(1 + 2)/>\n    function f() { @k = 7; }")).toEqual([]);
   });
   test("the inferred `int` is a write contract — a number literal into it is E-TYPE-031", () => {
-    expect(codes("    let <k=(1 + 2)/>\n    function f() { @k = 2.5 }")).toEqual(["E-TYPE-031"]);
+    expect(codes("    let <k=(1 + 2)/>\n    function f() { @k = 2.5; }")).toEqual(["E-TYPE-031"]);
   });
   test("a sequence read carries no grant: a copy of `int[append]` is `int[]` (an append is refused)", () => {
     const t = typeOf("    <xs:int[append]=([1])/>\n    <ys=(@xs)/>", "ys").ty;
@@ -100,9 +100,9 @@ describe("rule 7 — outside the set is E-DECL-TYPE-NOT-INFERABLE", () => {
     ["`!`", "<r=(!@f)/>"],
     ["`&&`", "<r=(@f && @f)/>"],
     ["`is given`", "<r=(@f is given)/>"],
-    ["a call whose returns differ in type", "function k(b: bool) { if (b) { return 1 } else { return \"x\" } }\n    <r=(k(true))/>"],
-    ["a call returning a shadowed local of another type (fix round 1, F1)", "function g(x: int) { if (@f) { const x: string = \"a\"\n return x } else { return 1 } }\n    <r=(g(1))/>"],
-    ["a call that is recursive", "function rec(x: int) { if (x > 0) { return rec(x - 1) } else { return 0 } }\n    <r=(rec(2))/>"],
+    ["a call whose returns differ in type", "function k(b: bool) { if (b) { return 1; } else { return \"x\"; } }\n    <r=(k(true))/>"],
+    ["a call returning a shadowed local of another type (fix round 1, F1)", "function g(x: int) { if (@f) { const x: string = \"a\";\n return x; } else { return 1; } }\n    <r=(g(1))/>"],
+    ["a call that is recursive", "function rec(x: int) { if (x > 0) { return rec(x - 1); } else { return 0; } }\n    <r=(rec(2))/>"],
     ["a ternary with arms of two kinds", "<r=(@f ? 1 : \"x\")/>"],
   ]) {
     test(label, () => { expect(codes(S + "    " + decl)).toContain("E-DECL-TYPE-NOT-INFERABLE"); });
@@ -110,7 +110,7 @@ describe("rule 7 — outside the set is E-DECL-TYPE-NOT-INFERABLE", () => {
   // s469 #1471 delta review HIGH-B: a function that returns on some paths and falls off on another is
   // refused where it is declared (E-BOOTSTRAP-UNSUPPORTED) — that report owns it
   test("a call that does not return on every path — the callee is refused (its fall-off would be `undefined`)", () => {
-    expect(codes(S + "    function half(x: int) { if (x > 0) { return 1 } }\n    <r=(half(2))/>")).toContain("E-RETURN-INCOMPLETE");
+    expect(codes(S + "    function half(x: int) { if (x > 0) { return 1; } }\n    <r=(half(2))/>")).toContain("E-RETURN-INCOMPLETE");
   });
   test("`(!0)` is no longer an `int` literal (dd D3) — the typer refuses the `!`, and that report owns it (no cascade)", () => {
     expect(codes("    <r=(!0)/>")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
@@ -211,7 +211,7 @@ describe("rule 9 — boundaries need a written type", () => {
 // ---------------------------------------------------------------------------
 describe("rule 10 — an unproven annotation is an error", () => {
   // genuinely unprovable (fix round 1, F2): its returns are an `int` and a `string`
-  const MK = "    function mk(b: bool) { if (b) { return 5 } else { return \"five\" } }\n";
+  const MK = "    function mk(b: bool) { if (b) { return 5; } else { return \"five\"; } }\n";
   test("`:int` over a call whose return is neither declared nor proven", () => {
     expect(codes(MK + "    <v:int=(mk(true))/>")).toEqual(["E-DECL-TYPE-UNPROVEN"]);
   });
@@ -219,11 +219,11 @@ describe("rule 10 — an unproven annotation is an error", () => {
     expect(codes(MK + "    <v:int=(mk(true) + 1)/>")).toEqual(["E-DECL-TYPE-UNPROVEN"]);
   });
   test("a call's ARGUMENT is not its value — `tw(mk(true))` with `tw -> int` is proven", () => {
-    expect(codes(MK + "    fn tw(x: int) -> int { return x * 2 }\n    <v:int=(tw(mk(true)))/>")).toEqual([]);
+    expect(codes(MK + "    fn tw(x: int) -> int { return x * 2; }\n    <v:int=(tw(mk(true)))/>")).toEqual([]);
   });
   test("a declared return, or a proven one, is silent", () => {
-    expect(codes("    function mk() -> int { const k: int = 5\n return k }\n    <v:int=(mk())/>")).toEqual([]);
-    expect(codes("    function six() { return 6 }\n    <v:int=(six() + 1)/>")).toEqual([]);
+    expect(codes("    function mk() -> int { const k: int = 5;\n return k; }\n    <v:int=(mk())/>")).toEqual([]);
+    expect(codes("    function six() { return 6; }\n    <v:int=(six() + 1)/>")).toEqual([]);
   });
   test("a written type over a value merely OUTSIDE the inference set (a member path) is not 'unproven'", () => {
     expect(codes("    type U:struct = { name: string }\n    <u:U=({ name: \"a\" })/>\n    <l:string=(@u.name)/>")).toEqual([]);
@@ -237,32 +237,32 @@ describe("rule 10 — an unproven annotation is an error", () => {
     expect(frontEnd(mods, [{ path: "app.scrml", src }]).diags.map((d) => d.code)).toEqual(["E-DECL-TYPE-UNPROVEN"]);
   });
   test("fix round 1, F2 — what the typer determines proves: a typed local, a member path through declared types, a comparison", () => {
-    expect(codes("    function mk() { const k: int = 5\n return k }\n    <v:int=(mk())/>")).toEqual([]);
-    expect(codes("    type U:struct = { name: string }\n    <u:U=({ name: \"a\" })/>\n    function nm() { return @u.name }\n    <v:string=(nm())/>")).toEqual([]);
+    expect(codes("    function mk() { const k: int = 5;\n return k; }\n    <v:int=(mk())/>")).toEqual([]);
+    expect(codes("    type U:struct = { name: string }\n    <u:U=({ name: \"a\" })/>\n    function nm() { return @u.name; }\n    <v:string=(nm())/>")).toEqual([]);
     expect(codes(MK + "    <r:bool=(mk(true) == 1)/>")).toEqual([]);
   });
   test("fix round 1, F1 — a returned name resolves through the body's scopes: an arm binder shadowing a parameter is untyped", () => {
-    const pre = "    type E:enum = { Bad, Worse }\n    function bad()! E { fail .Bad }\n    function g(e: int) { bad() !{ _ e :> { return e } }\n return e }\n";
+    const pre = "    type E:enum = { Bad, Worse }\n    function bad()! E { fail .Bad; }\n    function g(e: int) { bad() !{ _ e :> { return e; } };\n return e; }\n";
     expect(codes(pre + "    <r=(g(1))/>")).toEqual(["E-DECL-TYPE-NOT-INFERABLE"]);
     expect(codes(pre + "    <r:int=(g(1))/>")).toEqual(["E-DECL-TYPE-UNPROVEN"]);
   });
   test("fix round 1, F5 — a proof failing inside an already-refused function is not a second report", () => {
-    expect(codes("    function g(x) { return x }\n    <r=(g(1))/>")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes("    function g(x) { return x; }\n    <r=(g(1))/>")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("recursion stays unproven (the ruled fail-closed core)", () => {
-    expect(codes("    function rec(n: int) { if (n > 0) { return rec(n - 1) } else { return 0 } }\n    <v:int=(rec(2))/>")).toEqual(["E-DECL-TYPE-UNPROVEN"]);
+    expect(codes("    function rec(n: int) { if (n > 0) { return rec(n - 1); } else { return 0; } }\n    <v:int=(rec(2))/>")).toEqual(["E-DECL-TYPE-UNPROVEN"]);
   });
   test("fix round 2, N1 — `&&` / `||` are a determined `bool` only when BOTH operands are (JavaScript returns an operand)", () => {
-    const REC = "    function rec(n: int) { if (n > 0) { return rec(n - 1) } else { return \"s\" } }\n";
-    expect(codes(REC + "    function g() { return rec(1) || rec(2) }\n    <r=(g())/>\n    <q=(@r ? 1 : 2)/>")).toEqual(["E-DECL-TYPE-NOT-INFERABLE"]);
+    const REC = "    function rec(n: int) { if (n > 0) { return rec(n - 1); } else { return \"s\"; } }\n";
+    expect(codes(REC + "    function g() { return rec(1) || rec(2); }\n    <r=(g())/>\n    <q=(@r ? 1 : 2)/>")).toEqual(["E-DECL-TYPE-NOT-INFERABLE"]);
     expect(codes(REC + "    <r:bool=(rec(1) || false)/>")).toEqual(["E-DECL-TYPE-UNPROVEN"]);
-    expect(codes("    let <a:bool=true/>\n    function g() { return @a && false }\n    <r=(g())/>\n    <q=(@r ? 1 : 2)/>")).toEqual([]);
+    expect(codes("    let <a:bool=true/>\n    function g() { return @a && false; }\n    <r=(g())/>\n    <q=(@r ? 1 : 2)/>")).toEqual([]);
     // a provably non-bool operand: the typer's E-OPERATOR-OPERAND-TYPE owns it (no second report)
-    expect(codes("    let <n:int=1/>\n    function g() { return @n || 2 }\n    <r:int=(g())/>")).toEqual(["E-OPERATOR-OPERAND-TYPE", "E-OPERATOR-OPERAND-TYPE"]);
+    expect(codes("    let <n:int=1/>\n    function g() { return @n || 2; }\n    <r:int=(g())/>")).toEqual(["E-OPERATOR-OPERAND-TYPE", "E-OPERATOR-OPERAND-TYPE"]);
   });
   test("fix round 2, N2 — an `as=` handle resolves in its OWNER's scope (the program's), never another declaration's", () => {
     const pre = "<chip:struct>\n    let <label:int=7/>\n</> renders <p>${label}</p>\n<pane:struct>\n    let <label:string=\"c\"/>\n</> renders <div><chip as=w/></div>\n";
-    const src = pre + "<program>\n    function g() { return @w.label }\n    <r=(g())/>\n    <q=(@r * 2)/>\n    <main><pane as=w/></main>\n</program>\n";
+    const src = pre + "<program>\n    function g() { return @w.label; }\n    <r=(g())/>\n    <q=(@r * 2)/>\n    <main><pane as=w/></main>\n</program>\n";
     const r = frontEnd(mods, [{ path: "app.scrml", src }]);
     expect(r.diags.map((d) => d.code)).toEqual(["E-OPERATOR-OPERAND-TYPE"]);     // @r is the PANE's label: a string
     const p = r.typed.tables.decls.find((d) => d.sym.id === r.typed.tables.program.id);
@@ -270,7 +270,7 @@ describe("rule 10 — an unproven annotation is an error", () => {
   });
   test("re-review #3 nit — a REDECLARED handle is E-HANDLE-REDECLARE's alone (no own-value cascade)", () => {
     const pre = "<chip:struct>\n    let <label:int=7/>\n</> renders <p>${label}</p>\n";
-    const src = pre + "<program>\n    function g() { return @w.label }\n    <r:int=(g())/>\n    <main><chip as=w/><chip as=w/></main>\n</program>\n";
+    const src = pre + "<program>\n    function g() { return @w.label; }\n    <r:int=(g())/>\n    <main><chip as=w/><chip as=w/></main>\n</program>\n";
     expect(frontEnd(mods, [{ path: "app.scrml", src }]).diags.map((d) => d.code)).toEqual(["E-HANDLE-REDECLARE"]);
   });
   test("the message names the cause and the two fixes", () => {

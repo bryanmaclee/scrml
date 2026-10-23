@@ -110,7 +110,7 @@ function withLibLine(from, to) {
 function appWith(markup, fns = "") {
   return {
     path: "app.scrml",
-    src: `\${ import { dropdown, Openness } from "./lib/dropdown.scrml" }\n<program>\n${fns}\n    <main>\n${markup}\n    </main>\n</program>\n`,
+    src: `\${ import { dropdown, Openness } from "./lib/dropdown.scrml"; }\n<program>\n${fns}\n    <main>\n${markup}\n    </main>\n</program>\n`,
   };
 }
 
@@ -132,14 +132,14 @@ describe("more §66.20 diagnostics the subset reaches", () => {
 
   test("E-FIELD-PRIVATE-WRITE — a cross-file write to a field that is not exported (§66.14)", () => {
     const lib = withLibLine("export let <value:string=\"\"/>", "export let <value:string=\"\"/>\n    let <note:string=\"\"/>");
-    const app = appWith("<dropdown as=country label=\"a\" options=([\"x\"])/>", "    function f() { @country.note = \"x\" }");
+    const app = appWith("<dropdown as=country label=\"a\" options=([\"x\"])/>", "    function f() { @country.note = \"x\"; }");
     expect(codes(run([lib, app]))).toEqual(["E-FIELD-PRIVATE-WRITE"]);
     // the same write to the EXPORTED field is fine
-    expect(codes(run([lib, appWith("<dropdown as=country label=\"a\" options=([\"x\"])/>", "    function f() { @country.value = \"x\" }")]))).toEqual([]);
+    expect(codes(run([lib, appWith("<dropdown as=country label=\"a\" options=([\"x\"])/>", "    function f() { @country.value = \"x\"; }")]))).toEqual([]);
   });
 
   test("a typed parameter lowers to a typed Core Param read as a Local; an unannotated one is reported", () => {
-    const app = appWith("<dropdown as=country label=\"a\" options=([\"x\"])/>", "    function setValue(v: string) { @country.value = v }");
+    const app = appWith("<dropdown as=country label=\"a\" options=([\"x\"])/>", "    function setValue(v: string) { @country.value = v; }");
     const r = run([LIB(), app]);
     expect(codes(r)).toEqual([]);
     const f = r.core.fns[0];
@@ -150,7 +150,7 @@ describe("more §66.20 diagnostics the subset reaches", () => {
   });
 
   test("E-WRITE-NOT-GRANTED — `reset` of a field without `replace` (L4: reset IS a replace)", () => {
-    const app = appWith("<p>x</p>", "    <audit:string[free, append]=([])/>\n    function f() { reset(@audit) }");
+    const app = appWith("<p>x</p>", "    <audit:string[free, append]=([])/>\n    function f() { reset(@audit); }");
     expect(codes(run([LIB(), app]))).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
 });
@@ -190,10 +190,10 @@ ${fns}
   };
 }
 
-const DOC_FNS = `    function publish() { @d = { ...@d, phase: .Live } }
-    function retract() { @d = { ...@d, phase: .Draft } }
-    function bumpY() { @p = { ...@p, y: 5 } }
-    function replaceP() { @p = { x: 1, y: 2 } }`;
+const DOC_FNS = `    function publish() { @d = { ...@d, phase: .Live }; }
+    function retract() { @d = { ...@d, phase: .Draft }; }
+    function bumpY() { @p = { ...@p, y: 5 }; }
+    function replaceP() { @p = { x: 1, y: 2 }; }`;
 
 describe("O58 (b) — `@x = { ...@x, f: v }` is the field edit `@x.f = v`; a genuine replace is authoritative", () => {
   test("the spread lowers to field writes: a Transition on the instance's graph field, a FieldAt on the struct", () => {
@@ -207,7 +207,7 @@ describe("O58 (b) — `@x = { ...@x, f: v }` is the field edit `@x.f = v`; a gen
   });
 
   test("a spread to a state NO write can reach (no incoming edge, not initial) is refused at compile time", () => {
-    const r = run([docProgram(DOC_FNS + "\n    function archive() { @d = { ...@d, phase: .Archived } }")]);
+    const r = run([docProgram(DOC_FNS + "\n    function archive() { @d = { ...@d, phase: .Archived }; }")]);
     expect(codes(r)).toEqual(["E-ENGINE-INVALID-TRANSITION"]);
   });
 
@@ -278,26 +278,26 @@ async function spreadOutcome(fn, tag) {
 
 describe("O58 (b) — a spread reads ONE snapshot: it means what the genuine replace means (§66.10.1, §66.11.3.1)", () => {
   test("a struct-cell swap `{ ...@p, x: @p.y, y: @p.x }` swaps (the genuine replace's 2,1 — never 2,2)", async () => {
-    const genuine = await spreadOutcome("    function go() { @p = { x: @p.y, y: @p.x } }", "snap-genuine");
+    const genuine = await spreadOutcome("    function go() { @p = { x: @p.y, y: @p.x }; }", "snap-genuine");
     expect(genuine.pt).toBe("2,1");
-    const spread = await spreadOutcome("    function go() { @p = { ...@p, x: @p.y, y: @p.x } }", "snap-swap");
+    const spread = await spreadOutcome("    function go() { @p = { ...@p, x: @p.y, y: @p.x }; }", "snap-swap");
     expect(spread.pt).toBe(genuine.pt);
   });
 
   test("override order does not matter: `{ ...@p, y: @p.x + 10, x: @p.y }` → 2,11", async () => {
-    expect((await spreadOutcome("    function go() { @p = { ...@p, y: @p.x + 10, x: @p.y } }", "snap-order")).pt).toBe("2,11");
+    expect((await spreadOutcome("    function go() { @p = { ...@p, y: @p.x + 10, x: @p.y }; }", "snap-order")).pt).toBe("2,11");
   });
 
   test("a value reading its own and a sibling field sees the pre-write snapshot: `{ ...@p, x: @p.x + @p.y, y: @p.x }` → 3,1", async () => {
-    expect((await spreadOutcome("    function go() { @p = { ...@p, x: @p.x + @p.y, y: @p.x } }", "snap-self")).pt).toBe("3,1");
+    expect((await spreadOutcome("    function go() { @p = { ...@p, x: @p.x + @p.y, y: @p.x }; }", "snap-self")).pt).toBe("3,1");
   });
 
   test("an INSTANCE spread swap `{ ...@pp, a: @pp.b, b: @pp.a }` swaps (the instance path, not only the struct path)", async () => {
-    expect((await spreadOutcome("    function go() { @pp = { ...@pp, a: @pp.b, b: @pp.a } }", "snap-inst")).pair).toBe("2,1");
+    expect((await spreadOutcome("    function go() { @pp = { ...@pp, a: @pp.b, b: @pp.a }; }", "snap-inst")).pair).toBe("2,1");
   });
 
   test("the classification is unchanged: still one contract-checked FieldAt Write per override, values evaluated first", async () => {
-    const { r } = await spreadOutcome("    function go() { @p = { ...@p, x: @p.y, y: @p.x } }", "snap-shape");
+    const { r } = await spreadOutcome("    function go() { @p = { ...@p, x: @p.y, y: @p.x }; }", "snap-shape");
     const st = r.core.fns.find((f) => f.sym.hint === "go").body.stmts;
     // S440: the instance is resolved once (Let inst = Handle(…)); the pre-statement value is read
     // once (Let before = @p, strict snapshot); the writes are grouped in one all-or-nothing Commit
@@ -322,9 +322,9 @@ describe("O58 (b) — a spread reads ONE snapshot: it means what the genuine rep
   });
 
   test("a LONE override stays a single Write (no Commit); a snapshot Let only when its value reads `@p`", async () => {
-    const lone = (await spreadOutcome("    function go() { @p = { ...@p, x: 4 } }", "snap-lone")).r;
+    const lone = (await spreadOutcome("    function go() { @p = { ...@p, x: 4 }; }", "snap-lone")).r;
     expect(lone.core.fns.find((f) => f.sym.hint === "go").body.stmts.map((s) => s.variant)).toEqual(["Write"]);
-    const reads = (await spreadOutcome("    function go() { @p = { ...@p, x: @p.y } }", "snap-lone-reads")).r;
+    const reads = (await spreadOutcome("    function go() { @p = { ...@p, x: @p.y }; }", "snap-lone-reads")).r;
     expect(reads.core.fns.find((f) => f.sym.hint === "go").body.stmts.map((s) => s.variant)).toEqual(["Let", "Write"]);
   });
 });
@@ -372,7 +372,7 @@ ${fns}
 }
 
 // `live()` moves phase Draft → Live (so phase → Gone is then an edge while stage → Gone is not).
-const LIVE = "    function live() { @g = { ...@g, phase: .Live } }";
+const LIVE = "    function live() { @g = { ...@g, phase: .Live }; }";
 
 async function atomicRun(fn, tag) {
   const r = run([gateProgram(`${LIVE}\n${fn}`)]);
@@ -392,24 +392,24 @@ async function atomicRun(fn, tag) {
 
 describe("RULED S440 — a spread write is ALL-OR-NOTHING on a runtime refusal", () => {
   test("two contract-carrying fields, the SECOND refused: the instance is byte-identical to before", async () => {
-    const o = await atomicRun("    function go() { @g = { ...@g, phase: .Gone, stage: .Gone } }", "atomic-second");
+    const o = await atomicRun("    function go() { @g = { ...@g, phase: .Gone, stage: .Gone }; }", "atomic-second");
     expect(o.after).toBe(o.before);
     expect(o.afterText).toBe(o.beforeText);
   });
 
   test("the FIRST refused (override order does not matter): nothing applied", async () => {
-    const o = await atomicRun("    function go() { @g = { ...@g, stage: .Gone, phase: .Gone } }", "atomic-first");
+    const o = await atomicRun("    function go() { @g = { ...@g, stage: .Gone, phase: .Gone }; }", "atomic-first");
     expect(o.after).toBe(o.before);
   });
 
   test("a contract-free-of-graph (`let`) field alongside a refused graph field: the `let` write is not applied either", async () => {
-    const o = await atomicRun("    function go() { @g = { ...@g, note: \"n1\", stage: .Gone } }", "atomic-let");
+    const o = await atomicRun("    function go() { @g = { ...@g, note: \"n1\", stage: .Gone }; }", "atomic-let");
     expect(o.after).toBe(o.before);
     expect(o.afterText).toBe("G: Live/Draft/n0");
   });
 
   test("a granted move (`stage` Draft → Live) alongside a refused one (`phase` Live → Draft, the initial state): neither applied", async () => {
-    const o = await atomicRun("    function go() { @g = { ...@g, stage: .Live, phase: .Draft } }", "atomic-move");
+    const o = await atomicRun("    function go() { @g = { ...@g, stage: .Live, phase: .Draft }; }", "atomic-move");
     const fn = o.r.core.fns.find((f) => f.sym.hint === "go").body.stmts;
     expect(fn.map((s) => s.variant)).toEqual(["Let", "Let", "Let", "Commit"]);
     expect(fn[3].data.writes.map((s) => [s.data.edit, s.data.check])).toEqual([["Transition", "RuntimeEdge"], ["Transition", "RuntimeEdge"]]);
@@ -445,13 +445,13 @@ describe("RULED S440 — a spread write is ALL-OR-NOTHING on a runtime refusal",
   });
 
   test("a spread with ZERO overrides (`@g = { ...@g }`, `@p = { ...@p }`) is the same value: nothing is written", () => {
-    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g }\n @p = { ...@p } }`)]);
+    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g };\n @p = { ...@p }; }`)]);
     expect(codes(r)).toEqual([]);
     expect(r.core.fns.find((f) => f.sym.hint === "go").body.stmts).toEqual([]);
   });
 
   test("check.scrml C7 bites: a one-write Commit, a Commit holding a non-Write, a Commit write storing a non-Local", () => {
-    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, phase: .Gone, stage: .Gone } }`)]);
+    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, phase: .Gone, stage: .Gone }; }`)]);
     expect(mods.check.checkCore(r.core)).toEqual([]);
     const fn = r.core.fns.find((f) => f.sym.hint === "go");
     const commit = fn.body.stmts[3];
@@ -465,7 +465,7 @@ describe("RULED S440 — a spread write is ALL-OR-NOTHING on a runtime refusal",
   });
 
   test("the printed commit checks every edge BEFORE the first write (the emitted JS, read as a developer would)", async () => {
-    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, stage: .Live, phase: .Draft } }`)]);
+    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, stage: .Live, phase: .Draft }; }`)]);
     const { out } = await loadProgram(r.core, "atomic-js");
     const body = /function go\(\) \{([\s\S]*?)\n\}/.exec(out.js)[1];
     const at = (re) => body.search(re);
@@ -480,7 +480,7 @@ describe("RULED S440 — a spread write is ALL-OR-NOTHING on a runtime refusal",
   });
 
   test("when every override is granted, ALL apply (the commit is not a no-op)", async () => {
-    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, phase: .Gone, note: \"n1\" } }`)]);
+    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, phase: .Gone, note: \"n1\" }; }`)]);
     expect(codes(r)).toEqual([]);
     const { rt } = await loadProgram(r.core, "atomic-ok");
     click(document.querySelector("button.live"));
@@ -490,7 +490,7 @@ describe("RULED S440 — a spread write is ALL-OR-NOTHING on a runtime refusal",
   });
 
   test("through a `given`-narrowed handle (`given c = @g :> { @g = { ...@g, … } }`): all-or-nothing too", async () => {
-    const o = await atomicRun("    function go() { given c = @g :> { @g = { ...@g, phase: .Gone, stage: .Gone } } }", "atomic-given");
+    const o = await atomicRun("    function go() { given c = @g :> { @g = { ...@g, phase: .Gone, stage: .Gone }; } }", "atomic-given");
     expect(o.after).toBe(o.before);
   });
 });
@@ -507,10 +507,10 @@ const TRIPLE = (fns) => ({
   src: `<program>
     type P:struct = { let x: int, let y: int, let z: int }
     let <p:P=({ x: 1, y: 2, z: 3 })/>
-    function bump() -> int { @p.z = 99
- return 5 }
-    function touch() -> int { @p.x = 99
- return 7 }
+    function bump() -> int { @p.z = 99;
+ return 5; }
+    function touch() -> int { @p.x = 99;
+ return 7; }
 ${fns}
     <main>
         <p class="pt">\${@p.x},\${@p.y},\${@p.z}</p>
@@ -531,19 +531,19 @@ async function tripleAfter(fn, tag) {
 
 describe("RULED S440 — STRICT SNAPSHOT: every `@x` read in a spread-override literal sees the pre-statement value", () => {
   test("the bump case `{ ...@p, x: bump(), y: @p.z }` (bump writes @p.z = 99) → 5,3,99 (was 5,99,99)", async () => {
-    expect(await tripleAfter("    function go() { @p = { ...@p, x: bump(), y: @p.z } }", "strict-bump")).toBe("5,3,99");
+    expect(await tripleAfter("    function go() { @p = { ...@p, x: bump(), y: @p.z }; }", "strict-bump")).toBe("5,3,99");
   });
 
   test("a swap with a call in between `{ ...@p, x: @p.y, y: touch(), z: @p.x }` (touch writes @p.x = 99) → 2,7,1 (was 2,7,99)", async () => {
-    expect(await tripleAfter("    function go() { @p = { ...@p, x: @p.y, y: touch(), z: @p.x } }", "strict-swap-call")).toBe("2,7,1");
+    expect(await tripleAfter("    function go() { @p = { ...@p, x: @p.y, y: touch(), z: @p.x }; }", "strict-swap-call")).toBe("2,7,1");
   });
 
   test("rotate-3 `{ ...@p, x: @p.y, y: @p.z, z: @p.x }` → 2,3,1", async () => {
-    expect(await tripleAfter("    function go() { @p = { ...@p, x: @p.y, y: @p.z, z: @p.x } }", "strict-rotate3")).toBe("2,3,1");
+    expect(await tripleAfter("    function go() { @p = { ...@p, x: @p.y, y: @p.z, z: @p.x }; }", "strict-rotate3")).toBe("2,3,1");
   });
 
   test("a LONE override reading after a call in its own value `{ ...@p, y: bump() + @p.z }` → 1,8,99 (was 1,104,99)", async () => {
-    expect(await tripleAfter("    function go() { @p = { ...@p, y: bump() + @p.z } }", "strict-lone")).toBe("1,8,99");
+    expect(await tripleAfter("    function go() { @p = { ...@p, y: bump() + @p.z }; }", "strict-lone")).toBe("1,8,99");
   });
 
   test("an INSTANCE spread: `{ ...@g, note: mark(), stage: @g.phase }` (mark moves phase Draft → Live) — stage gets the pre-statement Draft; mark's phase write survives", async () => {
@@ -551,9 +551,9 @@ describe("RULED S440 — STRICT SNAPSHOT: every `@x` read in a spread-override l
       path: "strict-inst.scrml",
       src: `${GATES}
 <program>
-    function mark() -> string { @g.phase = .Live
- return "m" }
-    function go() { @g = { ...@g, note: mark(), stage: @g.phase } }
+    function mark() -> string { @g.phase = .Live;
+ return "m"; }
+    function go() { @g = { ...@g, note: mark(), stage: @g.phase }; }
     <main>
         <gate as=g title="G"/>
         <button class="go" onclick=go()>go</button>
@@ -591,18 +591,18 @@ renders <p class="box">\${a},\${b},\${c}</p>
     let <n:int=0/>
     <log:int[free, append]=([])/>
     function stamp() -> int {
-        @log.append(1)
-        return 1
+        @log.append(1);
+        return 1;
     }
     function e1${twin ? "W" : ""}() -> int {
-        if (@n > 0) { @h = { ...@h, a: stamp() + @h.b * 0 } }
-        return 0
+        if (@n > 0) { @h = { ...@h, a: stamp() + @h.b * 0 }; }
+        return 0;
     }
     function e2${twin ? "W" : ""}() -> int {
-        ${guard ? "if (@log.length < 40) { @h.c = @log.length }" : "@h.c = @log.length"}
-        return 0
+        ${guard ? "if (@log.length < 40) { @h.c = @log.length; }" : "@h.c = @log.length"};
+        return 0;
     }
-${twin ? "    function e1() -> int { return 0 }\n    function e2() -> int { return 0 }\n" : ""}    function go() { @n = 1 }
+${twin ? "    function e1() -> int { return 0; }\n    function e2() -> int { return 0; }\n" : ""}    function go() { @n = 1; }
     <main>
         <box as=h title="B"/>
         <p class="e1">\${e1()}</p>
@@ -630,7 +630,7 @@ ${twin ? "    function e1() -> int { return 0 }\n    function e2() -> int { retu
   }
 
   test("the snapshot Lets name only the fields read (instance spread: `before_phase`, `before_title`; never a whole-instance snapshot)", async () => {
-    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, stage: @g.phase, note: @g.title } }`)]);
+    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, stage: @g.phase, note: @g.title }; }`)]);
     expect(codes(r)).toEqual([]);
     const { out } = await loadProgram(r.core, "n1-shape");
     const body = /function go\(\) \{([\s\S]*?)\n\}/.exec(out.js)[1];
@@ -642,7 +642,7 @@ ${twin ? "    function e1() -> int { return 0 }\n    function e2() -> int { retu
   });
 
   test("a read of the WHOLE `@g` in an override takes the whole snapshot — only then (it reads every field lexically anyway)", async () => {
-    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, stage: .Live, note: (@g == @g ? "same" : "diff") } }`)]);
+    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, stage: .Live, note: (@g == @g ? "same" : "diff") }; }`)]);
     expect(codes(r)).toEqual([]);
     expect(mods.check.checkCore(r.core)).toEqual([]);
     const { out } = await loadProgram(r.core, "n1-whole");
@@ -662,18 +662,18 @@ ${twin ? "    function e1() -> int { return 0 }\n    function e2() -> int { retu
 // ---------------------------------------------------------------------------
 describe("RULED S440 — a duplicate override key is a compile error (E-STRUCT-DUPLICATE-KEY)", () => {
   test("an INSTANCE spread `{ ...@g, phase: .Gone, phase: .Live }` is refused, once, at the second key", () => {
-    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, phase: .Gone, phase: .Live } }`)]);
+    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, phase: .Gone, phase: .Live }; }`)]);
     expect(codes(r)).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
     expect(r.diags[0].message).toContain("`phase` is named twice");
   });
 
   test("a STRUCT-CELL spread `{ ...@p, x: 5, x: 6 }` is refused", () => {
-    expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, x: 6 } }")]))).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
+    expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, x: 6 }; }")]))).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
   });
 
   test("three of one key report twice; distinct keys are fine", () => {
-    expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, y: 1, x: 6, x: 7 } }")]))).toEqual(["E-STRUCT-DUPLICATE-KEY", "E-STRUCT-DUPLICATE-KEY"]);
-    expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, y: 6 } }")]))).toEqual([]);
+    expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, y: 1, x: 6, x: 7 }; }")]))).toEqual(["E-STRUCT-DUPLICATE-KEY", "E-STRUCT-DUPLICATE-KEY"]);
+    expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, y: 6 }; }")]))).toEqual([]);
   });
 });
 
@@ -688,15 +688,15 @@ describe("S440 F-A — a Commit outside a handler batch: no observer sees the ha
   // `twin`: react / watch write nothing; their writing bodies are reactW / watchW (grafted in Core)
   const REACT = (spread, twin) => `    let <n:int=0/>
     function react${twin ? "W" : ""}() -> int {
-        if (@n > 0) { @g = { ...@g, ${spread} } }
-        return @n
-    }${twin ? "\n    function react() -> int { return @n }" : ""}`;
+        if (@n > 0) { @g = { ...@g, ${spread} }; }
+        return @n;
+    }${twin ? "\n    function react() -> int { return @n; }" : ""}`;
   const prog = (spread, fns, view, twin = false) => ({
     path: "fa.scrml",
     src: `${GATES}
 <program>
 ${REACT(spread, twin)}
-${twin ? fns.replace("function watch()", "function watchW()") + (fns ? '\n    function watch() -> string { return "w" }' : "") : fns}
+${twin ? fns.replace("function watch()", "function watchW()") + (fns ? '\n    function watch() -> string { return "w"; }' : "") : fns}
     <main>
         <gate as=g title="G"/>
         <p class="r">\${react()}</p>
@@ -737,8 +737,8 @@ ${view}
 
   test("case B (probe): a watcher that refuses on the half state never fires — final Live/Live", async () => {
     const watch = `    function watch() -> string {
-        if (@g.phase == .Live) { if (@g.stage == .Draft) { @g = { ...@g, stage: .Gone } } }
-        return "w"
+        if (@g.phase == .Live) { if (@g.stage == .Draft) { @g = { ...@g, stage: .Gone }; } }
+        return "w";
     }`;
     const o = await runFA("fa-b", "phase: .Live, stage: .Live", watch, `        <p class="w">\${watch()}</p>`);
     expect(o.err).toBe(null);
@@ -762,14 +762,14 @@ describe("O59 — construction runs in document order after the cells it reads",
   test("a use-site initializer reading a cell declared earlier sees it (seeded once, L6); a locked one tracks", async () => {
     const app = {
       path: "app.scrml",
-      src: `\${ import { dropdown, Openness } from "./lib/dropdown.scrml" }
+      src: `\${ import { dropdown, Openness } from "./lib/dropdown.scrml"; }
 <program>
     let <startCountry:string="CA"/>
     let <title:string="Country"/>
     <main>
         <dropdown as=country label=(@title) options=(["US", "CA"]) value=(@startCountry)/>
         <p class="ship">\${@country.value}</p>
-        <button class="change" onclick={ @startCountry = "US"; @title = "Nation" }>change</button>
+        <button class="change" onclick={ @startCountry = "US"; @title = "Nation"; }>change</button>
     </main>
 </program>
 `,
@@ -790,7 +790,7 @@ describe("O59 — construction runs in document order after the cells it reads",
 describe("O60 — a live use-site value to a LOCKED field that carries a grant SEEDS it", () => {
   const app = {
     path: "app.scrml",
-    src: `\${ import { dropdown, Openness } from "./lib/dropdown.scrml" }
+    src: `\${ import { dropdown, Openness } from "./lib/dropdown.scrml"; }
 <program>
     let <startOpen:Openness=.Opened/>
     <main>
@@ -883,13 +883,13 @@ describe("reads require narrowing (ruled S437) — E-DECL-HANDLE-NOT-NARROWED", 
   });
 
   test("an un-narrowed read in logic is refused", () => {
-    const r = run([LIB(), prog("<p>x</p>", "    function f() { return @color.value }")]);
+    const r = run([LIB(), prog("<p>x</p>", "    function f() { return @color.value; }")]);
     expect(codes(r)).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
     expect(r.diags[0].message).toContain("dropdown | not");
   });
 
   test("a narrowed read (`given c = @color :> { … c.value … }`) is accepted", () => {
-    const r = run([LIB(), prog("<p>x</p>", "    let <seen:string=\"\"/>\n    function f() { given c = @color :> { @seen = c.value } }")]);
+    const r = run([LIB(), prog("<p>x</p>", "    let <seen:string=\"\"/>\n    function f() { given c = @color :> { @seen = c.value; } }")]);
     expect(codes(r)).toEqual([]);
   });
 
@@ -916,15 +916,15 @@ describe("§66.7.5 — `@h` is narrowed inside its own `given c = @h :> { … }`
   const fnStmts = (r, name) => r.core.fns.find((f) => f.sym.hint === name).body.stmts;
 
   test("a direct READ `@color.value` inside the block is accepted", () => {
-    expect(codes(run([LIB(), prog("    function f() { given c = @color :> { @seen = @color.value } }")]))).toEqual([]);
+    expect(codes(run([LIB(), prog("    function f() { given c = @color :> { @seen = @color.value; } }")]))).toEqual([]);
   });
 
   test("a direct WRITE `@color.value = …` inside the block is accepted", () => {
-    expect(codes(run([LIB(), prog("    function f() { given c = @color :> { @color.value = \"x\" } }")]))).toEqual([]);
+    expect(codes(run([LIB(), prog("    function f() { given c = @color :> { @color.value = \"x\"; } }")]))).toEqual([]);
   });
 
   test("the direct write lowers exactly as the write through `c` does (the same Narrowed place)", () => {
-    const r = run([LIB(), prog("    function f() { given c = @color :> { @color.value = \"x\" } }\n    function g() { given c = @color :> { c.value = \"x\" } }")]);
+    const r = run([LIB(), prog("    function f() { given c = @color :> { @color.value = \"x\"; } }\n    function g() { given c = @color :> { c.value = \"x\"; } }")]);
     expect(codes(r)).toEqual([]);
     expect(mods.check.checkCore(r.core)).toEqual([]);
     const inner = (name) => fnStmts(r, name)[1].data.thenB.stmts[0];
@@ -936,7 +936,7 @@ describe("§66.7.5 — `@h` is narrowed inside its own `given c = @h :> { … }`
   });
 
   test("at runtime the direct write lands while mounted", async () => {
-    const r = run([LIB(), prog("    function f() { given c = @color :> { @color.value = \"blue\" } }", "true",
+    const r = run([LIB(), prog("    function f() { given c = @color :> { @color.value = \"blue\"; } }", "true",
       "<button class=\"go\" onclick=f()>go</button>")]);
     expect(codes(r)).toEqual([]);
     await loadProgram(r.core, "narrow-direct-write");
@@ -948,27 +948,27 @@ describe("§66.7.5 — `@h` is narrowed inside its own `given c = @h :> { … }`
 
   // bite: the narrowing is scoped to the block and to the handle it names
   test("outside the block (after it) `@color` is still refused", () => {
-    const r = run([LIB(), prog("    function f() { given c = @color :> { @seen = c.value }\n return @color.value }")]);
+    const r = run([LIB(), prog("    function f() { given c = @color :> { @seen = c.value; }\n return @color.value; }")]);
     expect(codes(r)).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
   });
 
   test("a write after the block is still refused", () => {
-    const r = run([LIB(), prog("    function f() { given c = @color :> { @seen = c.value }\n @color.value = \"x\" }")]);
+    const r = run([LIB(), prog("    function f() { given c = @color :> { @seen = c.value; }\n @color.value = \"x\"; }")]);
     expect(codes(r)).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
   });
 
   test("a DIFFERENT handle's block does not narrow `@color` (read and write)", () => {
-    expect(codes(run([LIB(), prog("    function f() { given c = @country :> { @seen = @color.value } }")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
-    expect(codes(run([LIB(), prog("    function f() { given c = @country :> { @color.value = \"x\" } }")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
+    expect(codes(run([LIB(), prog("    function f() { given c = @country :> { @seen = @color.value; } }")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
+    expect(codes(run([LIB(), prog("    function f() { given c = @country :> { @color.value = \"x\"; } }")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
   });
 
   test("nested: an outer narrowing holds inside an inner `given`; an inner one ends with its block", () => {
-    expect(codes(run([LIB(), prog("    function f() { given c = @color :> { given d = @country :> { @color.value = @country.value } } }")]))).toEqual([]);
-    expect(codes(run([LIB(), prog("    function f() { given d = @country :> { given c = @color :> { @seen = @color.value }\n @color.value = \"x\" } }")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
+    expect(codes(run([LIB(), prog("    function f() { given c = @color :> { given d = @country :> { @color.value = @country.value; } } }")]))).toEqual([]);
+    expect(codes(run([LIB(), prog("    function f() { given d = @country :> { given c = @color :> { @seen = @color.value; }\n @color.value = \"x\"; } }")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
   });
 
   test("a `given` over an UNconditional handle: a direct write inside is accepted and lands", async () => {
-    const r = run([LIB(), prog("    function f() { given c = @country :> { @country.value = \"CA\" } }", "false",
+    const r = run([LIB(), prog("    function f() { given c = @country :> { @country.value = \"CA\"; } }", "false",
       "<button class=\"go\" onclick=f()>go</button>")]);
     expect(codes(r)).toEqual([]);
     await loadProgram(r.core, "narrow-uncond");

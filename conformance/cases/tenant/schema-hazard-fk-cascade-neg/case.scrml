@@ -6,8 +6,8 @@
     // The delete names no tenant table; the cascade reaches one.
     ${
         function go() {
-            ?{`DELETE FROM config WHERE k = 'c'`}.run()
-            return "ok"
+            ?{`DELETE FROM config WHERE k = 'c'`}.run();
+            return "ok";
         }
     }
     <button onclick=${ go() }>go</button>

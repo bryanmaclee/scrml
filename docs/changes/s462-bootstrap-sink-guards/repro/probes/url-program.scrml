@@ -14,7 +14,7 @@ renders <a class="lnk" href=u>l</a>
     let <list:string="/a;javascript:alert(2)"/>
     let <animated:string="fill"/>
     <rows:Row[]=([{ id: 1, url: "JaVaScRiPt:alert(3)" }, { id: 2, url: "https://example.com/" }])/>
-    function flip() { @u = "vbscript:x" }
+    function flip() { @u = "vbscript:x"; }
 
     <main>
         <a id="e" href=@bad>bound</a>

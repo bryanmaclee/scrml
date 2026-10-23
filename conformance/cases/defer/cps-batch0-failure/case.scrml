@@ -8,14 +8,14 @@ ${
     <busy> = false
 
     function save(id: number) {
-        @busy = true
-        @trace = @trace + "start;"
-        defer @trace = @trace + "D;"
-        defer @busy = false
-        ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run()
-        @trace = @trace + "mid;"
-        ?{`INSERT INTO log (msg) VALUES ('saved')`}.run()
-        @trace = @trace + "end;"
+        @busy = true;
+        @trace = @trace + "start;";
+        defer @trace = @trace + "D;";
+        defer @busy = false;
+        ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run();
+        @trace = @trace + "mid;";
+        ?{`INSERT INTO log (msg) VALUES ('saved')`}.run();
+        @trace = @trace + "end;";
     }
 }
 <errorBoundary fallback={<p id="err">save failed</p>}>

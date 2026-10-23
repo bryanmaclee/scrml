@@ -2,12 +2,12 @@ ${
     <got> = ""
 
     function defer(x: string) {
-        return "called " + x
+        return "called " + x;
     }
 
     function go() {
-        let r = defer("a")
-        @got = r
+        let r = defer("a");
+        @got = r;
     }
 }
 <program>

@@ -2,8 +2,8 @@
 <r> = 0
 ${
     function f() {
-        if (@a) { @r = 1 } // note
-        else { @r = 2 }
+        if (@a) { @r = 1; } // note
+        else { @r = 2; }
     }
 }
 <button id="go" onclick=f()>go</button>

@@ -1,5 +1,5 @@
 ${
-    import { parseVariant } from 'scrml:data'
+    import { parseVariant } from 'scrml:data';
 
     type LoadResult:enum = {
         Success(rows: int)
@@ -11,11 +11,11 @@ ${
 
     function decode() {
         parseVariant('{"tag":"Archived"}', LoadResult) !{
-            ::MissingDiscriminator          :> { @parseError = "missing-discriminator" }
-            ::UnknownVariant(tag)           :> { @parseError = "unknown: " + tag }
-            ::InvalidPayload(field, reason) :> { @parseError = "invalid-payload:" + field }
-            ::Malformed(reason)             :> { @parseError = "malformed" }
-        }
+            ::MissingDiscriminator          :> { @parseError = "missing-discriminator"; }
+            ::UnknownVariant(tag)           :> { @parseError = "unknown: " + tag; }
+            ::InvalidPayload(field, reason) :> { @parseError = "invalid-payload:" + field; }
+            ::Malformed(reason)             :> { @parseError = "malformed"; }
+        };
     }
 }
 <program>

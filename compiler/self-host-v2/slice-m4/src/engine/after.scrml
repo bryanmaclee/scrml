@@ -19,8 +19,8 @@
     </>
     renders <article><h3>${title}</h3><p>${status}</p></article>
 
-    function load()   { @phase = .Loading }         // along an edge of the graph
-    function finish() { @phase = .Done }            // legal from .Loading; a no-op from .Done (§51.0.F.1); E-ENGINE-INVALID-TRANSITION otherwise
+    function load()   { @phase = .Loading; }         // along an edge of the graph
+    function finish() { @phase = .Done; }            // legal from .Loading; a no-op from .Done (§51.0.F.1); E-ENGINE-INVALID-TRANSITION otherwise
 
     <main>
         <p><*phase/></p>                            // ⚑ O5: how the state-child bodies render

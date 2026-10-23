@@ -1,10 +1,10 @@
 // §14.13.1: a parameter is not a text sink.
 <program>
     fn label(s: string) -> string {
-        return s
+        return s;
     }
     fn show(n: int) -> string {
-        return label(n)
+        return label(n);
     }
     <main>
         <p>${show(1)}</p>

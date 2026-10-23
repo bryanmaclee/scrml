@@ -2,7 +2,7 @@
 <program>
     let <name:string | not=not/>
     <main>
-        <button id="in" onclick={ @name = "bryan" }>in</button>
+        <button id="in" onclick={ @name = "bryan"; }>in</button>
         <p id="who">${match @name { not :> "nobody", else :> "hi " + @name, }}</p>
     </main>
 </program>

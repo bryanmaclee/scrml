@@ -7,7 +7,7 @@
     // A view over the ALTER-scoped `notes` would serve every tenant's notes.
     ${
         function everyone() {
-            return ?{`SELECT body FROM all_notes`}.all()
+            return ?{`SELECT body FROM all_notes`}.all();
         }
     }
     <button onclick=${ everyone() }>all</button>

@@ -5,8 +5,8 @@ ${
         return n * 2
     }
     function go() {
-        @out = double(21) !{ .Transport(_) :> return }
-        @seen = @out
+        @out = double(21) !{ .Transport(_) :> return };
+        @seen = @out;
     }
 }
 <button id="go" onclick=go()>Go</>

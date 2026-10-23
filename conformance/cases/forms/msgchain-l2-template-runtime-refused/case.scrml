@@ -1,6 +1,6 @@
 <program>
 ${
-    import { registerMessages } from 'scrml:data'
+    import { registerMessages } from 'scrml:data';
     const later = "{field} needs {threshold}"
     registerMessages({
         .LengthFailed: "{field} needs a length {predicate}",

@@ -1,6 +1,6 @@
 ${
     server function loadName(id: string) {
-        return "user " + id
+        return "user " + id;
     }
 }
 <page>

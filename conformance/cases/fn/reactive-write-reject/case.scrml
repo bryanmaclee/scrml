@@ -2,8 +2,8 @@
 ${ @counter = 0 }
 ${
     fn badWrite(a: int) {
-        @counter = a
-        return a
+        @counter = a;
+        return a;
     }
 }
 <p>${badWrite(1)}</>

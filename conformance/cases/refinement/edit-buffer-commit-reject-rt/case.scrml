@@ -3,11 +3,11 @@ ${
     <ls>: number(>0)[] = [1, 2]
     <draft>: number[] = []
     function edit() {
-        @draft = @ls
-        @draft[0] = 5
+        @draft = @ls;
+        @draft[0] = 5;
     }
-    function add() { @draft.push(@m) }
-    function commit() { @ls = @draft }
+    function add() { @draft.push(@m); }
+    function commit() { @ls = @draft; }
 }
 <program>
 <button id="e" onclick=edit()>e</button>

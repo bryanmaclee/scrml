@@ -1,6 +1,6 @@
 <program>
 ${
-    import { messageFor, registerMessages } from 'scrml:data'
+    import { messageFor, registerMessages } from 'scrml:data';
     registerMessages({ .EqFailed: "<b>{field}</b> must be {expected}" })
     <signup>
         <password req> = <input id="password" type="text"/>

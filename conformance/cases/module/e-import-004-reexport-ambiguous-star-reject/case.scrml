@@ -1,4 +1,4 @@
 ${
-    import { w } from './b.scrml'
+    import { w } from './b.scrml';
 }
 <p>${w()}</>

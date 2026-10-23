@@ -1,4 +1,4 @@
 ${
-    import { A, B } from './x.scrml'
+    import { A, B } from './x.scrml';
 }
 <p>${A + B}</>

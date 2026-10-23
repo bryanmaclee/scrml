@@ -1,5 +1,5 @@
 ${
-    function twice(x: int) { return x * 2 }
+    function twice(x: int) { return x * 2; }
     const ops = Object.freeze({ double: twice })
 }
 <program><p id="p">${ops.double(2)}</></>

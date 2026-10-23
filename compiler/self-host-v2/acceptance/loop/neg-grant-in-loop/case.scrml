@@ -2,6 +2,6 @@
 <program>
     <xs:int[]=([])/>
     <main>
-        <button onclick={ for (i of 0..3) { @xs.append(i) } }>b</button>
+        <button onclick={ for (i of 0..3) { @xs.append(i); } }>b</button>
     </main>
 </program>

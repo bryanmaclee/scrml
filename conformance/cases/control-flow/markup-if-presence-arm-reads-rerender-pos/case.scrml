@@ -6,6 +6,6 @@
 <user>: { name: string } | not = { name: "ada" }
 
 <main>
-    <button id="rename" onclick={ @user = { name: "bob" } }>rename</button>
+    <button id="rename" onclick={ @user = { name: "bob" }; }>rename</button>
     <div id="who">${ if (@user is given) { lift <p id="name">${@user.name}</p> } }</div>
 </main>

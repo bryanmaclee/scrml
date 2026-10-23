@@ -1,5 +1,5 @@
 ${
-  import { formFor } from 'scrml:data'
+  import { formFor } from 'scrml:data';
 
   type Address:struct = {
     street: string

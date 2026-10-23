@@ -10,7 +10,7 @@
         <button id="go" type="submit">Save</button>
     </form>
 
-    function save() { @calls = @calls + 1 }
+    function save() { @calls = @calls + 1; }
 
     <main>
         <*signup/>

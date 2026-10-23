@@ -24,9 +24,9 @@
     </form>
 
     function save() {
-        if (!@signup.agree) return                            // top level: @signup = the shared instance (§66.7.1)
-        @saveState = .Saving                                  // along the rule= graph
-        @saveState = .Saved
+        if (!@signup.agree) return;                            // top level: @signup = the shared instance (§66.7.1)
+        @saveState = .Saving;                                  // along the rule= graph
+        @saveState = .Saved;
     }
 
     <main>

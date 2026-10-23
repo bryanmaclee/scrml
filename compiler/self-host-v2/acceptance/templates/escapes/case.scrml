@@ -2,7 +2,7 @@
 <program>
     let <n:int=1/>
     fn text(k: int) -> string {
-        return `a\`b \${x} ${"${"}y} $ {z} $${k} \u{1F600}`
+        return `a\`b \${x} ${"${"}y} $ {z} $${k} \u{1F600}`;
     }
     <main>
         <p id="out">${text(@n)}</p>

@@ -2,8 +2,8 @@ type Phase:enum = { Idle, Running, Done }
 
 <count> = 0
 
-${ function startGame() { @count = @count + 1 } }
-${ function track(name: string) { @count = @count + name.length } }
+${ function startGame() { @count = @count + 1; } }
+${ function track(name: string) { @count = @count + name.length; } }
 
 <p>Count: ${@count}</>
 

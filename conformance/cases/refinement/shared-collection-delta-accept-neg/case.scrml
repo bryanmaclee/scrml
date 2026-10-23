@@ -8,18 +8,18 @@ ${
     <p>: P = { a: [6, 7], b: [8] }
     <mm>: number(>0)[][] = [[1], [2]]
     function released() {
-        @x = @y
-        @x = [8]
-        @y.push(@t)
+        @x = @y;
+        @x = [8];
+        @y.push(@t);
     }
-    function pathField() { @rows[1].n = 9 }
-    function pathRow() { @rows[0] = { u: "q", n: 4 } }
-    function unrefinedField() { @rows[1].u = "zz" }
+    function pathField() { @rows[1].n = 9; }
+    function pathRow() { @rows[0] = { u: "q", n: 4 }; }
+    function unrefinedField() { @rows[1].u = "zz"; }
     function twoPositions() {
-        @p.b = @p.a
-        @p.a.push(9)
+        @p.b = @p.a;
+        @p.a.push(9);
     }
-    function nestedPush() { @mm[1].push(@t) }
+    function nestedPush() { @mm[1].push(@t); }
 }
 <program>
 <button id="released" onclick=released()>a</button>

@@ -9,9 +9,9 @@ ${
         return n
     }
     function indep() {
-        @a = one(1)
-        @b = two(2)
-        @seen = `indep:${@a},${@b}`
+        @a = one(1);
+        @b = two(2);
+        @seen = `indep:${@a},${@b}`;
     }
 }
 <button id="indep" onclick=indep()>i</>

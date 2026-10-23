@@ -3,9 +3,9 @@
   <n> = 0
   <m> = 0
   function beacon(v: number) {
-    return v
+    return v;
   }
-  <effect deps=[@n]>${ beacon(@n) }</>
-  <effect deps=[@m]>${ beacon(@m) }</>
+  <effect deps=[@n]>${ beacon(@n); }</>
+  <effect deps=[@m]>${ beacon(@m); }</>
   <p>${@n}</p>
 </program>

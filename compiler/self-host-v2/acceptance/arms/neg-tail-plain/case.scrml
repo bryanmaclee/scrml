@@ -4,12 +4,12 @@
     let <g:Guess=.No/>
     function say(x: Guess) -> string {
         return match x {
-            .Yes :> "y"
+            .Yes :> "y",
             .No :> {
-                const t: string = "n"
-                t
+                const t: string = "n";
+                t;
             }
-        }
+        };
     }
     <main><p>${say(@g)}</p></main>
 </program>

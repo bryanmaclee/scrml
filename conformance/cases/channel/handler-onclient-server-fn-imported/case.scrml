@@ -1,6 +1,6 @@
 <program>
 ${
-  import { onErr } from './helpers.scrml'
+  import { onErr } from './helpers.scrml';
 }
 
   <channel name="chat" onclient:error=onErr(err)>

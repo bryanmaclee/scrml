@@ -6,41 +6,41 @@ ${
     <n> = 0
 
     function risky()! -> E {
-        fail E.Bad
+        fail E.Bad;
     }
 
     function a() {
-        defer return
+        defer return;
     }
 
     function b()! -> E {
-        defer fail E.Bad
-        @n = 1
+        defer fail E.Bad;
+        @n = 1;
     }
 
     function c()! -> E {
         defer {
-            let v = risky()?
-            @n = v
+            let v = risky()?;
+            @n = v;
         }
-        @n = 2
+        @n = 2;
     }
 
     function d() {
         for (const i of [1, 2]) {
             defer {
                 if (i == 1) {
-                    break
+                    break;
                 }
             }
-            @n = i
+            @n = i;
         }
     }
 }
 <program>
     <button onclick=a()>a</>
-    <button onclick={ b() !{ .Bad :> @n = -1 } }>b</>
-    <button onclick={ c() !{ .Bad :> @n = -1 } }>c</>
+    <button onclick={ b() !{ .Bad :> @n = -1 }; }>b</>
+    <button onclick={ c() !{ .Bad :> @n = -1 }; }>c</>
     <button onclick=d()>d</>
     <p>${@n}</p>
 </program>

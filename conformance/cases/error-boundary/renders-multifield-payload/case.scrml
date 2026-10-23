@@ -5,8 +5,8 @@ type PaymentError:enum = {
 }
 
 function charge(amount: int)! PaymentError {
-    if (amount > 50) fail PaymentError.InsufficientFunds(50, amount)
-    return amount
+    if (amount > 50) fail PaymentError.InsufficientFunds(50, amount);
+    return amount;
 }
 
 <page>

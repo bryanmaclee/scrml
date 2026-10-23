@@ -3,10 +3,10 @@
     type Widget:struct = { id: int, label: string }
     <rows:Widget[replace]=([])/>
     function loadAll() -> Widget[] {
-        return ?{`SELECT id, label FROM widgets`}.all() !{ _ :> [] }
+        return ?{`SELECT id, label FROM widgets`}.all() !{ _ :> [] };
     }
     <main>
-        <button id="load" onclick={ @rows = loadAll() !{ .Transport(t) :> return } }>Load</button>
+        <button id="load" onclick={ @rows = loadAll() !{ .Transport(t) :> return }; }>Load</button>
         <p id="count">${@rows.length}</p>
     </main>
 </program>

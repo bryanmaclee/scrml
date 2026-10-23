@@ -4,18 +4,18 @@
     let <right:string=""/>
     type Auth:enum = { Granted, Locked }
     function find(pw: string) -> Auth | not {
-        if (pw == "hunter2") return .Granted
+        if (pw == "hunter2") return .Granted;
     }
     function attempt(pw: string) -> string {
         return match find(pw) {
-            .Granted :> "welcome"
-            .Locked :> "denied"
+            .Granted :> "welcome",
+            .Locked :> "denied",
             not :> "denied"
-        }
+        };
     }
     function login() {
-        @wrong = attempt("hunter3")
-        @right = attempt("hunter2")
+        @wrong = attempt("hunter3");
+        @right = attempt("hunter2");
     }
     <main>
         <button id="go" onclick=login()>go</button>

@@ -1,3 +1,3 @@
 <a> = false
-<p id="out">${ if @a {"A"} // note
- else {"B"} }</p>
+<p id="out">${ if @a {"A";} // note
+ else {"B";} }</p>

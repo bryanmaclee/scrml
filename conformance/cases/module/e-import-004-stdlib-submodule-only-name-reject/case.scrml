@@ -1,4 +1,4 @@
 ${
-    import { JwtError } from 'scrml:auth'
+    import { JwtError } from 'scrml:auth';
 }
 <p>hello</>

@@ -1,7 +1,7 @@
 ${
-    function mintToken() { return "t" }
-    function submitOne(t: string) { return t }
-    function touch(v: int) { return v }
+    function mintToken() { return "t"; }
+    function submitOne(t: string) { return t; }
+    function touch(v: int) { return v; }
     let items = [1, 2]
     lin token = mintToken()
     submitOne(token)

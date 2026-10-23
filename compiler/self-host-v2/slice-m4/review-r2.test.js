@@ -37,7 +37,7 @@ describe("item 1 — O19 on a CHILD field (own value AND attributes) is refused,
   });
 });
 
-const seq = (t, b) => `<program>\n <xs:${t}=([])/>\n function f() { ${b} }\n <main><p>x</p></main>\n</program>\n`;
+const seq = (t, b) => `<program>\n <xs:${t}=([])/>\n function f() { ${b}; }\n <main><p>x</p></main>\n</program>\n`;
 
 describe("item 2 — shrinking a FIXED-length sequence is E-WRITE-INVARIANT (F7's mirror)", () => {
   test("pop / shift / filter on a type without `free` → E-WRITE-INVARIANT", () => {
@@ -66,12 +66,12 @@ describe("item 4 — a sequence spread reads ONE snapshot (RULED S442)", () => {
   beforeAll(async () => {
     let src = auditFixture().replace("<li>${e.actor}: ${e.action}</li>", "<li>${e.actor}: ${e.action} @${e.at}</li>");
     src = src.replace("function record(action: string) {", `function mk2() -> Entry {
-        @audit.append({ at: 99, actor: "in", action: "inner" })
-        const e: Entry = { at: 0, actor: "out", action: "outer" }
-        return e
+        @audit.append({ at: 99, actor: "in", action: "inner" });
+        const e: Entry = { at: 0, actor: "out", action: "outer" };
+        return e;
     }
-    function snap() { @audit = [...@audit, mk2(), { at: @audit.length, actor: "q", action: "after" }] }
-    function snapPre() { @audit = [{ at: @audit.length, actor: "p", action: "pre" }, ...@audit] }
+    function snap() { @audit = [...@audit, mk2(), { at: @audit.length, actor: "q", action: "after" }]; }
+    function snapPre() { @audit = [{ at: @audit.length, actor: "p", action: "pre" }, ...@audit]; }
     function record(action: string) {`).replace("<audit:Entry[free, append]=[]/>", "<audit:Entry[free, append, prepend]=[]/>");
     const r = run(src);
     expect(r.diags).toEqual([]);

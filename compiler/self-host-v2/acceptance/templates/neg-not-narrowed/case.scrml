@@ -1,7 +1,7 @@
 // §14.13.2: a `T | not` slot must be narrowed first.
 <program>
     fn show(m: int | not) -> string {
-        return `got ${m}`
+        return `got ${m}`;
     }
     <main>
         <p>${show(4)}</p>

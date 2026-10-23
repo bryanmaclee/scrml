@@ -3,15 +3,15 @@
     let <wrong:string=""/>
     let <right:string=""/>
     function look(pw: string) {
-        if (pw == "hunter2") return "user"
+        if (pw == "hunter2") return "user";
     }
     function attempt(pw: string) -> string {
-        if (look(pw) is not) return "denied"
-        return "welcome"
+        if (look(pw) is not) return "denied";
+        return "welcome";
     }
     function login() {
-        @wrong = attempt("hunter3")
-        @right = attempt("hunter2")
+        @wrong = attempt("hunter3");
+        @right = attempt("hunter2");
     }
     <main>
         <button id="go" onclick=login()>go</button>

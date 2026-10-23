@@ -10,8 +10,8 @@
     <len=(@name.length)/>
     <greet=(@name + "!")/>
     <nums=([1, 2, 3])/>
-    fn twice(x: int) -> int { return x * 2 }
-    function half(y: number) { return y / 2 }
+    fn twice(x: int) -> int { return x * 2; }
+    function half(y: number) { return y / 2; }
     <viaDeclared=(twice(@base))/>
     <viaProven=(half(@ratio))/>
     <main>

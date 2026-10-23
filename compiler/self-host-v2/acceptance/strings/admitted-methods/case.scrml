@@ -4,9 +4,9 @@
     let <e:string="a😀b😀"/>
     function pos(x: int | not) -> string {
         return match x {
-            not :> "not"
+            not :> "not",
             else :> "at"
-        }
+        };
     }
     let <i:int | not=(@e.indexOf("b"))/>
     let <j:int | not=(@e.lastIndexOf("😀"))/>

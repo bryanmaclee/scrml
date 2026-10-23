@@ -39,7 +39,7 @@ const btn = (label) => [...document.querySelectorAll("button")].find((b) => b.te
 const SQ = "?" + "{";
 
 const TYPES = `    type LoadError:enum = { NotFound(id: string), Timeout }`;
-const LOAD = `    function load(id: string)! LoadError {\n        if (id == "x") fail LoadError.NotFound(id)\n        if (id == "y") fail LoadError.Timeout\n        return id\n    }`;
+const LOAD = `    function load(id: string)! LoadError {\n        if (id == "x") fail LoadError.NotFound(id);\n        if (id == "y") fail LoadError.Timeout;\n        return id;\n    }`;
 
 const P = (decls, buttons = [], extra = "") =>
   `<program>\n    let <log:string=""/>\n    let <out:string=""/>\n    let <n:int=0/>\n${decls}\n    <main>\n${buttons
@@ -63,7 +63,7 @@ const text = () => ({ log: $("#log").textContent, out: $("#out").textContent, n:
 
 // ---------------------------------------------------------------------------
 describe("§18.6.1 — the whole-error binder `| _ err :>`", () => {
-  const CATCH = `    function caught(id: string) -> LoadError {\n        load(id) !{ _ err :> { return err } }\n        return .Timeout\n    }`;
+  const CATCH = `    function caught(id: string) -> LoadError {\n        load(id) !{ _ err :> { return err; } };\n        return .Timeout;\n    }`;
 
   test("in a `!{}` arm, `err` is the WHOLE error value — variant and payload (runtime)", async () => {
     const { program } = await load(P(`${TYPES}\n${LOAD}\n${CATCH}`), ["caught"]);
@@ -72,7 +72,7 @@ describe("§18.6.1 — the whole-error binder `| _ err :>`", () => {
   });
 
   test("after earlier arms it takes only the variants they left (runtime)", async () => {
-    const { program } = await load(P(`${TYPES}\n${LOAD}\n    function rest(id: string) -> LoadError {\n        load(id) !{\n            .NotFound(m) :> @log = "nf:" + m\n            _ err :> {\n                @n = 7\n                return err\n            }\n        }\n        return .Timeout\n    }`), ["rest"]);
+    const { program } = await load(P(`${TYPES}\n${LOAD}\n    function rest(id: string) -> LoadError {\n        load(id) !{\n            .NotFound(m) :> @log = "nf:" + m,\n            _ err :> {\n                @n = 7;\n                return err;\n            }\n        };\n        return .Timeout;\n    }`), ["rest"]);
     expect(program.rest("x")).toBe("Timeout");
     expect(text().log).toBe("nf:x");
     expect(text().n).toBe("0");
@@ -81,7 +81,7 @@ describe("§18.6.1 — the whole-error binder `| _ err :>`", () => {
   });
 
   test("in a `match` on a failable result it binds an ERROR, never the success value (runtime)", async () => {
-    const { program } = await load(P(`${TYPES}\n${LOAD}\n    function viaMatch(id: string) -> LoadError {\n        match load(id) {\n            .Ok(v) :> @log = "ok:" + v\n            _ err :> { return err }\n        }\n        return .Timeout\n    }`), ["viaMatch"]);
+    const { program } = await load(P(`${TYPES}\n${LOAD}\n    function viaMatch(id: string) -> LoadError {\n        match load(id) {\n            .Ok(v) :> @log = "ok:" + v,\n            _ err :> { return err; }\n        }\n        return .Timeout;\n    }`), ["viaMatch"]);
     expect(program.viaMatch("x")).toEqual({ variant: "NotFound", data: ["x"] });
     expect(program.viaMatch("a")).toBe("Timeout");
     expect(text().log).toBe("ok:a");
@@ -98,12 +98,12 @@ describe("§18.6.1 — the whole-error binder `| _ err :>`", () => {
   });
 
   test("it is the wildcard: a `!{}` with only `| _ err :>` is exhaustive; a deferred one is total (§19.16.3 r3)", () => {
-    clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ _ err :> @n = 1 }\n    }`));
-    clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        defer load("x") !{ _ err :> @n = 2 }\n        @n = 1\n    }`));
+    clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ _ err :> @n = 1 };\n    }`));
+    clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        defer load("x") !{ _ err :> @n = 2 };\n        @n = 1;\n    }`));
   });
 
   test("its static type is the whole error enum: assigning it to a string is a type error, returning it as the enum is not", () => {
-    const bad = codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ _ err :> @out = err }\n    }`));
+    const bad = codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ _ err :> @out = err };\n    }`));
     expect(bad.length).toBe(1);
     expect(bad[0]).toMatch(/^E-TYPE-/);
     clean(P(`${TYPES}\n${LOAD}\n${CATCH}`));
@@ -120,7 +120,7 @@ describe("§18.6.1 — the whole-error binder `| _ err :>`", () => {
   });
 
   test("check C-E2: a `whole` binder on a variant arm is rejected", () => {
-    const r = clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            .NotFound(m) :> @n = 1\n            _ err :> @n = 2\n        }\n    }`));
+    const r = clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            .NotFound(m) :> @n = 1,\n            _ err :> @n = 2\n        };\n    }`));
     const fn = r.core.fns.find((f) => f.sym.hint === "go");
     const arms = attemptOf(fn).arms;
     arms[0].whole = arms[1].whole;
@@ -128,7 +128,7 @@ describe("§18.6.1 — the whole-error binder `| _ err :>`", () => {
   });
 
   test("on a `?{}` the binder is a SqlError (codes + Core: the Attempt over the query's settled outcome)", () => {
-    const r = clean(`<program db="./app.db">\n    function f() -> int {\n        ${SQ}\`DELETE FROM t\`}.run() !{ _ err :> { return 0 } }\n        return 1\n    }\n    <main><p>x</p></main>\n</program>\n`);
+    const r = clean(`<program db="./app.db">\n    function f() -> int {\n        ${SQ}\`DELETE FROM t\`}.run() !{ _ err :> { return 0; } };\n        return 1;\n    }\n    <main><p>x</p></main>\n</program>\n`);
     const fn = r.core.server.find((f) => f.sym.hint === "f");
     const a = attemptOf(fn);
     expect(a.err.hint).toBe("SqlError");
@@ -138,69 +138,69 @@ describe("§18.6.1 — the whole-error binder `| _ err :>`", () => {
 
 describe("§18.2 / §18.6.1 — E-MATCH-BARE-BINDER", () => {
   test("a bare name as a `!{}` arm's whole pattern (`| err :>`) — one report, no E-SCOPE-001 / E-TYPE-080 cascade", () => {
-    const src = P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ err :> @log = "e" }\n    }`);
+    const src = P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ err :> @log = "e" };\n    }`);
     expect(codes(src)).toEqual(["E-MATCH-BARE-BINDER"]);
     expect(msg(src, "E-MATCH-BARE-BINDER")).toBe("Arm pattern 'err' is a bare name. To bind the whole error, write '_ err' (e.g. '| _ err :>'); for a catch-all that binds nothing write '_' (or 'else'); or name the variant ('.V(x)') to bind its payload.");
     rejected(src, "E-MATCH-BARE-BINDER");
   });
 
   test("a bare name in a `match` on a failable result (`err :>`)", () => {
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @log = v\n            err :> @n = 1\n        }\n    }`))).toEqual(["E-MATCH-BARE-BINDER"]);
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @log = v,\n            err :> @n = 1\n        }\n    }`))).toEqual(["E-MATCH-BARE-BINDER"]);
   });
 
   test("`else <name>` — in a `!{}` and in a `match` (it offers `_ <name>`)", () => {
-    const src = P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ else err :> @n = 1 }\n    }`);
+    const src = P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ else err :> @n = 1 };\n    }`);
     expect(codes(src)).toEqual(["E-MATCH-BARE-BINDER"]);
     expect(msg(src, "E-MATCH-BARE-BINDER")).toContain("'_ err'");
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @log = v\n            else err :> @n = 1\n        }\n    }`))).toEqual(["E-MATCH-BARE-BINDER"]);
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @log = v,\n            else err :> @n = 1\n        }\n    }`))).toEqual(["E-MATCH-BARE-BINDER"]);
   });
 
   test("`_ <name>` on a `match` whose subject is NOT a failable result (s469: the §18 plain-value match — only the binder is refused)", () => {
-    const src = P(`    type Mode:enum = { A, B }\n    function go(m: Mode) -> int {\n        return match m {\n            .A :> 1\n            _ rest :> 2\n        }\n    }`);
+    const src = P(`    type Mode:enum = { A, B }\n    function go(m: Mode) -> int {\n        return match m {\n            .A :> 1,\n            _ rest :> 2\n        };\n    }`);
     expect(codes(src).slice().sort()).toEqual(["E-MATCH-BARE-BINDER"]);
     expect(msg(src, "E-MATCH-BARE-BINDER")).toContain("only where that value is an error");
   });
 
   test("a bare name on a non-failable `match` takes §18.2's plain message", () => {
-    const src = P(`    type Mode:enum = { A, B }\n    function go(m: Mode) -> int {\n        return match m {\n            .A :> 1\n            other :> 2\n        }\n    }`);
+    const src = P(`    type Mode:enum = { A, B }\n    function go(m: Mode) -> int {\n        return match m {\n            .A :> 1,\n            other :> 2\n        };\n    }`);
     expect(msg(src, "E-MATCH-BARE-BINDER")).toBe("Arm pattern 'other' is a bare name. A match arm does not bind the whole value: write '_' (or 'else') for a catch-all, or name the variant ('.V(x)') to bind its payload.");
   });
 
   test("near-miss: `| _ :>` and `| _ err :>` compile", () => {
-    clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ _ :> @n = 1 }\n        load("y") !{ _ err :> @n = 2 }\n    }`));
+    clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ _ :> @n = 1 };\n        load("y") !{ _ err :> @n = 2 };\n    }`));
   });
 });
 
 describe("§19.4.3 ruling 1a — E-ERROR-012: in a value position every arm yields a value or leaves", () => {
-  const go = (body, buttons = ["go"]) => P(`${TYPES}\n${LOAD}\n    function noop() {\n        @n = 1\n    }\n    function vd() -> void {\n        @n = 2\n    }\n${body}`, buttons);
+  const go = (body, buttons = ["go"]) => P(`${TYPES}\n${LOAD}\n    function noop() {\n        @n = 1;\n    }\n    function vd() -> void {\n        @n = 2;\n    }\n${body}`, buttons);
 
   test("an arm that writes (`let r = f() !{ _ :> @n = 1 }`) — the SPEC's message, no Core", () => {
-    const src = go(`    function go() {\n        const r = load("x") !{ _ :> @n = 1 }\n    }`);
+    const src = go(`    function go() {\n        const r = load("x") !{ _ :> @n = 1 };\n    }`);
     expect(codes(src)).toEqual(["E-ERROR-012"]);
     expect(msg(src, "E-ERROR-012")).toBe("Arm '_' of the handler on 'load(…)' produces no value, but the handler's result is used here (the initializer of `r`). In a value position every arm must yield a value of 'load's success type or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| _ :> { @phase = …; fallback }'), leave with 'return', or call 'load(…) !{ … }' as a statement and keep the writes in its arms.");
     rejected(src, "E-ERROR-012");
   });
 
   test("every value position: an assignment's right-hand side, a `return` operand", () => {
-    expect(msg(go(`    function go() {\n        @log = load("x") !{ _ :> @n = 1 }\n    }`), "E-ERROR-012")).toContain("(the right-hand side of an assignment)");
-    expect(msg(go(`    function go() -> string {\n        return load("x") !{ _ :> @n = 1 }\n    }`), "E-ERROR-012")).toContain("(a `return` operand)");
+    expect(msg(go(`    function go() {\n        @log = load("x") !{ _ :> @n = 1 };\n    }`), "E-ERROR-012")).toContain("(the right-hand side of an assignment)");
+    expect(msg(go(`    function go() -> string {\n        return load("x") !{ _ :> @n = 1 };\n    }`), "E-ERROR-012")).toContain("(a `return` operand)");
   });
 
   test("a call that yields nothing: no `return <value>` in its body, `-> void`, `reset(@x)`", () => {
-    expect(codes(go(`    function go() {\n        const r = load("x") !{ _ :> noop() }\n    }`))).toEqual(["E-ERROR-012"]);
-    expect(codes(go(`    function go() {\n        @log = load("x") !{ _ :> vd() }\n    }`))).toEqual(["E-ERROR-012"]);
-    expect(codes(go(`    function go() {\n        const r = load("x") !{ _ :> reset(@n) }\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function go() {\n        const r = load("x") !{ _ :> noop() };\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function go() {\n        @log = load("x") !{ _ :> vd() };\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function go() {\n        const r = load("x") !{ _ :> reset(@n) };\n    }`))).toEqual(["E-ERROR-012"]);
   });
 
   test("a block arm whose last statement is not an expression: a write, a declaration, a non-leaving `if`, an empty block", () => {
-    expect(codes(go(`    function go() {\n        const r = load("x") !{ _ :> { @n = 1 } }\n    }`))).toEqual(["E-ERROR-012"]);
-    expect(codes(go(`    function go() -> string {\n        return load("x") !{ _ :> {\n            const q = "a"\n        } }\n    }`))).toEqual(["E-ERROR-012"]);
-    expect(codes(go(`    function go() -> string {\n        const r = load("x") !{ _ :> {\n            if (@n == 0) { return "a" }\n        } }\n        return r\n    }`))).toEqual(["E-ERROR-012"]);
-    expect(codes(go(`    function go() {\n        @log = load("x") !{ _ :> { } }\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function go() {\n        const r = load("x") !{ _ :> { @n = 1; } };\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function go() -> string {\n        return load("x") !{ _ :> {\n            const q = "a";\n        } };\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function go() -> string {\n        const r = load("x") !{ _ :> {\n            if (@n == 0) { return "a"; }\n        } };\n        return r;\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function go() {\n        @log = load("x") !{ _ :> { } };\n    }`))).toEqual(["E-ERROR-012"]);
   });
 
   test("one report per falling arm; the arm is named by its pattern", () => {
-    const src = go(`    function go() {\n        const r = load("x") !{\n            .NotFound(mid) :> @log = mid\n            .Timeout :> @n = 1\n        }\n    }`);
+    const src = go(`    function go() {\n        const r = load("x") !{\n            .NotFound(mid) :> @log = mid,\n            .Timeout :> @n = 1\n        };\n    }`);
     expect(codes(src)).toEqual(["E-ERROR-012", "E-ERROR-012"]);
     const ms = run(src).diags.map((d) => d.message);
     expect(ms[0]).toContain("Arm '.NotFound(mid)'");
@@ -208,19 +208,19 @@ describe("§19.4.3 ruling 1a — E-ERROR-012: in a value position every arm yiel
   });
 
   test("a `match` on a failable result in a value position — the `.Ok(v)` arm is an arm like any other", () => {
-    const src = go(`    function go() -> string {\n        return match load("x") {\n            .Ok(v) :> @log = v\n            else :> "e"\n        }\n    }`);
+    const src = go(`    function go() -> string {\n        return match load("x") {\n            .Ok(v) :> @log = v,\n            else :> "e"\n        };\n    }`);
     expect(codes(src)).toEqual(["E-ERROR-012"]);
     expect(msg(src, "E-ERROR-012")).toContain("Arm '.Ok(v)' of the match on 'load(…)'");
   });
 
   test("on a `?{}` query the message names the query (codes only — the printer refuses queries, U1c)", () => {
-    const src = `<program db="./app.db">\n    function f() -> int {\n        const r = ${SQ}\`SELECT a FROM t\`}.get() !{ _ :> { const z = 1 } }\n        return 1\n    }\n    <main><p>x</p></main>\n</program>\n`;
+    const src = `<program db="./app.db">\n    function f() -> int {\n        const r = ${SQ}\`SELECT a FROM t\`}.get() !{ _ :> { const z = 1; } };\n        return 1;\n    }\n    <main><p>x</p></main>\n</program>\n`;
     expect(codes(src)).toEqual(["E-ERROR-012"]);
     expect(msg(src, "E-ERROR-012")).toContain("the `" + SQ + "}` query");
   });
 
   test("near-miss: statement position MAY fall through (runtime)", async () => {
-    await load(go(`    function go() {\n        load("x") !{ _ :> @n = 5 }\n    }`));
+    await load(go(`    function go() {\n        load("x") !{ _ :> @n = 5 };\n    }`));
     click(btn("go"));
     expect(text().n).toBe("5");
   });
@@ -228,15 +228,15 @@ describe("§19.4.3 ruling 1a — E-ERROR-012: in a value position every arm yiel
   // s469 (§18.5, RULED S469 "block arms yield with `lift`"): a statement-holding block arm whose value
   // is used yields with `lift`; its bare last expression is E-ARM-TAIL-VALUE
   test("a block arm yields its `lift` operand (§18.5, S469), its statements run first (runtime)", async () => {
-    expect(codes(go(`    function go() {\n        const r = load("x") !{ _ :> {\n            @n = 1\n            "z"\n        } }\n        @log = r\n    }`))).toEqual(["E-ARM-TAIL-VALUE"]);
-    await load(go(`    function go() {\n        const r = load("x") !{ _ :> {\n            @n = 1\n            lift "z"\n        } }\n        const s = load("ok") !{ _ :> {\n            @n = 2\n            lift "never"\n        } }\n        @log = r + s\n    }`));
+    expect(codes(go(`    function go() {\n        const r = load("x") !{ _ :> {\n            @n = 1;\n            "z";\n        } };\n        @log = r;\n    }`))).toEqual(["E-ARM-TAIL-VALUE"]);
+    await load(go(`    function go() {\n        const r = load("x") !{ _ :> {\n            @n = 1;\n            lift "z";\n        } };\n        const s = load("ok") !{ _ :> {\n            @n = 2;\n            lift "never";\n        } };\n        @log = r + s;\n    }`));
     click(btn("go"));
     expect(text().log).toBe("zok");
     expect(text().n).toBe("1");
   });
 
   test("a block arm's value may read its own locals (runtime)", async () => {
-    await load(go(`    function go() {\n        @log = load("x") !{ _ :> {\n            const t = "v"\n            @n = 1\n            lift t + "!"\n        } }\n    }`));
+    await load(go(`    function go() {\n        @log = load("x") !{ _ :> {\n            const t = "v";\n            @n = 1;\n            lift t + "!";\n        } };\n    }`));
     click(btn("go"));
     expect(text().log).toBe("v!");
     expect(text().n).toBe("1");
@@ -245,92 +245,92 @@ describe("§19.4.3 ruling 1a — E-ERROR-012: in a value position every arm yiel
   // r2 HIGH-1 — §19.16.2: "The same code covers a `defer` written directly in an arm of a `match` / `if` /
   // `for` that is used for its VALUE … the defer block would capture it" (E-DEFER-UNSUPPORTED-SITE)
   test("r2 HIGH-1: a `defer` directly in a value-position `!{}` arm is E-DEFER-UNSUPPORTED-SITE, no Core", () => {
-    rejected(go(`    function go() {\n        const r = load("x") !{ _ :> {\n            @n = 1\n            defer @n = 99\n            @n\n        } }\n    }`), "E-DEFER-UNSUPPORTED-SITE");
-    expect(codes(go(`    function go() {\n        const r = load("x") !{ _ :> {\n            @n = 1\n            defer @n = 99\n            @n\n        } }\n    }`))).toEqual(["E-DEFER-UNSUPPORTED-SITE"]);
+    rejected(go(`    function go() {\n        const r = load("x") !{ _ :> {\n            @n = 1;\n            defer @n = 99;\n            @n;\n        } };\n    }`), "E-DEFER-UNSUPPORTED-SITE");
+    expect(codes(go(`    function go() {\n        const r = load("x") !{ _ :> {\n            @n = 1;\n            defer @n = 99;\n            @n;\n        } };\n    }`))).toEqual(["E-DEFER-UNSUPPORTED-SITE"]);
   });
 
   test("r2 HIGH-1: the same in a value-position `match` arm, and in an arm that LEAVES (PA reading)", () => {
-    const m = go(`    function pick(id: string) -> string {\n        return match load(id) {\n            .Ok(v) :> {\n                defer @n = 7\n                v\n            }\n            _ :> "e"\n        }\n    }`, []);
+    const m = go(`    function pick(id: string) -> string {\n        return match load(id) {\n            .Ok(v) :> {\n                defer @n = 7;\n                v;\n            },\n            _ :> "e"\n        };\n    }`, []);
     expect(codes(m)).toEqual(["E-DEFER-UNSUPPORTED-SITE"]);
     rejected(m, "E-DEFER-UNSUPPORTED-SITE");
-    expect(codes(go(`    function pick(id: string) -> string {\n        const r = load(id) !{ _ :> {\n            defer @n = 7\n            return "L"\n        } }\n        return r\n    }`, []))).toEqual(["E-DEFER-UNSUPPORTED-SITE"]);
+    expect(codes(go(`    function pick(id: string) -> string {\n        const r = load(id) !{ _ :> {\n            defer @n = 7;\n            return "L";\n        } };\n        return r;\n    }`, []))).toEqual(["E-DEFER-UNSUPPORTED-SITE"]);
   });
 
   test("r2 HIGH-1 near-miss: a `defer` in a STATEMENT-position arm stays legal and runs at the arm's exit (runtime)", async () => {
-    await load(go(`    function go() {\n        load("x") !{ _ :> {\n            defer @n = @n + 10\n            @n = 1\n        } }\n    }`));
+    await load(go(`    function go() {\n        load("x") !{ _ :> {\n            defer @n = @n + 10;\n            @n = 1;\n        } };\n    }`));
     click(btn("go"));
     expect(text().n).toBe("11");
   });
 
   // r2 MED-2 — a value on EVERY path; falling off the end of the body is no value
   test("r2 MED-2: a callee that returns a value on only SOME paths yields nothing there — E-ERROR-012", () => {
-    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q" }\n        @n = 4\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() }\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469 (bryan: Always explicit): h's incomplete returns are refused too
-    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q" }\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() }\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469 (bryan: Always explicit): h's incomplete returns are refused too
+    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q"; }\n        @n = 4;\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() };\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469 (bryan: Always explicit): h's incomplete returns are refused too
+    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q"; }\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() };\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469 (bryan: Always explicit): h's incomplete returns are refused too
   });
 
   test("r2 MED-2 near-miss: every path returns a value (a final `return`, or an if / else both returning)", () => {
-    clean(go(`    function h() {\n        if (@n == 5) { return "q" }\n        return "r"\n    }\n    function k() {\n        if (@n == 5) { return "q" } else { return "w" }\n    }\n    function go() {\n        @log = load("x") !{ .NotFound(m) :> h()\n            _ :> k() }\n    }`));
+    clean(go(`    function h() {\n        if (@n == 5) { return "q"; }\n        return "r";\n    }\n    function k() {\n        if (@n == 5) { return "q"; } else { return "w"; }\n    }\n    function go() {\n        @log = load("x") !{ .NotFound(m) :> h(),\n            _ :> k() };\n    }`));
   });
 
   test("a block arm whose last expression is a handling form: its own Attempt, then its value (runtime)", async () => {
-    await load(go(`    function go() {\n        @log = load("x") !{ _ :> {\n            @n = 3\n            lift load("y") !{ _ :> "inner" }\n        } }\n    }`));
+    await load(go(`    function go() {\n        @log = load("x") !{ _ :> {\n            @n = 3;\n            lift load("y") !{ _ :> "inner" };\n        } };\n    }`));
     click(btn("go"));
     expect(text().log).toBe("inner");
     expect(text().n).toBe("3");
   });
 
   test("arms that leave (`return` / `fail` / an `if` both of whose branches leave) need no value (runtime)", async () => {
-    const { program } = await load(go(`    function pick(id: string) -> string {\n        const r = load(id) !{\n            .NotFound(m) :> { return "nf:" + m }\n            .Timeout :> {\n                if (@n == 0) { return "t0" } else { return "t1" }\n            }\n        }\n        return "ok:" + r\n    }\n    function relay(id: string)! LoadError {\n        const r = load(id) !{ .NotFound(m) :> { fail .NotFound(m) } .Timeout :> "t" }\n        return r\n    }`, []), ["pick"]);
+    const { program } = await load(go(`    function pick(id: string) -> string {\n        const r = load(id) !{\n            .NotFound(m) :> { return "nf:" + m; },\n            .Timeout :> {\n                if (@n == 0) { return "t0"; } else { return "t1"; }\n            }\n        };\n        return "ok:" + r;\n    }\n    function relay(id: string)! LoadError {\n        const r = load(id) !{ .NotFound(m) :> { fail .NotFound(m); }, .Timeout :> "t" };\n        return r;\n    }`, []), ["pick"]);
     expect(program.pick("x")).toBe("nf:x");
     expect(program.pick("y")).toBe("t0");
     expect(program.pick("a")).toBe("ok:a");
   });
 
   test("a call of a function that returns a value is a value", () => {
-    clean(go(`    fn d() -> string { return "q" }\n    function e() { return "w" }\n    function go() {\n        @log = load("x") !{ .NotFound(m) :> d() .Timeout :> e() }\n    }`));
+    clean(go(`    fn d() -> string { return "q"; }\n    function e() { return "w"; }\n    function go() {\n        @log = load("x") !{ .NotFound(m) :> d(), .Timeout :> e() };\n    }`));
   });
 });
 
 describe("§19.4.3 ruling 3 — E-ERROR-013: a `!{}` on something that cannot fail", () => {
   test("a call of an ordinary function — the SPEC's message, no Core", () => {
-    const src = P(`    fn parseCount(src: string) -> int { return src.length }\n    function show(src: string) {\n        let n = parseCount(src) !{ _ :> 0 }\n    }`);
+    const src = P(`    fn parseCount(src: string) -> int { return src.length; }\n    function show(src: string) {\n        let n = parseCount(src) !{ _ :> 0 };\n    }`);
     expect(codes(src)).toEqual(["E-ERROR-013"]);
     expect(msg(src, "E-ERROR-013")).toBe("'!{}' handler on 'parseCount(…)', which cannot fail: 'parseCount' is not a failable function, so none of its arms can run. Remove the '!{ … }' handler, or declare 'parseCount' with '!' if it can fail.");
     rejected(src, "E-ERROR-013");
   });
 
   test("statement position too (the handler is dead wherever it stands)", () => {
-    expect(codes(P(`    fn safe() -> int { return 1 }\n    function go() {\n        safe() !{ _ :> @n = 1 }\n    }`))).toEqual(["E-ERROR-013"]);
+    expect(codes(P(`    fn safe() -> int { return 1; }\n    function go() {\n        safe() !{ _ :> @n = 1 };\n    }`))).toEqual(["E-ERROR-013"]);
   });
 
   test("an expression that is not a call (`let data = not !{ … }`) — the message names the expression", () => {
-    const src = P(`    function go() {\n        let data = not !{ _ :> 1 }\n    }`);
+    const src = P(`    function go() {\n        let data = not !{ _ :> 1 };\n    }`);
     expect(codes(src)).toEqual(["E-ERROR-013"]);
     expect(msg(src, "E-ERROR-013")).toContain("'!{}' handler on 'not', which cannot fail");
   });
 
   test("a host call (`Date.now()`) cannot fail either", () => {
-    const src = P(`    function go() {\n        @n = Date.now() !{ _ :> 0 }\n    }`);
+    const src = P(`    function go() {\n        @n = Date.now() !{ _ :> 0 };\n    }`);
     expect(codes(src)).toEqual(["E-ERROR-013"]);
   });
 
   test("a name that does not resolve is reported once (E-SCOPE-001 — e.g. the built-in `parseVariant` the bootstrap lacks)", () => {
-    expect(codes(P(`    function go() {\n        @n = nope(1) !{ _ :> 0 }\n    }`))).toEqual(["E-SCOPE-001"]);
+    expect(codes(P(`    function go() {\n        @n = nope(1) !{ _ :> 0 };\n    }`))).toEqual(["E-SCOPE-001"]);
   });
 
   test("a function whose body can place it on the server: a client call of it is failable (§19.9.10) — s454: VALID, never E-ERROR-013", () => {
-    const src = `<program db="./app.db">\n    let <n:int=0/>\n    function count() -> int {\n        const r = ${SQ}\`SELECT 1 AS a\`}.get() !{ _ :> not }\n        return 1\n    }\n    function go() {\n        @n = count() !{ _ :> 0 }\n    }\n    <main><button onclick=go()>go</button></main>\n</program>\n`;
+    const src = `<program db="./app.db">\n    let <n:int=0/>\n    function count() -> int {\n        const r = ${SQ}\`SELECT 1 AS a\`}.get() !{ _ :> not };\n        return 1;\n    }\n    function go() {\n        @n = count() !{ _ :> 0 };\n    }\n    <main><button onclick=go()>go</button></main>\n</program>\n`;
     expect(codes(src)).toEqual([]);
   });
 
   test("a `match` on a non-failable value is not affected — no E-ERROR-013 (s469: the §18 plain-value match, admitted)", () => {
-    const src = P(`    type Mode:enum = { A, B }\n    function go(m: Mode) -> int {\n        return match m {\n            .A :> 1\n            .B :> 2\n        }\n    }`);
+    const src = P(`    type Mode:enum = { A, B }\n    function go(m: Mode) -> int {\n        return match m {\n            .A :> 1,\n            .B :> 2\n        };\n    }`);
     expect(codes(src)).toEqual([]);
   });
 
   test("near-miss: a `!{}` on a `!` call and on a `?{}` compile", () => {
-    clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        @log = load("x") !{ _ :> "z" }\n    }`));
-    expect(codes(`<program db="./app.db">\n    function f() -> int {\n        ${SQ}\`DELETE FROM t\`}.run() !{ _ :> { return 0 } }\n        return 1\n    }\n    <main><p>x</p></main>\n</program>\n`)).toEqual([]);
+    clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        @log = load("x") !{ _ :> "z" };\n    }`));
+    expect(codes(`<program db="./app.db">\n    function f() -> int {\n        ${SQ}\`DELETE FROM t\`}.run() !{ _ :> { return 0; } };\n        return 1;\n    }\n    <main><p>x</p></main>\n</program>\n`)).toEqual([]);
   });
 });
 
@@ -347,16 +347,16 @@ describe("§19.4.3 — E-ERROR-014: a `!{}` written as markup content, attached 
   });
 
   test("near-miss: a handler attached to a call in an event-handler body compiles", () => {
-    clean(P(`${TYPES}\n${LOAD}`, [], `        <button onclick={ load("x") !{ _ :> @n = 1 } }>go</button>\n`));
+    clean(P(`${TYPES}\n${LOAD}`, [], `        <button onclick={ load("x") !{ _ :> @n = 1 }; }>go</button>\n`));
   });
 });
 
 describe("§19.10.4 — E-ERROR-015: manual transaction control outside a `!` function", () => {
   const DBP = (body) => `<program db="./app.db">\n${body}\n    <main><p>x</p></main>\n</program>\n`;
-  const H = (sql) => `${SQ}\`${sql}\`}.run() !{ _ :> { return 0 } }`;
+  const H = (sql) => `${SQ}\`${sql}\`}.run() !{ _ :> { return 0; } };`;
 
   test("`?{BEGIN}` in a function without `!` — the SPEC's message, no Core", () => {
-    const src = DBP(`    function plain() -> int {\n        ${H("BEGIN")}\n        return 1\n    }`);
+    const src = DBP(`    function plain() -> int {\n        ${H("BEGIN")}\n        return 1;\n    }`);
     expect(codes(src)).toEqual(["E-ERROR-015"]);
     expect(msg(src, "E-ERROR-015")).toBe("Manual transaction control 'BEGIN' in 'plain', which is not declared '!'. A transaction is '!'-gated (§19.10.4): its rollback promise needs a failure path. Declare 'plain' with '!' and use 'transaction { … }' (§19.10.2), which commits or rolls back on every exit.");
     rejected(src, "E-ERROR-015");
@@ -364,23 +364,23 @@ describe("§19.10.4 — E-ERROR-015: manual transaction control outside a `!` fu
 
   test("every transaction-control statement, in any form, after leading comments and whitespace", () => {
     for (const sql of ["BEGIN", "begin transaction", "BEGIN IMMEDIATE", "COMMIT", "END", "ROLLBACK", "ROLLBACK TO sp1", "SAVEPOINT sp1", "RELEASE sp1", "  -- start\n  BEGIN", "/* x */ COMMIT"]) {
-      expect([sql, codes(DBP(`    function plain() -> int {\n        ${H(sql)}\n        return 1\n    }`))]).toEqual([sql, ["E-ERROR-015"]]);
+      expect([sql, codes(DBP(`    function plain() -> int {\n        ${H(sql)}\n        return 1;\n    }`))]).toEqual([sql, ["E-ERROR-015"]]);
     }
   });
 
   test("an unhandled one is ALSO E-ERROR-002 (the R11 rule — a different rule; both fire)", () => {
-    expect(codes(DBP(`    function plain() {\n        ${SQ}\`COMMIT\`}.run()\n    }`)).slice().sort()).toEqual(["E-ERROR-002", "E-ERROR-015"]);
+    expect(codes(DBP(`    function plain() {\n        ${SQ}\`COMMIT\`}.run();\n    }`)).slice().sort()).toEqual(["E-ERROR-002", "E-ERROR-015"]);
   });
 
   test("near-miss: inside a `!` function it stays valid; an ordinary statement is not transaction control", () => {
-    expect(codes(DBP(`    function tx()! SqlError {\n        ${SQ}\`BEGIN\`}.run()\n        ${SQ}\`COMMIT\`}.run()\n    }`))).toEqual([]);
-    expect(codes(DBP(`    function plain() -> int {\n        ${H("UPDATE t SET a = 1")}\n        ${H("SELECT ending FROM t")}\n        return 1\n    }`))).toEqual([]);
+    expect(codes(DBP(`    function tx()! SqlError {\n        ${SQ}\`BEGIN\`}.run();\n        ${SQ}\`COMMIT\`}.run();\n    }`))).toEqual([]);
+    expect(codes(DBP(`    function plain() -> int {\n        ${H("UPDATE t SET a = 1")}\n        ${H("SELECT ending FROM t")}\n        return 1;\n    }`))).toEqual([]);
   });
 });
 
 describe("§8.1.1 (S451) — `<db src>` database scopes: the nearest scope wins; E-SQL-004 whatever the count", () => {
   // f(): a server function whose query is handled at the site; returns 1.
-  const FN = (name = "f") => `    function ${name}() -> int {\n        ${SQ}\`DELETE FROM t\`}.run() !{ _ :> { return 0 } }\n        return 1\n    }`;
+  const FN = (name = "f") => `    function ${name}() -> int {\n        ${SQ}\`DELETE FROM t\`}.run() !{ _ :> { return 0; } };\n        return 1;\n    }`;
   const dbOfQuery = (r, fname = "f") => {
     const fn = r.core.server.find((x) => x.sym.hint === fname);
     const db = r.core.dbs.find((d) => d.sym.id === queryOf(fn).db.id);
@@ -445,7 +445,7 @@ describe("§8.1.1 (S451) — `<db src>` database scopes: the nearest scope wins;
   });
 
   test("near-miss: a `<db src>` direct-child program with no query compiles and RUNS; its children render in place; no connection string reaches the client (runtime)", async () => {
-    const src = `<program>\n    let <n:int=0/>\n    <db src="./secret-app.db">\n        <p id="inside">inside \${@n}</p>\n        <button onclick=bump()>bump</button>\n    </db>\n    function bump() {\n        @n = @n + 1\n    }\n</program>\n`;
+    const src = `<program>\n    let <n:int=0/>\n    <db src="./secret-app.db">\n        <p id="inside">inside \${@n}</p>\n        <button onclick=bump()>bump</button>\n    </db>\n    function bump() {\n        @n = @n + 1;\n    }\n</program>\n`;
     const { out } = await load(src);
     expect(out.js).not.toContain("secret-app");
     expect(out.html).not.toContain("secret-app");
@@ -457,8 +457,8 @@ describe("§8.1.1 (S451) — `<db src>` database scopes: the nearest scope wins;
 
 describe("S452 ruling c — `!{}` arms take the `match` arm grammar; the leading `|` and the paren-free binder are LEGACY spellings that parse identically", () => {
   // the same program in the canonical and the legacy spelling → the same Core and the same runtime
-  const canon = `    function go() {\n        load("x") !{\n            .NotFound(m) :> @log = "nf:" + m\n            _ err :> @n = 1\n        }\n    }`;
-  const legacy = `    function go() {\n        load("x") !{\n            | .NotFound m :> @log = "nf:" + m\n            | _ err :> @n = 1\n        }\n    }`;
+  const canon = `    function go() {\n        load("x") !{\n            .NotFound(m) :> @log = "nf:" + m,\n            _ err :> @n = 1\n        };\n    }`;
+  const legacy = `    function go() {\n        load("x") !{\n            | .NotFound m :> @log = "nf:" + m,\n            | _ err :> @n = 1\n        };\n    }`;
   const strip = (x) => JSON.stringify(x, (k, v) => (k === "span" || k === "nid" || k === "site" ? undefined : v));
   // A legacy-spelled program: its ONLY diagnostics are `n` W-ARM-PIPE-LEGACY (§19.4.5) — Info, so
   // the artifact gate stays open (§34: Info "does not fail the compile") — and its Core checks clean.
@@ -484,7 +484,7 @@ describe("S452 ruling c — `!{}` arms take the `match` arm grammar; the leading
   });
 
   test("one-line arms, both spellings: `!{ .A :> 1 _ :> 2 }` and `!{ | .A :> 1 | _ :> 2 }`", async () => {
-    for (const h of [`!{ .NotFound(m) :> "nf" _ :> "o" }`, `!{ | .NotFound m :> "nf" | _ :> "o" }`, `!{ .NotFound(m) :> "nf" _ err :> "o" }`]) {
+    for (const h of [`!{ .NotFound(m) :> "nf", _ :> "o" };`, `!{ | .NotFound m :> "nf", | _ :> "o" };`, `!{ .NotFound(m) :> "nf", _ err :> "o" };`]) {
       const src = P(`${TYPES}\n${LOAD}\n    function go() {\n        @log = load("x") ${h}\n    }`, ["go"]);
       if (h.includes("|")) await loadLegacy(src, 2);
       else await load(src);
@@ -494,75 +494,75 @@ describe("S452 ruling c — `!{}` arms take the `match` arm grammar; the leading
   });
 
   test("the paren-free binder binds the PAYLOAD (§19.4.3 ruling 2): one field only — E-TYPE-021 on a unit or multi-field variant", () => {
-    const T2 = `    type E2:enum = { Unit, Two(a: string, b: string), One(m: string) }\n    function f()! E2 {\n        fail .Unit\n    }`;
-    expect(codes(P(`${T2}\n    function go() {\n        f() !{ | .Unit u :> @n = 1 | _ :> @n = 2 }\n    }`))).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY", "E-TYPE-021"]);
-    expect(codes(P(`${T2}\n    function go() {\n        f() !{ | .Two t :> @n = 1 | _ :> @n = 2 }\n    }`))).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY", "E-TYPE-021"]);
-    legacyOk(P(`${T2}\n    function go() {\n        f() !{ | .One m :> @log = m | _ :> @n = 2 }\n    }`), 2);
+    const T2 = `    type E2:enum = { Unit, Two(a: string, b: string), One(m: string) }\n    function f()! E2 {\n        fail .Unit;\n    }`;
+    expect(codes(P(`${T2}\n    function go() {\n        f() !{ | .Unit u :> @n = 1, | _ :> @n = 2 };\n    }`))).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY", "E-TYPE-021"]);
+    expect(codes(P(`${T2}\n    function go() {\n        f() !{ | .Two t :> @n = 1, | _ :> @n = 2 };\n    }`))).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY", "E-TYPE-021"]);
+    legacyOk(P(`${T2}\n    function go() {\n        f() !{ | .One m :> @log = m, | _ :> @n = 2 };\n    }`), 2);
   });
 
   test("addendum: the paren-free binder is read only after the legacy `|` — the canonical pipe-less arm has none", () => {
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            .NotFound m :> @n = 1\n            _ :> @n = 2\n        }\n    }`))).toContain("E-PARSE-ARM");
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            .NotFound m :> @n = 1,\n            _ :> @n = 2\n        }\n    }`))).toContain("E-PARSE-ARM");
   });
 
   test("a `match` arm has no paren-free binder (§18.2 grammar) — a parse error, not a silent reading", () => {
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @log = v\n            .NotFound m :> @n = 1\n            _ :> @n = 2\n        }\n    }`))).toContain("E-PARSE-ARM");
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @log = v,\n            .NotFound m :> @n = 1,\n            _ :> @n = 2\n        }\n    }`))).toContain("E-PARSE-ARM");
   });
 
   test("addendum: a `match` arm takes no leading `|` (§18.2) — E-PARSE-ARM naming the `|`, no Core; the `!{}` arm keeps it", () => {
-    const src = P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            | .Ok(v) :> @log = v\n            | _ err :> @n = 2\n        }\n    }`);
+    const src = P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            | .Ok(v) :> @log = v,\n            | _ err :> @n = 2\n        }\n    }`);
     expect(codes(src)).toEqual(["E-PARSE-ARM", "E-PARSE-ARM"]);
     expect(msg(src, "E-PARSE-ARM")).toContain("no leading `|`");
     rejected(src, "E-PARSE-ARM");
-    legacyOk(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            | .NotFound(m) :> @log = m\n            | _ err :> @n = 2\n        }\n    }`), 2);
+    legacyOk(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            | .NotFound(m) :> @log = m,\n            | _ err :> @n = 2\n        };\n    }`), 2);
   });
 
   test("E-MATCH-BARE-BINDER and the whole-error binder hold in both spellings, in `!{}` and in `match`", () => {
     for (const arms of [`err :> @n = 1`, `| err :> @n = 1`, `else err :> @n = 1`, `| else err :> @n = 1`]) {
       const want = arms.startsWith("|") ? ["W-ARM-PIPE-LEGACY", "E-MATCH-BARE-BINDER"] : ["E-MATCH-BARE-BINDER"];
-      expect([arms, codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            ${arms}\n        }\n    }`))]).toEqual([arms, want]);
+      expect([arms, codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            ${arms}\n        };\n    }`))]).toEqual([arms, want]);
     }
     for (const arms of [`err :> @n = 1`, `else err :> @n = 1`]) {
-      expect([arms, codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @log = v\n            ${arms}\n        }\n    }`))]).toEqual([arms, ["E-MATCH-BARE-BINDER"]]);
+      expect([arms, codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @log = v,\n            ${arms}\n        };\n    }`))]).toEqual([arms, ["E-MATCH-BARE-BINDER"]]);
     }
   });
 
   // s452-boot-arm-pipe — W-ARM-PIPE-LEGACY (§19.4.5, §34: Info): one per `|`-led `!{}` arm.
   const wMsgs = (src) => run(src).diags.filter((d) => d.code === "W-ARM-PIPE-LEGACY").map((d) => d.message);
-  const fnH = (h) => P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n${h}\n        }\n    }`, ["go"]);
+  const fnH = (h) => P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n${h}\n        };\n    }`, ["go"]);
 
   test("W-ARM-PIPE-LEGACY fires once per `|`-led arm; pipe-less arms carry none", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n${canon}`, ["go"]))).toEqual([]);
     expect(codes(P(`${TYPES}\n${LOAD}\n${legacy}`, ["go"]))).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY"]);
     // mixed: only the `|`-led arm lints
-    expect(codes(fnH(`            .NotFound(m) :> @log = m\n            | _ :> @n = 2`))).toEqual(["W-ARM-PIPE-LEGACY"]);
+    expect(codes(fnH(`            .NotFound(m) :> @log = m,\n            | _ :> @n = 2`))).toEqual(["W-ARM-PIPE-LEGACY"]);
     // one line, three arms
-    expect(codes(fnH(`            | .NotFound(m) :> @log = m | .Timeout :> @n = 1 | _ :> @n = 2`))).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY"]);
+    expect(codes(fnH(`            | .NotFound(m) :> @log = m, | .Timeout :> @n = 1, | _ :> @n = 2`))).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY"]);
     // a value-producing handler
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ | .Timeout :> "t" | _ :> "?" }\n    }`, ["go"]))).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY"]);
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ | .Timeout :> "t", | _ :> "?" };\n    }`, ["go"]))).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY"]);
   });
 
   test("its message is §19.4.5's: the arm as written, its canonical rewrite (a paren-free binder gains parentheses), `scrml fix`", () => {
     const tail = " :>'. Run 'scrml fix' to rewrite every site (§19.4.5).";
     const m = (pat, canonical) => `Arm '| ${pat} :>' uses the deprecated leading '|'. A pattern arm is a match arm (§18.2): write '${canonical}${tail}`;
-    expect(wMsgs(fnH(`            | .NotFound m :> @log = m\n            | _ err :> @n = 1`))).toEqual([m(".NotFound m", ".NotFound(m)"), m("_ err", "_ err")]);
-    expect(wMsgs(fnH(`            | ::NotFound m :> @log = m\n            | ::Timeout :> @n = 1`))).toEqual([m("::NotFound m", "::NotFound(m)"), m("::Timeout", "::Timeout")]);
-    expect(wMsgs(fnH(`            | .NotFound(m) :> @log = m\n            | else :> @n = 1`))).toEqual([m(".NotFound(m)", ".NotFound(m)"), m("else", "else")]);
+    expect(wMsgs(fnH(`            | .NotFound m :> @log = m,\n            | _ err :> @n = 1`))).toEqual([m(".NotFound m", ".NotFound(m)"), m("_ err", "_ err")]);
+    expect(wMsgs(fnH(`            | ::NotFound m :> @log = m,\n            | ::Timeout :> @n = 1`))).toEqual([m("::NotFound m", "::NotFound(m)"), m("::Timeout", "::Timeout")]);
+    expect(wMsgs(fnH(`            | .NotFound(m) :> @log = m,\n            | else :> @n = 1`))).toEqual([m(".NotFound(m)", ".NotFound(m)"), m("else", "else")]);
   });
 
   test("the paren-free binder after the `|` still lints — and lowers to the SAME Core as `.V(m)`", () => {
-    const a = clean(fnH(`            .NotFound(m) :> @log = m\n            _ :> @n = 2`));
-    const b = legacyOk(fnH(`            | .NotFound m :> @log = m\n            | _ :> @n = 2`), 2);
+    const a = clean(fnH(`            .NotFound(m) :> @log = m,\n            _ :> @n = 2`));
+    const b = legacyOk(fnH(`            | .NotFound m :> @log = m,\n            | _ :> @n = 2`), 2);
     expect(strip(b.core)).toBe(strip(a.core));
     // one-line, the deprecated separator too: each lint is its own (W-MATCH-ARROW-LEGACY is analyze's)
-    const one = run(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ | .Timeout => "t" | _ :> "?" }\n    }`, ["go"]));
+    const one = run(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ | .Timeout => "t", | _ :> "?" };\n    }`, ["go"]));
     expect(one.diags.map((d) => d.code).sort()).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY", "W-MATCH-ARROW-LEGACY"]);
     expect(one.core == null).toBe(false);
-    const oneC = clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ .Timeout :> "t" _ :> "?" }\n    }`, ["go"]));
-    expect(strip(legacyOk(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ | .Timeout :> "t" | _ :> "?" }\n    }`, ["go"]), 2).core)).toBe(strip(oneC.core));
+    const oneC = clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ .Timeout :> "t", _ :> "?" };\n    }`, ["go"]));
+    expect(strip(legacyOk(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ | .Timeout :> "t", | _ :> "?" };\n    }`, ["go"]), 2).core)).toBe(strip(oneC.core));
   });
 
   test("a program whose every handler arm is `|`-led still produces a Core (Info never closes the gate) and runs", async () => {
-    const src = P(`${TYPES}\n${LOAD}\n    function go() {\n        @log = load("x") !{ | .NotFound m :> "nf:" + m | .Timeout :> "t" }\n        @out = load("y") !{ | _ :> "y-failed" }\n    }`, ["go"]);
+    const src = P(`${TYPES}\n${LOAD}\n    function go() {\n        @log = load("x") !{ | .NotFound m :> "nf:" + m, | .Timeout :> "t" };\n        @out = load("y") !{ | _ :> "y-failed" };\n    }`, ["go"]);
     const r = legacyOk(src, 3);
     expect(r.typed.files.every((f) => f.errs.length === 0)).toBe(true);
     await loadLegacy(src, 3);
@@ -577,7 +577,7 @@ describe("S452 ruling c — `!{}` arms take the `match` arm grammar; the leading
   });
 
   test("not the lint: a `|` on a `match` arm (E-PARSE-ARM) or between alternates (§18.2)", () => {
-    const mt = codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            | .Ok(v) :> @log = v\n            | _ :> @n = 2\n        }\n    }`));
+    const mt = codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            | .Ok(v) :> @log = v,\n            | _ :> @n = 2\n        }\n    }`));
     expect(mt).not.toContain("W-ARM-PIPE-LEGACY");
     expect(codes(fnH(`            .NotFound(m) | .Timeout :> @n = 1`))).not.toContain("W-ARM-PIPE-LEGACY");
   });
@@ -585,14 +585,16 @@ describe("S452 ruling c — `!{}` arms take the `match` arm grammar; the leading
   // r2 (review LOW): the lint names a rewrite, so it fires only for an arm that PARSED — never
   // during error recovery, never with an empty or truncated pattern. The errors are unchanged.
   test("r2: no lint during recovery — a bitwise `|` in a pipe-less arm's body (empty pattern)", () => {
+    // (s469: kept in its pre-dpa-073 shape on purpose — the arms are not comma-separated, so the two
+    // arm boundaries are also E-MATCH-ARM-SEPARATOR; the recovery under test is unchanged)
     const src = fnH(`            .NotFound(m) :> @n = @n | 2\n            _ :> @n = 2`);
-    expect(codes(src)).toEqual(["E-PARSE-ARM", "E-PARSE-ARM", "E-SYNTAX-010"]);
+    expect(codes(src)).toEqual(["E-MATCH-ARM-SEPARATOR", "E-PARSE-ARM", "E-PARSE-ARM", "E-MATCH-ARM-SEPARATOR", "E-SYNTAX-010"]);
     expect(wMsgs(src)).toEqual([]);
   });
 
   test("r2: no lint for a `|`-led unsupported alternation (`| .A | .B :>`) — no suggestion that drops `.B`", () => {
-    const piped = fnH(`            | .NotFound(m) | .Timeout :> @n = 1\n            | _ :> @n = 2`);
-    const plain = fnH(`            .NotFound(m) | .Timeout :> @n = 1\n            _ :> @n = 2`);
+    const piped = fnH(`            | .NotFound(m) | .Timeout :> @n = 1,\n            | _ :> @n = 2`);
+    const plain = fnH(`            .NotFound(m) | .Timeout :> @n = 1,\n            _ :> @n = 2`);
     expect(codes(plain)).toEqual(["E-PARSE-ARM"]);
     // only the well-formed `| _ :>` arm lints; the alternation keeps its one E-PARSE-ARM
     expect(codes(piped)).toEqual(["E-PARSE-ARM", "W-ARM-PIPE-LEGACY"]);
@@ -602,7 +604,7 @@ describe("S452 ruling c — `!{}` arms take the `match` arm grammar; the leading
 
 describe("fix round r2 — E-ERROR-015 statement list, LOW-3 arm order, DB-LOW-1 redaction, NIT", () => {
   const DBP = (body) => `<program db="./app.db">\n${body}\n    <main><p>x</p></main>\n</program>\n`;
-  const fnWith = (sql) => DBP(`    function plain() -> int {\n        ${SQ}\`${sql}\`}.run() !{ _ :> { return 0 } }\n        return 1\n    }`);
+  const fnWith = (sql) => DBP(`    function plain() -> int {\n        ${SQ}\`${sql}\`}.run() !{ _ :> { return 0; } };\n        return 1;\n    }`);
 
   test("r2 MED-1: EVERY statement is read — `?{;BEGIN}`, `?{SELECT 1; BEGIN}`", () => {
     for (const sql of [";BEGIN", "SELECT 1; BEGIN", "SELECT 1;\n  -- c\n  COMMIT", "UPDATE t SET a = 1;;ROLLBACK"]) {
@@ -626,11 +628,11 @@ describe("fix round r2 — E-ERROR-015 statement list, LOW-3 arm order, DB-LOW-1
   });
 
   test("r2 LOW-3: an arm after `_ err` is E-SYNTAX-010 (§18.6.1: `_ err` is the wildcard for the last-arm position) — with a true message", () => {
-    const okAfter = P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            _ err :> @n = 2\n            .Ok(v) :> @log = v\n        }\n    }`);
+    const okAfter = P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            _ err :> @n = 2,\n            .Ok(v) :> @log = v\n        }\n    }`);
     expect(codes(okAfter)).toEqual(["E-SYNTAX-010"]);
     expect(msg(okAfter, "E-SYNTAX-010")).toContain("never `.Ok`");
     expect(msg(okAfter, "E-SYNTAX-010")).not.toContain("already took every remaining case");
-    const wildAfter = P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            _ err :> @n = 2\n            _ :> @n = 3\n        }\n    }`);
+    const wildAfter = P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            _ err :> @n = 2,\n            _ :> @n = 3\n        };\n    }`);
     expect(codes(wildAfter)).toEqual(["E-SYNTAX-010"]);
   });
 
@@ -651,7 +653,7 @@ describe("fix round r2 — E-ERROR-015 statement list, LOW-3 arm order, DB-LOW-1
 
 describe("fix round r3 — fail-closed tx scan, every-path yield, no echoed connection string, alternation message", () => {
   const DBP = (body) => `<program db="./app.db">\n${body}\n    <main><p>x</p></main>\n</program>\n`;
-  const fnWith = (sql) => DBP(`    function plain() -> int {\n        ${SQ}\`${sql}\`}.run() !{ _ :> { return 0 } }\n        return 1\n    }`);
+  const fnWith = (sql) => DBP(`    function plain() -> int {\n        ${SQ}\`${sql}\`}.run() !{ _ :> { return 0; } };\n        return 1;\n    }`);
   const go = (body) => P(`${TYPES}\n${LOAD}\n${body}`, ["go"]);
 
   test("r3 MED-A: dialect-dependent quoting / commenting cannot hide transaction control (fail closed)", () => {
@@ -668,7 +670,7 @@ describe("fix round r3 — fail-closed tx scan, every-path yield, no echoed conn
     // accepted false positive: a `$$ … BEGIN … END $$` body in a non-`!` function
     expect(codes(fnWith("CREATE FUNCTION f() RETURNS int AS $$ BEGIN; RETURN 1; END $$ LANGUAGE plpgsql"))).toEqual(["E-ERROR-015"]);
     // the way out: a `!` function
-    expect(codes(DBP(`    function tx()! SqlError {\n        ${SQ}\`'a\\\\''; BEGIN\`}.run()\n    }`))).toEqual([]);
+    expect(codes(DBP(`    function tx()! SqlError {\n        ${SQ}\`'a\\\\''; BEGIN\`}.run();\n    }`))).toEqual([]);
   });
 
   test("r4 MED-A: the plain split ALWAYS runs — bracketed identifiers, \\f / \\v whitespace, a lone \\r ending a `--` comment", () => {
@@ -680,20 +682,20 @@ describe("fix round r3 — fail-closed tx scan, every-path yield, no echoed conn
   test("r4 MED-A: an accepted false positive — `INSERT … VALUES ('done; commit later')` in a non-`!` function", () => {
     expect(codes(fnWith("INSERT INTO t VALUES ('done; commit later')"))).toEqual(["E-ERROR-015"]);
     // the way out: bind the text as a value
-    expect(codes(DBP(`    function plain(note: string) -> int {\n        ${SQ}\`INSERT INTO t VALUES (\${note})\`}.run() !{ _ :> { return 0 } }\n        return 1\n    }`))).toEqual([]);
+    expect(codes(DBP(`    function plain(note: string) -> int {\n        ${SQ}\`INSERT INTO t VALUES (\${note})\`}.run() !{ _ :> { return 0; } };\n        return 1;\n    }`))).toEqual([]);
   });
 
   test("r3 MED-B: a bare `return` at ANY depth means the callee may yield no value — E-ERROR-012", () => {
-    expect(codes(go(`    function h() {\n        if (@n == 1) { return }\n        return "a"\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() }\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469: a bare `return` beside a value return
-    expect(codes(go(`    function h() {\n        load("x") !{ _ :> { return } }\n        return "a"\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() }\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469: a bare `return` beside a value return
+    expect(codes(go(`    function h() {\n        if (@n == 1) { return; }\n        return "a";\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() };\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469: a bare `return` beside a value return
+    expect(codes(go(`    function h() {\n        load("x") !{ _ :> { return; } };\n        return "a";\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() };\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469: a bare `return` beside a value return
   });
 
   test("r3 LOW-C: the first unconditional `return <value>` decides (what follows is dead)", () => {
-    clean(go(`    function h() {\n        return "a"\n        @n = 4\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() }\n    }`));
+    clean(go(`    function h() {\n        return "a";\n        @n = 4;\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() };\n    }`));
   });
 
   test("r3 LOW-C: a `fn` tail expression is NOT a value in the bootstrap (no implicit tail return — it prints `\"a\";`), so it stays E-ERROR-012", () => {
-    expect(codes(go(`    fn h() { "a" }\n    function go() {\n        @log = load("x") !{ _ :> h() }\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    fn h() { "a"; }\n    function go() {\n        @log = load("x") !{ _ :> h() };\n    }`))).toEqual(["E-ERROR-012"]);
   });
 
   test("r3 LOW-B: no db diagnostic echoes the value — every credential shape stays out", () => {

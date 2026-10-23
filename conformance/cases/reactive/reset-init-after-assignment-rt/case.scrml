@@ -2,7 +2,7 @@ ${
     <ticks> = 0
     @ticks = @ticks + 1
     function doReset() {
-        reset(@ticks)
+        reset(@ticks);
     }
 }
 <button id="rs" onclick=doReset()>reset</>

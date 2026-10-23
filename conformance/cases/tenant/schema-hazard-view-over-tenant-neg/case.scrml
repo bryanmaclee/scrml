@@ -7,7 +7,7 @@
     // Reading a view is never scoped to the active tenant.
     ${
         function go() {
-            return ?{`SELECT id, name FROM all_assets`}.all()
+            return ?{`SELECT id, name FROM all_assets`}.all();
         }
     }
     <button onclick=${ go() }>go</button>

@@ -79,41 +79,41 @@ describe("§4.14 `:`-shorthand bodies", () => {
 
 describe("expressions: spread elements, index, arrow functions", () => {
   test("`[...@a, 1]` — the first element is a Spread of `@a`", () => {
-    const e = exprOf("[...@a, 1]");
+    const e = exprOf("[...@a, 1];");
     expect(e.k.variant).toBe("ArrayLit");
     expect(e.k.data.elems.map((x) => x.k.variant)).toEqual(["Spread", "Num"]);
     expect(e.k.data.elems[0].k.data.e.k).toEqual({ variant: "At", data: { name: "a" } });
   });
 
   test("`[1, ...xs]` — a trailing Spread of a local", () => {
-    const e = exprOf("[1, ...xs]");
+    const e = exprOf("[1, ...xs];");
     expect(e.k.data.elems.map((x) => x.k.variant)).toEqual(["Num", "Spread"]);
     expect(e.k.data.elems[1].k.data.e.k).toEqual({ variant: "Name", data: { name: "xs" } });
   });
 
   test("`@a[0].f` — a Member of an Index; a spaced `[` is not an index", () => {
-    const e = exprOf("@a[0].f");
+    const e = exprOf("@a[0].f;");
     expect(e.k.variant).toBe("Member");
     expect(e.k.data.obj.k.variant).toBe("Index");
     expect(e.k.data.obj.k.data.idx.k).toEqual({ variant: "Num", data: { raw: "0" } });
   });
 
   test("`e => e.n != 1` and `(a, b) => a` are Lambdas with their parameters and body", () => {
-    const one = exprOf("e => e.n != 1");
+    const one = exprOf("e => e.n != 1;");
     expect(one.k.variant).toBe("Lambda");
     expect(one.k.data.params).toEqual(["e"]);
     expect(one.k.data.body.k.variant).toBe("Binary");
-    const two = exprOf("(a, b) => a");
+    const two = exprOf("(a, b) => a;");
     expect(two.k.data.params).toEqual(["a", "b"]);
     expect(two.k.data.body.k).toEqual({ variant: "Name", data: { name: "a" } });
   });
 
   test("a parenthesized expression is still not a lambda", () => {
-    expect(exprOf("(a + 1)").k.variant).toBe("Binary");
+    expect(exprOf("(a + 1);").k.variant).toBe("Binary");
   });
 
   test("an arrow function with a braced body is reported, not guessed", () => {
-    expect(codes("${ function f() { const v = x => { return 1 } } }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes("${ function f() { const v = x => { return 1; } } }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 });
 

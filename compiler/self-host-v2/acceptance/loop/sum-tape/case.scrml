@@ -2,11 +2,11 @@
 <program>
     <xs:int[]=([3, 4, 5])/>
     function sum(ys: int[]) -> int {
-        let total = 0
+        let total = 0;
         for (y of ys) {
-            total = total + y
+            total = total + y;
         }
-        return total
+        return total;
     }
     <main>
         <p id="s">${sum(@xs)}</p>
