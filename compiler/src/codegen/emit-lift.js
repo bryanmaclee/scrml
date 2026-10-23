@@ -1796,8 +1796,14 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         exprJS = `${emitExprField(null, val.name, liftExprCtx())}(${rawArgs})`;
         rawText = `${val.name}(${(val.args || []).join(", ")})`;
       } else if (val && val.kind === "string-literal") {
-        exprJS = JSON.stringify(String(val.value ?? ""));
-        rawText = "";
+        // A QUOTED condition is still a condition expression (§17.1: `if="@n >= 3"`),
+        // never a string — a non-empty string is truthy, so reading it as one would
+        // render the element whatever the condition says. A whole-value `${…}` is
+        // the same expression.
+        const q = String(val.value ?? "").trim();
+        const interp = /^\$\{([\s\S]*)\}$/.exec(q);
+        rawText = interp ? interp[1].trim() : q;
+        exprJS = rawText === "" ? "false" : emitExprField(null, rawText, liftExprCtx());
       } else {
         recordRefusedLowering(new CGError(
           "E-CG-003",

@@ -26,6 +26,8 @@ ${wrap(`<b if=${guard}>LOGGED IN</b>`, guard)}
 const GUARDS = [
   ["plain", `(@pw == "secret")`],
   ["call", `allowed(@pw)`],
+  // A QUOTED condition is an expression (§17.1), not a string: read as a string it is truthy.
+  ["quoted", `"allowed(@pw)"`],
 ];
 const WRAPS = [
   ["for-lift sole root", (b) => `<div id="out">\${ for (x of @xs) { lift ${b} } }</div>`],
