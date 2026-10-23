@@ -908,11 +908,12 @@ ${
     }
 
     // Where an expression arm ends: at bracket depth 0, the arms' closing `}`,
-    // a `,` (the arm-list separator, s469), a `|` (the next arm), the first token on a later line unless the line
-    // above ends in a §7.2.2 rule-2 continuation token (`.Boom(m) :> "a:" +⏎ m`
-    // is one arm — dpa-068 D12), or the start of the next arm on the same line
-    // (`.A :> 1  .B :> 2` — a pattern followed by its separator, which no
-    // expression contains).
+    // a `,` (the arm-list separator, s469), a `|` (the next arm), or the start
+    // of the next arm (`.A :> 1  .B :> 2`, on the same line or the next — a
+    // pattern followed by its separator, which no expression contains; the
+    // missing `,` is then reported by parseArms). s469 (dpa-073 F1 (a)): a line
+    // break is whitespace — `.Boom(m) :> "a:"⏎ + m` is one arm, as
+    // `.Boom(m) :> "a:" +⏎ m` already was (dpa-068 D12).
     fn armEnd(tp: TP) -> int {
         let i: int = tp.i
         let depth: int = 0
@@ -927,7 +928,9 @@ ${
                 // arm bodies yet (it fails loudly — pinned in arms-union-s469.test.js);
                 // when they land, this boundary rule must learn markup depth.
                 if (x.cls == TC.Punct && tk(x, ",")) return i
-                if (x.line != tp.toks[i - 1].line && !continuesLine(tp.toks, i - 1)) return i
+                // (s469 — dpa-073 F1 (a): a line break no longer ends an arm; the
+                // next arm's head below still does, so a missing `,` is reported
+                // after the arm it is missing from, never read as one long body)
                 if (x.cls == TC.Punct && tk(x, "|")) return i
                 if (armStartsAt(tp.toks, i)) return i
             }
@@ -958,24 +961,6 @@ ${
             j = j + 1
         }
         return ts.length - 1
-    }
-
-    // §7.2.2 rule 2 — does token `k`, the last of its line, continue the
-    // expression onto the next line? The closed list: a binary operator, `=` and
-    // the compound assignments, `.` / `?.`, a conditional `?` / `:`, `,`, `=>`,
-    // `:>`, and a prefix `!` / `typeof` / `new`. A `?` written against its
-    // operand (`load(id)?`) is §19.5 propagation and ends the expression.
-    fn continuesLine(ts: PTok[], k: int) -> boolean {
-        const t: PTok = ts[k]
-        if (t.cls == TC.Keyword || t.cls == TC.Ident) {
-            return ["in", "instanceof", "is", "typeof", "new", "and", "or"].indexOf(t.text) >= 0
-        }
-        if (t.cls != TC.Punct) return false
-        if (tk(t, "?")) return !(k > 0 && touching(ts[k - 1], t))
-        return ["+", "-", "*", "/", "%", "**", "==", "!=", "===", "!==", "<", ">", "<=", ">=",
-                "&&", "||", "??", "&", "|", "^", "<<", ">>", ">>>",
-                "=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "&=", "|=", "^=", "<<=", ">>=", ">>>=",
-                ".", "?.", ":", ",", "=>", ":>", "!"].indexOf(t.text) >= 0
     }
 
     // Does an arm's pattern start at token `i` — `.V`, `::V`, `_`, `else`,
@@ -1716,6 +1701,12 @@ ${
             at = last.end
             if (last.text.length <= 24 && last.text.indexOf("\n") < 0) after = " after `" + last.text + "`"
         }
+        // (one report per place: a statement that already reported its own
+        // missing `;` here — the split `return` — is not reported twice)
+        if (tp.diags.length > 0) {
+            const prev: Diag = tp.diags[tp.diags.length - 1]
+            if (prev.code == "E-STMT-MISSING-SEMICOLON" && prev.span.start == at) return tp
+        }
         const msg: string = "Expected `;` to end the statement — insert `;`" + after + ". A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3)."
         const d: Diag = newDiag("E-STMT-MISSING-SEMICOLON", msg, tp.file, mkSpan(at, at))
         return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
@@ -1807,8 +1798,21 @@ ${
         }
         if (isWord(tp, "return")) {
             const nx: PTok = peekAt(tp, 1)
-            if (nx.cls == TC.End || nx.line != t.line || tk(nx, "}") || tk(nx, ";")) {
+            if (nx.cls == TC.End || tk(nx, "}") || tk(nx, ";")) {
                 return mkS(adv(tp), start, AStmtK.Return(not))
+            }
+            // s469 — dpa-073 F6 reads `return⏎expr;` as returning `expr` (F1 (a):
+            // a newline ends nothing). Until the newline-terminated corpus is
+            // migrated (F5 steps 2–3) that reading would silently turn a legacy
+            // `return⏎next();` into `return next();`, so the split form is
+            // REFUSED, fail closed (PA reading, S469): E-STMT-MISSING-SEMICOLON
+            // at the end of `return` — the legacy meaning's fix-it — whose message
+            // names the other repair.
+            if (nx.line != t.line) {
+                const rt: TP = adv(tp)
+                const d: Diag = newDiag("E-STMT-MISSING-SEMICOLON", "Expected `;` to end the statement — insert `;` after `return` to return nothing, or put the returned value on the `return` line. A `return` followed by a line break is refused for now: dpa-073 F1 reads `return⏎expr;` as returning `expr`, and the bootstrap does not guess which was meant while newline-terminated code is still being migrated.", rt.file, mkSpan(t.end, t.end))
+                const rd: TP = { toks: rt.toks, i: rt.i, nid: rt.nid, diags: rt.diags.concat([d]), file: rt.file }
+                return mkS(rd, start, AStmtK.Return(not))
             }
             const v: RExpr = parseAssign(adv(tp))
             return mkS(v.tp, start, AStmtK.Return(v.e))
