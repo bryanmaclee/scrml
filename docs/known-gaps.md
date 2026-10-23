@@ -31,10 +31,28 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 266 | 4 |
-| MED | 676 | 7 |
+| MED | 679 | 7 |
 | LOW | 463 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-impl1-duplicate-function-silently-overrides-s469 — impl#1 accepts two `function` declarations of one name at file scope with exit 0 and no diagnostic, and the later one wins: `function pick(n: int) -> int { return 1; }` then a second `pick` returning `2` compiles, and `pick(0)` is `2` — `NEW S469 (owner: file as a gap); MED; open`
+
+<!-- @gap id=g-impl1-duplicate-function-silently-overrides-s469 sev=MED status=open locus=compiler/src/gauntlet-phase1-checks.js(Check 3 — the file-scope duplicate-binding check walks `let` / `const` only, not `function` declarations) prov=ruling:user-voice-scrml.md(S469 "Owner — impl#1 non-security bugs stay gaps" — "File as gaps (Recommended)");dispatch:s469-boot-templates(found by the templates lane);spec:§7.6,§7.3.3 -->
+
+Found by the S469 templates lane. Reproduced S469 (s469-spec-lin-request) both inside a top-level `${ }` block and bare in the `<program>` body: impl#1 compiles at exit 0 (only the redundant-logic lint), emits both as `_scrml_pick_2` / `_scrml_pick_3`, and every call goes to the later one. The SPEC already rules this: two top-level `function` declarations of one name are **E-SCOPE-010** (§7.6, S440 #6), and the §34 row marks that case Nominal on impl#1. The bootstrap refuses it (`E-SCOPE-010: function \`pick\` is already declared at file scope`). Cost: an adopter who pastes a second helper with the same name gets the wrong function with no warning. Not fixed: impl#1 is fixed only for bootstrap or security work (S435), and the owner ruled that non-security bugs stay gaps. (Inside a function body, two same-named `function` declarations are outside §7.3.3's rule, which is a separate SPEC question and not this gap.)
+
+### g-spec-route-query-missing-key-unspecified-s469 — SPEC §20.4 does not say what `route.query.<key>` yields when the URL has no such key: it says every `route.query` value "SHALL have type `string`", which cannot hold for an absent key — `NEW S469; MED; open (ruling owed — owner)`
+
+<!-- @gap id=g-spec-route-query-missing-key-unspecified-s469 sev=MED status=open locus=compiler/SPEC.md(§20.4 normative statements "`route.query` SHALL expose all query string key-value pairs present in the request URL" and "All values on `route.params` and `route.query` SHALL have type `string`") prov=dispatch:s469-spec-lin-request(owed to the owner, PA brief item 3b);spec:§20.4 -->
+
+§20.4 types every `route.query` value `string` and exposes only the keys present in the URL, so a read of a missing key (`route.query.tab` on `/settings`) has no specified value. On impl#1 such a read is a host-JS property miss. A path parameter has no such hole: an unknown one is E-SCOPE-011 at compile time, but the query string is not known until the request arrives. Also unspecified: a key with no `=` (`?tab`), and a key given twice (`?tag=a&tag=b`). **Owed to the owner.** **PA recommendation:** `route.query.<key>` has type `string | not` and is `not` when the key is absent, which matches the S469 rule that a failed parse is `T | not`. A bare `?tab` is `""`. A repeated key yields its first value, with the full list behind a separate accessor if one is ever wanted. The alternative, an absent key reading as `""`, would make "absent" and "present but empty" the same value, which is the same mistake as `g-sse-arg-not-vs-omitted-indistinguishable-s466`.
+
+### g-bootstrap-lin-not-implemented-s469 — the BOOTSTRAP has no `lin`: a `lin` declaration is `E-SCOPE-001: \`lin\` is not declared`, and a `lin` parameter is misreported as "an unannotated parameter `lin`" (E-BOOTSTRAP-UNSUPPORTED) — `NEW S469; MED; open (owed bootstrap change; fails closed)`
+
+<!-- @gap id=g-bootstrap-lin-not-implemented-s469 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(the parameter check that emits "an unannotated parameter `…`" — it is handed `lin` as the parameter's name; the declaration path, where `lin` reads as an identifier, is not traced) prov=dispatch:s469-spec-lin-request(PA brief item 3c);spec:§35,§6.7.7 -->
+
+Reproduced S469 (s469-spec-lin-request) on the bootstrap (`bun scripts/scrml-boot.ts compile`): `function useToken(lin token: string) -> string { return token; }` fails with *"an unannotated parameter `lin` — bootstrap slice M2 needs `lin: Type` (Core parameters are typed)"*, and `lin token = "a";` in a function body fails with *"`lin` is not declared"* (E-SCOPE-001). Both fail closed, but the messages point the author at the wrong fix: the parameter is annotated, and `lin` is a keyword, not an undeclared name. Owed: the bootstrap parses `lin` declarations (§35.2) and `lin` parameters (§35.2.1) and runs the §35 linear pass (E-LIN-001 / -002 / -003 / -005 / -006, and the S469 `<request>`-body form, §6.7.7). Until then it should refuse `lin` with one honest E-BOOTSTRAP-UNSUPPORTED ("`lin` is not yet supported by the bootstrap") at both sites. impl#1 implements §35 (`compiler/src/type-system.ts`).
 
 ### g-bootstrap-integer-type-name-refused-s469 — the BOOTSTRAP refuses the type name `integer`, which SPEC §14.13.6 keeps as a soft-deprecated synonym of `int` through a §63 window — `NEW S469; LOW; RESOLVED S469 (s469-boot-ruled-backlog)`
 
