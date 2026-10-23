@@ -5,7 +5,7 @@
  *
  * Each generated arm list (literal or variant heads, alternations, bodies holding `,` / `|` / `:>` /
  * quotes / regexes / templates, `:>` or the deprecated `->`, `else` or `_`) is compiled at one
- * expression position in FOUR spellings — newline, comma (trailing `,` optional), one line,
+ * expression position (one arm sometimes `|`-led, which must be refused everywhere) in FOUR spellings — newline, comma (trailing `,` optional), one line,
  * mixed. The contract:
  *   - either every spelling is refused, or none is (no spelling-dependent refusal);
  *   - when none is refused, all four emit byte-identical output, and every match dispatch tests
@@ -96,12 +96,16 @@ for (let it = 0; it < LISTS; it++) {
   const elseKw = pick(["else", "_"]);
   const arrow = rnd() < 0.15 ? "->" : ":>";
   const bodyOf = (b) => (arrow === "->" && b.startsWith("/") ? pick(ARROW_DASH_BODIES) : b);
-  const lines = [...arms.map((a) => `${a.heads.join(" | ")} ${arrow} ${bodyOf(a.body)}`), `${elseKw} ${arrow} ${bodyOf(pick(BODIES))}`];
+  // S469 r5 — sometimes one arm is written with the `!{}` handler's legacy leading `|`
+  // (`| 1 :> …`, `| .Tri :> …`): §18.2's `match` has none, so that list must be refused in EVERY
+  // spelling and position (g-impl1-legacy-pipe-literal-match-arms-s469 — it used to run the wrong arm).
+  const pipeArm = arms.length > 0 && rnd() < 0.15 ? Math.floor(rnd() * arms.length) : -1;
+  const lines = [...arms.map((a, i) => `${i === pipeArm ? "| " : ""}${a.heads.join(" | ")} ${arrow} ${bodyOf(a.body)}`), `${elseKw} ${arrow} ${bodyOf(pick(BODIES))}`];
   const expected = arms.flatMap((a) => a.heads.map((h) => (fam === "lit" ? norm(h) : TAG(h)))).join(" ");
   const trailing = rnd() < 0.5;
   const mixMask = lines.map(() => rnd() < 0.5);
   const pos = pick(Object.keys(POS));
-  CASES.push({ fam, lines, expected, trailing, mixMask, pos });
+  CASES.push({ fam, lines, expected, trailing, mixMask, pos, legacyPipe: pipeArm >= 0 });
 }
 
 describe(`seeded arm-list differential (seed ${SEED}, ${LISTS} lists × 4 spellings)`, () => {
@@ -117,6 +121,13 @@ describe(`seeded arm-list differential (seed ${SEED}, ${LISTS} lists × 4 spelli
       const res = {};
       for (const [sn, sf] of Object.entries(sp)) res[sn] = compile(PRE + POS[c.pos](ty, subj, sf));
       const refused = Object.fromEntries(Object.entries(res).map(([k, r]) => [k, r.codes.length > 0]));
+      if (c.legacyPipe) {
+        // a `|`-led arm: refused in every spelling, never compiled. (Usually E-PARSE-001; a compile the
+        // typer already fails — the filed false E-VALUE-FUNCTION-STORED — stops before the lowering's
+        // E-PARSE-001, which is still a refusal.)
+        for (const [sn, r] of Object.entries(res)) expect({ sn, refused: r.codes.length > 0 }).toEqual({ sn, refused: true });
+        return;
+      }
       // no spelling-dependent refusal
       expect(new Set(Object.values(refused)).size).toBe(1);
       if (refused.newline) return; // refused in every spelling: fail closed
