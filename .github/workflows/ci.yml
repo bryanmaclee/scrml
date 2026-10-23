@@ -182,6 +182,14 @@ jobs:
       - name: Snippet gate (every public-cited .scrml still compiles)
         if: ${{ !cancelled() }}
         run: bun scripts/snippet-gate.js
+      # S469 — the claim gate (scripts/claim-gate.js), BLOCKING. Every ```scrml fence in the public
+      # surface (scripts/claim-gate-surface.js) compiles — ruled documents with the bootstrap, the rest
+      # with impl#1 — and the surface floor holds (a new README / NERDME / DESIGN / docs/**.md page
+      # with scrml in it must be gated or excused with a reason). Dated pre-S469 articles and the two
+      # release announcements are bannered and excused file by file (S469 "Banner + exempt").
+      - name: Claim gate (every public scrml fence compiles; the surface floor)
+        if: ${{ !cancelled() }}
+        run: bun scripts/claim-gate.js
       # ABSOLUTE floor (NOT differential): every shipped showcase PROGRAM (examples/* + multi-file
       # example/benchmark apps) must build on HEAD. corpus-emit-differential is base-vs-head and treats
       # compile-failure as DATA, so a program broken since before the baseline is invisible to it — that

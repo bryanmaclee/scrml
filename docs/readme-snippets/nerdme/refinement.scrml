@@ -1,18 +1,22 @@
-// NERDME.md "Runtime type validation" — gated by scripts/snippet-gate.js.
+// NERDME.md "Runtime type validation" — ruled; spec-ahead on the bootstrap (no refinement types yet).
 <program>
-<price>: number(>0 && <10000) = 5
-<email>: string(email) = "a@b.co"
+
+<price:number(>0 && <10000)=5/>
+<email:string(email)="a@b.co"/>
 
 type Invoice:struct = {
-    amount: number(>0 && <10000)
-    recipient: string(email)
+    amount: number(>0 && <10000),
+    recipient: string(email),
 }
 
 fn discount(amount: number(>0 && <10000)) -> number {
-    let discounted = amount * 0.9
-    let safe: number(>0 && <10000) = discounted
-    return safe
+    let discounted = amount * 0.9;
+    let safe: number(>0 && <10000) = discounted;
+    return safe;
 }
 
-<p>${discount(@price)} ${@email}</p>
-</>
+<main>
+    <p>${discount(@price)} ${@email}</p>
+</main>
+
+</program>

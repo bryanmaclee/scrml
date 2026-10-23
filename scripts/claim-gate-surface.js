@@ -40,6 +40,21 @@ export const PUBLIC_SURFACE = [
  */
 export const SURFACE_UNGATED = {
   "docs/articles/archive": "superseded April–May drafts, bannered \"do not paste\" (S469 \"Archive old drafts\")",
+  // S469 "Banner + exempt": dated pieces written before the S469 rulings, in bryan's voice. Each
+  // carries a banner saying its code is the older dialect and unchecked. Listed one by one, not
+  // as `docs/articles`, so llm-kickstarter-v2 (ruled) and any NEW article stay gated.
+  ...Object.fromEntries([
+    "docs/articles/i-am-jacks-engine-2026-09-07.md",
+    "docs/articles/i-am-jacks-engine-PUBLISH.md",
+    "docs/articles/i-am-jacks-match-2026-09-08.md",
+    "docs/articles/i-am-jacks-match-PUBLISH.md",
+    "docs/articles/i-am-jacks-program-2026-09-07.md",
+    "docs/articles/i-am-jacks-program-PUBLISH.md",
+    "docs/articles/if-you-give-a-dev-an-enum-2026-08-31.md",
+    "docs/articles/if-you-give-a-dev-an-enum-PUBLISH.md",
+    "docs/website/v0.2.0-announce-2026-05-05.md",
+    "docs/website/v0.3.0-announce-2026-05-14.md",
+  ].map((p) => [p, "dated piece written before the S469 rulings; bannered: older-dialect code, not checked (S469 \"Banner + exempt\")"])),
   "docs/changes": "internal change briefs and progress logs — historical records, often quoting broken code by design",
   "docs/audits": "dated audit records — historical, they quote code as it was",
   "docs/heads-up": "dated internal heads-up notices — historical",
