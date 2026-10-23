@@ -53,7 +53,7 @@ import { sliceTemplateText } from "../interpolation-extent.ts";
 import { isRcdataElement } from "../html-elements.js";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { CGError } from "./errors.ts";
-import { recordRefusedLowering, refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite } from "./refused-lowering-errors.ts";
+import { recordRefusedLowering, refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite, refuseUnloweredElseChain } from "./refused-lowering-errors.ts";
 import {
   classifyInterpolatedAttrSink,
   interpolatedAttrSinkMessage,
@@ -329,6 +329,15 @@ interface EachBlockAstNode {
    */
   asNames: [string, string] | null;
   keyExprRaw: string | null;
+  /**
+   * §17.1.2 — the opener's `if=` render gate: `ifRaw` the verbatim source, `ifCond`
+   * the §5.2 attribute VALUE (ast-builder `captureStructuralIfAttr`; for an `<each>`
+   * from lifted markup, `eachBlockFromMarkupNode`). Absent when there is no `if=`.
+   * A top-level each is gated by emit-html's mount controller; a row-scoped one by
+   * `lowerRowScopedEachIfGate`.
+   */
+  ifRaw?: string;
+  ifCond?: any;
   bodyChildren: any[];      // full walkable body AST (includes <empty>)
   templateChildren: any[];  // bodyChildren minus the <empty> sub-element
   emptyChild: any | null;   // the <empty> sub-element node, or null
@@ -1264,6 +1273,181 @@ function _eachIfCondReferencesItem(rawCond: string, itemNames: string[]): boolea
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// §17.1.2 — `if=` on an `<each>` positioned INSIDE another each's row
+// (g-nested-each-if-guard-dropped-s469).
+//
+// A top-level `<each if=…>` is gated by the §17.1 mount controller: a `<template>`
+// + marker in the HTML and a mount/unmount effect wired at boot (emit-html.ts
+// `emitIfMountGate`). A nested `<each>` has no static HTML — its row is built by
+// the outer factory at run time — so it cannot take a template. Its gate is the
+// row's own inner-list effect instead: while the condition is false the inner
+// mount is cleared and the collection is NOT read (§17.1.2.1 — "the iterated
+// collection is not read and no rows are reconciled while `expr` is false");
+// when it turns true the reconcile runs again and rebuilds the rows. The effect
+// reads the condition, so it re-runs whenever a cell in it changes, in both
+// directions.
+//
+// The condition itself is lowered by `lowerMountToggleCondition`
+// (if-gate-condition.ts) — the function the top-level mount controller calls —
+// from the fields `ifGateConditionFields` derives, so `if=@pw == "x"`,
+// `if=fn(@a)` and `if=${ … !{ … } }` read the same here as at top level. The only
+// row-specific step is scope: `@.` names the ENCLOSING row's item and a row alias
+// (`y`, `y.ok`) is a plain identifier, not a cell. Before this, the nested branch
+// never read `ifCond` and the inner rows rendered whatever the condition said.
+// ---------------------------------------------------------------------------
+
+/**
+ * The file-scoped inputs the `if=` lowering reads (`IfGateLoweringEnv`), set by the
+ * entry point that drives the row walk (`emitEachBodyRenderForFile` for Tier-1, the
+ * lift lowering for Tier-0) and cleared after it. Same module-state pattern as
+ * `_eachRequestIds`; codegen is synchronous.
+ */
+let _eachIfGateEnv: any | null = null;
+
+/**
+ * §59.8 / §59.12 — the file's value-native MAP / SET cell names, so a NESTED `<each>`'s
+ * `in=` lowers a map / set iterable exactly as the top-level render fn does
+ * (`rewriteMapAwareIterable`). Set by `emitEachBodyRenderForFile`; null elsewhere (the
+ * nested iterable then takes the row-scope text lowering, as before).
+ */
+let _eachMapSetNames: { maps: Set<string>; sets: Set<string> } | null = null;
+
+/**
+ * A nested `<each>`'s `in=` source, lowered in the enclosing row's scope. A source that
+ * names a value-native map / set cell takes the top level's map/set-aware lowering
+ * (after `@.` is resolved to the enclosing item) — the row-scope text lowering left
+ * `@m.entries()` as a method call on the plain map object (TypeError) and iterated a bare
+ * `@s` as the map object instead of its elements. Every other source is unchanged.
+ */
+function lowerRowScopedIterable(inExpr: string, enclosingIterVar: string | null): string {
+  const names = _eachMapSetNames;
+  if (names && names.maps.size > 0 && typeof inExpr === "string") {
+    const mentions = [...names.maps].some((n) => new RegExp("@" + _escapeForRegex(n) + "(?![\\w$])").test(inExpr));
+    if (mentions) {
+      const scoped = enclosingIterVar ? rewriteContextualSigil(inExpr.replace(/@\s*\.\s*/g, "@."), enclosingIterVar) : inExpr;
+      return rewriteMapAwareIterable(scoped, names.maps, names.sets);
+    }
+  }
+  return rewriteIterValueExpr(inExpr, enclosingIterVar);
+}
+
+/**
+ * Set the `if=` lowering inputs for a Tier-0 (`${ for … lift }`) walk; returns the
+ * previous value so the caller can restore it.
+ */
+export function setEachIfGateEnv(env: any | null): any | null {
+  const prev = _eachIfGateEnv;
+  _eachIfGateEnv = env;
+  return prev;
+}
+
+/**
+ * Set the file's map / set cell names for a Tier-0 (`${ for … lift }`) walk; returns the
+ * previous value so the caller can restore it. See `_eachMapSetNames`.
+ */
+export function setEachMapSetNames(names: { maps: Set<string>; sets: Set<string> } | null): { maps: Set<string>; sets: Set<string> } | null {
+  const prev = _eachMapSetNames;
+  _eachMapSetNames = names;
+  return prev;
+}
+
+/** Every name a row binds in the current scope: each enclosing iter var + `as (k, v)` names. */
+function _rowScopeNames(enclosingIterVar: string | null): Set<string> {
+  const names = new Set<string>();
+  if (enclosingIterVar) names.add(enclosingIterVar);
+  for (const c of _eachReconcileCtxStack) {
+    names.add(c.iterVar);
+    if (c.destructure) { names.add(c.destructure[0]); names.add(c.destructure[1]); }
+  }
+  return names;
+}
+
+/**
+ * Lower the `if=` of a structural `<each>` that sits inside a row to a JS condition
+ * evaluated in the row's scope. Returns null when the node carries no `if=`.
+ *
+ * Fails CLOSED: an `if=` value this cannot lower is refused (E-CG-003) and the gate
+ * is emitted as `false` — never dropped.
+ */
+function lowerRowScopedEachIfGate(node: any, enclosingIterVar: string | null): string | null {
+  const ifVal = node?.ifCond;
+  if (!ifVal) return null;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { ifGateConditionFields, lowerMountToggleCondition } = require("./if-gate-condition.ts") as typeof import("./if-gate-condition.ts");
+  const refuse = (why: string): string => {
+    recordRefusedLowering(new CGError(
+      "E-CG-003",
+      `E-CG-003: the \`if=\` on this \`<each>\` inside an \`<each>\` row ${why}, so the compiler cannot gate the ` +
+      `list. It is refused rather than emitted ungated (§17.1.2). Write the condition as \`if=@cell\`, ` +
+      `\`if=fn(…)\` or \`if=(expression)\`.`,
+      ifVal.span ?? node.span ?? { start: 0, end: 0 },
+    ), node);
+    return "false";
+  };
+  let fields = ifGateConditionFields(ifVal);
+  if (!fields) return refuse(`has a value of kind "${String(ifVal.kind)}"`);
+
+  // Row scope. `@.` names the enclosing row's item; a row alias is a plain identifier.
+  const rowNames = _rowScopeNames(enclosingIterVar);
+  const hasSigil = (s: unknown): boolean => typeof s === "string" && /@\s*\./.test(s);
+  const scopeText = (s: string): string =>
+    enclosingIterVar ? rewriteContextualSigil(s.replace(/@\s*\.\s*/g, "@."), enclosingIterVar) : s;
+  const scopeNode = (n: any): any => {
+    if (!n || typeof n !== "object") return n;
+    const clone = structuredClone(n);
+    if (enclosingIterVar) rewriteEachScopeInExprNode(clone, enclosingIterVar);
+    return clone;
+  };
+  if (ifVal.kind === "variable-ref") {
+    const name = String(ifVal.name ?? "");
+    const base = name.split(".")[0];
+    // `@.ok` / `y` / `y.ok`: not a cell. Lower it as the expression it is, in row scope.
+    if (hasSigil(name) || (!name.startsWith("@") && rowNames.has(base))) {
+      fields = { condExpr: scopeText(name), condExprNode: scopeNode(ifVal.exprNode), refs: [] };
+    }
+  } else if (ifVal.kind === "expr") {
+    if (hasSigil(ifVal.raw)) {
+      fields = { ...fields, condExpr: scopeText(String(ifVal.raw ?? "")), condExprNode: scopeNode(ifVal.exprNode) };
+    }
+  } else if (ifVal.kind === "call-ref") {
+    if (hasSigil(fields.condExpr)) fields = { ...fields, condExpr: scopeText(String(fields.condExpr)) };
+  }
+
+  const env = _eachIfGateEnv ?? { requestIds: _eachRequestIds ?? new Set<string>() };
+  let lowered: string | undefined;
+  try {
+    lowered = lowerMountToggleCondition(fields, env);
+  } catch (e) {
+    return refuse(`could not be lowered (${String((e as any)?.message ?? e).slice(0, 80)})`);
+  }
+  if (!lowered) return refuse("has no condition");
+  return lowered;
+}
+
+/**
+ * The gate statement for a row-scoped `<each if=…>`, emitted at the top of the inner
+ * list's effect (after the enclosing item is re-resolved, before the collection is
+ * read). False → clear the inner mount and stop: no read, no reconcile, no `<empty>`
+ * (§17.1.2 gates "the whole iterated list, including `<empty>`"). Because the effect
+ * read the condition, it re-runs when the condition changes; true → the reconcile
+ * below rebuilds the rows into the cleared mount.
+ *
+ * A condition that reads an item of an each further out than the immediate row is
+ * re-resolved live first (`enclosingResolvePreludeLines`, the S294 mechanism), so a
+ * same-key reconcile of that outer list cannot leave the gate reading a stale item.
+ */
+function emitRowScopedEachIfGateLines(cond: string, mountVar: string, indent: string): string[] {
+  const out: string[] = [];
+  for (const l of enclosingResolvePreludeLines(cond, indent)) out.push(l);
+  out.push(`${indent}// §17.1.2 — this list's if=: while false the list is cleared and its collection is not read.`);
+  out.push(`${indent}if (!(${cond})) {`);
+  out.push(`${indent}  _scrml_each_clear(${mountVar});`);
+  out.push(`${indent}  return;`);
+  out.push(`${indent}}`);
+  return out;
+}
+
 function renderTemplateChildToJs(
   child: any,
   iterVarName: string,
@@ -1412,6 +1596,17 @@ function renderTemplateChildToJs(
     if (refuseElementLowering(tagName, child as { span?: unknown }) || refuseRawContentLowering(child as any)) {
       lines.push(`${indent}${fragmentVar}.appendChild(_scrml_g.document.createComment(""));`);
       return;
+    }
+    // §17.1.1 (S469 review F4) — no if=/else chain is built in a row template, so an
+    // `else` / `else-if=` here would render unconditionally. Refused: the recorded error
+    // fails the compile (no artifact ships). The element is still walked, so the other
+    // refusals its attributes / children carry are reported too.
+    {
+      const _attrsForElse = (child as any).attributes ?? (child as any).attrs;
+      const _elseAttr = Array.isArray(_attrsForElse)
+        ? _attrsForElse.find((a: any) => a && (a.name === "else" || a.name === "else-if"))
+        : null;
+      if (_elseAttr) refuseUnloweredElseChain(_elseAttr.name, "inside an `<each>` row", (_elseAttr.span ? _elseAttr : child) as { span?: unknown });
     }
     lines.push(`${indent}const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(tagName)});`);
 
@@ -1949,7 +2144,7 @@ function renderTemplateChildToJs(
     // passes through unchanged. `@cell` → `_scrml_reactive_get("cell")`.
     let innerItemsExpr: string;
     if (innerNode.iterShape === "in") {
-      innerItemsExpr = rewriteIterValueExpr(innerNode.inExprRaw ?? "[]", iterVarName);
+      innerItemsExpr = lowerRowScopedIterable(innerNode.inExprRaw ?? "[]", iterVarName);
     } else if (innerNode.iterShape === "of") {
       const ofResolved = rewriteIterValueExpr(innerNode.ofExprRaw ?? "0", iterVarName);
       innerItemsExpr = `_scrml_g.Array.from({length: _scrml_g.Number(${ofResolved}) || 0}, (_v, _i) => _i)`;
@@ -2022,6 +2217,10 @@ function renderTemplateChildToJs(
     // leaked effect retains its detached row node and re-runs on every data
     // change. `_scrml_mount_track` is the IDENTITY outside a mount, so an <each>
     // on a page with no if= registers nothing and behaves exactly as before.
+    // §17.1.2 — the inner `<each>`'s own `if=` (g-nested-each-if-guard-dropped-s469).
+    // Lowered in THIS (outer-row) scope, before the reconcile ctx of the inner list
+    // is pushed. See `lowerRowScopedEachIfGate`.
+    const _innerGate = lowerRowScopedEachIfGate(innerNode, iterVarName);
     lines.push(`${indent}_scrml_mount_track(_scrml_effect(() => {`);
     if (_outerCtx && _outerCtx.iterVar === iterVarName) {
       lines.push(`${indent}  let ${_outerCtx.iterVar} = _scrml_resolve_item(${_outerCtx.mountVar}, ${_outerCtx.keyVar});`);
@@ -2030,11 +2229,19 @@ function renderTemplateChildToJs(
         lines.push(l);
       }
     }
+    if (_innerGate !== null) {
+      for (const l of emitRowScopedEachIfGateLines(_innerGate, innerMountVar, `${indent}  `)) lines.push(l);
+    }
     lines.push(`${indent}  const ${innerItemsVar} = ${innerItemsExpr};`);
     for (const l of emitEachReconcileLines(innerNode, innerIterVar, innerIdxName, innerMountVar, innerItemsVar, `${indent}  `, engineCtx)) {
       lines.push(l);
     }
-    lines.push(`${indent}}));`);
+    // S462 round 7 (R7-1): a nested list reconcile (row removal) is a render-gate
+    // effect — it runs before the user effects of the write that triggers it, so
+    // user code triggered by the write that turns the `if=` false never sees the
+    // inner rows still mounted. The Tier-0 sibling (`emitNestedEachFromMarkup`) and
+    // the top-level render fn already pass the flag; this branch had been missed.
+    lines.push(`${indent}}, true));`);
     return;
   }
 
@@ -3263,6 +3470,8 @@ export function resetEachModuleState(): void {
   _eachMarkupFnNames = null;
   _eachRequestIds = null;
   _eachLiftRegistry = null;
+  _eachIfGateEnv = null;
+  _eachMapSetNames = null;
 }
 
 /**
@@ -3923,6 +4132,12 @@ function eachAttrRawText(attrVal: any): string | null {
   if (kind === "variable-ref" && typeof attrVal.name === "string") return attrVal.name.trim() || null;
   if (kind === "expr" && typeof attrVal.raw === "string") return attrVal.raw.trim() || null;
   if (kind === "string-literal" && typeof attrVal.value === "string") return attrVal.value.trim() || null;
+  // A call (`in=items()`, `in=@m.entries()`) is a `call-ref` whose `name` is the callee
+  // only — reading `name` alone (the fallback below) dropped the call, so the list
+  // iterated the function / method itself and rendered nothing (S469 audit).
+  if (kind === "call-ref" && typeof attrVal.name === "string" && attrVal.name.trim()) {
+    return `${attrVal.name.trim()}(${(Array.isArray(attrVal.args) ? attrVal.args : []).join(", ")})`;
+  }
   if (typeof attrVal.raw === "string") return attrVal.raw.trim() || null;
   if (typeof attrVal.name === "string") return attrVal.name.trim() || null;
   if (typeof attrVal.value === "string") return attrVal.value.trim() || null;
@@ -3952,6 +4167,10 @@ export function eachBlockFromMarkupNode(markupNode: any): EachBlockAstNode | nul
   let ofExprRaw: string | null = null;
   let asName: string | null = null;
   let keyExprRaw: string | null = null;
+  // §17.1.2 — the opener's `if=` (g-lifted-each-if-attribute-silently-ignored): the
+  // attribute VALUE as the markup parser built it — the same §5.2 value object the
+  // ast-builder stamps on a structural each-block as `ifCond`.
+  let ifCond: any = null;
   for (const attr of attrs) {
     if (!attr || typeof attr.name !== "string") continue;
     const n = attr.name;
@@ -3959,6 +4178,7 @@ export function eachBlockFromMarkupNode(markupNode: any): EachBlockAstNode | nul
     else if (n === "of") ofExprRaw = eachAttrRawText(attr.value);
     else if (n === "key") keyExprRaw = eachAttrRawText(attr.value);
     else if (n === "as") asName = eachAttrRawText(attr.value);
+    else if (n === "if" && attr.value) ifCond = attr.value;
   }
 
   // §59.8 — `as (k, v)`: parseLiftTag captures the two-name destructure as the
@@ -4015,7 +4235,8 @@ export function eachBlockFromMarkupNode(markupNode: any): EachBlockAstNode | nul
     emptyChild,
     bodyRaw: "",
     span: markupNode.span ?? null,
-  };
+    ...(ifCond ? { ifRaw: eachAttrRawText(ifCond) ?? "", ifCond } : {}),
+  } as EachBlockAstNode;
 }
 
 /**
@@ -4061,6 +4282,16 @@ export function emitNestedEachFromMarkup(
   fragmentVar: string,
   indent: string = "",
   engineCtx: EachEngineCtx | null = null,
+  /**
+   * S469 review F1 — the enclosing lift's live re-resolve prelude (emit-lift
+   * `computeItemDerivedReplay`), given the code the effect reads. Inside a reconciled
+   * `${ for … lift }` row the for-loop var is a CREATE-TIME closure: a same-key
+   * reconcile reuses the row without re-running its factory, so a gate or source
+   * reading `r.ok` / `r.cells` off it never saw the new item. The prelude rebinds it
+   * from the row wrapper by key (and subscribes the effect to that slot). Null outside
+   * a reconciled lift → byte-identical.
+   */
+  scopePrelude: ((code: string) => string[]) | null = null,
 ): string[] | null {
   const eachBlock = eachBlockFromMarkupNode(markupNode);
   if (!eachBlock) return null;
@@ -4076,7 +4307,7 @@ export function emitNestedEachFromMarkup(
   // form (when the lift is itself inside another each) lowers to that var.
   let innerItemsExpr: string;
   if (eachBlock.iterShape === "in") {
-    innerItemsExpr = rewriteIterValueExpr(eachBlock.inExprRaw ?? "[]", enclosingScopeVar);
+    innerItemsExpr = lowerRowScopedIterable(eachBlock.inExprRaw ?? "[]", enclosingScopeVar);
   } else {
     const ofResolved = rewriteIterValueExpr(eachBlock.ofExprRaw ?? "0", enclosingScopeVar);
     innerItemsExpr = `_scrml_g.Array.from({length: _scrml_g.Number(${ofResolved}) || 0}, (_v, _i) => _i)`;
@@ -4116,7 +4347,16 @@ export function emitNestedEachFromMarkup(
   // leaked effect retains its detached row node and re-runs on every data
   // change. `_scrml_mount_track` is the IDENTITY outside a mount, so an <each>
   // on a page with no if= registers nothing and behaves exactly as before.
+  // §17.1.2 — the lifted `<each>`'s own `if=`, gated exactly as the Tier-1 nested
+  // branch gates it (`lowerRowScopedEachIfGate`), in the for-loop's scope.
+  const _gate = lowerRowScopedEachIfGate(eachBlock, enclosingScopeVar);
   lines.push(`${indent}_scrml_mount_track(_scrml_effect(() => {`);
+  if (scopePrelude) {
+    for (const l of scopePrelude([_gate ?? "", innerItemsExpr].join("\n"))) lines.push(`${indent}  ${l}`);
+  }
+  if (_gate !== null) {
+    for (const l of emitRowScopedEachIfGateLines(_gate, innerMountVar, `${indent}  `)) lines.push(l);
+  }
   lines.push(`${indent}  const ${innerItemsVar} = ${innerItemsExpr};`);
   for (const l of emitEachReconcileLines(eachBlock, innerIterVar, innerIdxName, innerMountVar, innerItemsVar, `${indent}  `, engineCtx)) {
     lines.push(l);
@@ -4405,6 +4645,18 @@ export function emitEachBodyRenderForFile(
     };
     _eachRequestIds = collectRequestIds(_astForBinds);
   }
+  // §17.1.2 (S469) — the inputs the row-scoped `<each if=…>` gate lowers its
+  // condition with: the SAME ones emit-event-wiring hands the top-level mount
+  // controller (`IfGateLoweringEnv`). Restored in the finally below.
+  const _prevIfGateEnv = _eachIfGateEnv;
+  const _prevMapSetNames = _eachMapSetNames;
+  _eachMapSetNames = { maps: eachMapVarNames, sets: eachSetVarNames };
+  _eachIfGateEnv = {
+    derivedNames: ctx.derivedNames,
+    synthCellKeys: ctx.synthCellKeys,
+    encodingCtx: ctx.encodingCtx,
+    requestIds: _eachRequestIds ?? new Set<string>(),
+  };
   const _prevLiftRegistry = _eachLiftRegistry;
   _eachLiftRegistry = (ctx.registry as any) ?? null;
 
@@ -4548,6 +4800,8 @@ export function emitEachBodyRenderForFile(
     // g-request-is-some-in-each-loop-attr-misroute — drop the per-file request-id
     // set so a later caller (or the Tier-0 lift path) never reads a stale file's.
     _eachRequestIds = null;
+    _eachIfGateEnv = _prevIfGateEnv;
+    _eachMapSetNames = _prevMapSetNames;
     _eachLiftRegistry = _prevLiftRegistry;
   }
 
