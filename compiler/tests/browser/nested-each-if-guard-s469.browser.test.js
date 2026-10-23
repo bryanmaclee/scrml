@@ -345,3 +345,76 @@ describe("nested <each> — a value-native map / set iterable lowers as at top l
     expect(rowTexts()).toEqual(["x"]);
   });
 });
+
+describe("lifted <each if=…> reads the LIVE loop item (S469 review F1)", () => {
+  // rows(ok1, ok2) → the tape value; lit(…) → the same value as a scrml literal.
+  const mk = (withIds) => (ok1, ok2) => [
+    { ...(withIds ? { id: 1 } : {}), ok: ok1, cells: [1] },
+    { ...(withIds ? { id: 2 } : {}), ok: ok2, cells: [1, 2] },
+  ];
+  const lit = (v) => `[${v.map((o) => `{ ${Object.entries(o).map(([k, x]) => `${k}: ${JSON.stringify(x)}`).join(", ")} }`).join(", ")}]`;
+  for (const [keying, rows] of [["id keys", mk(true)], ["index keys", mk(false)]]) {
+    for (const guard of ["r.ok", "(r.ok)"]) {
+      test(`${keying}, if=${guard}: a same-key write flips the gate both ways`, async () => {
+        const app = compileAndMount(`<rows> = ${lit(rows(true, false))}
+<div id="out">\${ for (r of @rows) { lift <div><each in=r.cells as c if=${guard}><b class="row">SECRET</b></each></div> } }</div>
+`);
+        expect(app.errors).toEqual([]);
+        await flush();
+        expect(count("#out b.row")).toBe(1);
+        await set("rows", rows(false, true));
+        expect(count("#out b.row")).toBe(2);
+        await set("rows", rows(false, false));
+        expect(count("#out b.row")).toBe(0);
+        await set("rows", rows(true, true));
+        expect(count("#out b.row")).toBe(3);
+      });
+    }
+  }
+
+  test("the inner source follows the live item too (`in=r.cells`, stale on main)", async () => {
+    const app = compileAndMount(`<rows> = [{ id: 1, cells: [1] }]
+<div id="out">\${ for (r of @rows) { lift <div><each in=r.cells as c><b class="row">\${c}</b></each></div> } }</div>
+`);
+    expect(app.errors).toEqual([]);
+    await flush();
+    expect(outText()).toBe("1");
+    await set("rows", [{ id: 1, cells: [7, 8] }]);
+    expect(outText()).toBe("78");
+  });
+});
+
+describe("an `else` sibling where no if= chain is built is refused (S469 review F4)", () => {
+  for (const [where, src] of [
+    ["after a nested <each if=>", `<div id="out"><each in=@xs as y><each in=@xs as x if=(@pw == "secret")>A</each><p else>X</p></each></div>`],
+    ["after a markup if= in a row", `<div id="out"><each in=@xs as y><p if=(@pw == "secret")>A</p><p else>X</p></each></div>`],
+    ["after a lifted <each if=>", `<div id="out">\${ for (r of @rows) { lift <div><each in=r.cells as c if=r.ok>A</each><p else>X</p></div> } }</div>`],
+    ["after a markup if= in lifted markup", `<div id="out">\${ for (r of @rows) { lift <div><p if=r.ok>A</p><p else>X</p></div> } }</div>`],
+  ]) {
+    test(`${where}: E-CTRL-001, not an unconditional render`, () => {
+      const app = compileAndMount(`<pw> = "wrong"
+<xs> = [1]
+<rows> = [{ id: 1, ok: true, cells: [1] }]
+${src}
+`);
+      expect(app.errors).toContain("E-CTRL-001");
+    });
+  }
+
+  test("else-if= in a row: E-CTRL-002", () => {
+    const app = compileAndMount(`<pw> = "wrong"
+<xs> = [1]
+<div id="out"><each in=@xs as y><p if=(@pw == "a")>A</p><p else-if=(@pw == "b")>B</p></each></div>
+`);
+    expect(app.errors).toContain("E-CTRL-002");
+  });
+
+  test("a top-level if/else chain is unaffected", async () => {
+    const app = compileAndMount(`<pw> = "wrong"
+<div id="out"><p if=(@pw == "secret")>A</p><p else>X</p></div>
+`);
+    expect(app.errors).toEqual([]);
+    await flush();
+    expect(outText()).toBe("X");
+  });
+});

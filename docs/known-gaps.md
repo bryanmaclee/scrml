@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 263 | 4 |
-| MED | 669 | 7 |
-| LOW | 462 | 0 |
+| HIGH | 264 | 4 |
+| MED | 668 | 7 |
+| LOW | 464 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -236,6 +236,15 @@ alias (`y`, `y.ok`) is an identifier rather than a cell, and an outer-outer row 
 (the S294 prelude). An `if=` value the gate cannot lower is refused (E-CG-003) and emitted as `false`. The inner-list
 effect now passes the R7-1 render-gate flag, as its Tier-0 sibling and the top-level render fn already did.
 
+**Review of 67bbca342 (LAND-W-F/U), closed in the same PR.** F1 (HIGH): a LIFTED `<each if=r.ok>` read the
+create-time loop item — a same-key write of `@rows` left the gate (and `in=r.cells`, stale on main too) on the old
+item, both ways. Fixed: inside a reconciled lift row, `emitNestedEachFromMarkup` emits emit-lift's
+`computeItemDerivedReplay` prelude before the gate and the source, as `maybeWrapLiftPerItemEffect` does. F4: an `else`
+/ `else-if=` sibling where no if= chain is built — an `<each>` row template and lifted markup, after a nested or lifted
+`<each if=>` AND after a markup `if=` (both measured: rendered unconditionally, no diagnostic) — is refused with
+E-CTRL-001 / E-CTRL-002 (`refuseUnloweredElseChain`), as an orphan `else` is at top level. Filed, not fixed:
+[[g-nested-each-if-reopen-row-effects-pile-up-s469]] (F2), [[g-if-gate-map-set-methods-not-lowered-s469]] (F3).
+
 **Opener-attribute audit of the nested branch** (vs the top-level `emitEachBodyRenderForFile` + `emitGatedStructural`):
 `in=` / `of=` / `as` / `as (k, v)` / `key=` / `<empty>` were already handled (shared `emitEachReconcileLines`);
 `if=` was DROPPED (fixed). `in=` was handled DIFFERENTLY (fixed): the nested branch took the row-scope text
@@ -255,6 +264,25 @@ whose one change is the nested list effect's render-gate flag (`}));` → `}, tr
 0 tests changed outcome (the 48 failures are identical on both sides), +21 new, all passing (20 of them fail on base). Pins: `compiler/tests/unit/nested-each-if-guard-s469.test.js`,
 `compiler/tests/browser/nested-each-if-guard-s469.browser.test.js`, security-failable-pack `n18` (10 shapes: FAIL on
 base, PASS after).
+
+### g-nested-each-if-reopen-row-effects-pile-up-s469 — every false→true cycle of a row-scoped `<each if=…>` rebuilds the inner rows and leaves the previous rows' per-item effects alive: `_scrml_each_clear` removes nodes and disposes nothing — `NEW S469 (review of 67bbca342, F2); LOW; open`
+
+<!-- @gap id=g-nested-each-if-reopen-row-effects-pile-up-s469 sev=LOW status=open locus=compiler/src/codegen/emit-each.ts(emitRowScopedEachIfGateLines — the false branch is `_scrml_each_clear(mount); return;`)+compiler/src/runtime-template.js(_scrml_each_clear / _scrml_reconcile_list dispose no per-row effect) prov=review:S469-67bbca342-final(F2) -->
+
+The detached rows' effects go inert (their `_scrml_resolve_item` returns null) but stay subscribed, so each cycle adds
+one dead effect per row that still wakes on every write of the cells it read. The same is true of an inner list whose
+source goes empty and comes back, and of any reconcile removal — no per-row scope exists to drain. Not a correctness
+or security defect (the gate itself is right both ways); a memory / wake-up cost proportional to toggle count. Fix
+direction: give each reconciled row a disposal scope the reconciler (and the gate's clear) runs on removal.
+
+### g-if-gate-map-set-methods-not-lowered-s469 — a value-native map / set method in an `if=` gate (`if=(@m.has("b"))`) is emitted raw, `_scrml_reactive_get("m").has("b")`, and throws: at boot inside `_scrml_boot` for a top-level gate, inside the row effect for a nested one — `NEW S469 (review of 67bbca342, F3); LOW; open`
+
+<!-- @gap id=g-if-gate-map-set-methods-not-lowered-s469 sev=LOW status=open locus=compiler/src/codegen/if-gate-condition.ts(lowerDisplayToggleCondition — emitExprField gets derivedNames / synthCellKeys / requestIds but no mapVarNames / setVarNames) prov=review:S469-67bbca342-final(F3);empirical:S469(the top-level and nested gates emit the same raw `.has("b")`) -->
+
+Loud, not silent: a TypeError (`has is not a function` on the plain map object) that, from `_scrml_boot`, stops the rest
+of the page's wiring. The top-level mount controller and the nested gate share the lowering, so both have it — this
+is not nested-specific. Fix direction: thread `mapVarNames` / `setVarNames` through `IfGateLoweringEnv` into the
+`emitExprField` call (the map-aware iterable lowering already has them).
 
 ### g-structural-if-failable-call-unchecked-s469 — (security) a `!` call in the `if=` of a STRUCTURAL element (`<each>` / `<match>` / `<engine>`) is never E-ERROR-002, and a `match` on one is not discriminated: `<each in=@xs as x if=check(@pw)>LOGGED IN</each>` logs in on a WRONG password — `NEW S469; HIGH; RESOLVED S469 (#1481, landed via #1487)`
 
@@ -14316,8 +14344,8 @@ contexts = `["gate"]`.
 reviewer's claim that the branch "cannot commit through the hook" — it can, which is the actual
 problem. The required-check half is mine, found verifying their correction rather than accepting it.
 
-<!-- @gap id=g-structural-if-inside-each-row-template-fails-open sev=MED status=open -->
-### G-STRUCTURAL-IF-INSIDE-EACH-ROW-TEMPLATE-FAILS-OPEN — a gated `<each>`/`<match>` inside an `<each>` row template silently ships the content it was told to withhold — `NEW S302; MED; open (the <each> half RESOLVED S469; the <match> half open)`
+<!-- @gap id=g-structural-if-inside-each-row-template-fails-open sev=HIGH status=open -->
+### G-STRUCTURAL-IF-INSIDE-EACH-ROW-TEMPLATE-FAILS-OPEN — a gated `<each>`/`<match>` inside an `<each>` row template silently ships the content it was told to withhold — `NEW S302; MED → HIGH (S469 review of 67bbca342: an open fail-open guard); open (the <each> half RESOLVED S469; the <match> half open)`
 
 ⛑ **S469 — the `<each>` half is RESOLVED** by [[g-nested-each-if-guard-dropped-s469]]: `<each … if=…>` inside a row is
 now gated, reactively, both ways. **The `<match … if=…>` half is still OPEN and still fails open** — re-measured on the
