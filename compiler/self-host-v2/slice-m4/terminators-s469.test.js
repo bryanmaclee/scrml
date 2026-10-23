@@ -180,4 +180,34 @@ describe("F2 — arms are a comma list (E-MATCH-ARM-SEPARATOR at every missing `
     click(btn("go"));
     expect($("#s").textContent).toBe("nf:x");
   });
+
+  test("r2: a qualified head (`E.A`, `E::A`) starts the next arm — one missing `,`, reported right after the arm before", () => {
+    for (const q of ["E.", "E::"]) {
+      const src = P(fn(`        return match k {\n            ${q}A :> 1\n            ${q}B :> 2\n        };`));
+      const ds = seps(src);
+      expect([q, ds.length]).toEqual([q, 1]);
+      expect(src.slice(0, ds[0].span.start).endsWith(`${q}A :> 1`)).toBe(true);
+      expect(codes(src)).toEqual(["E-MATCH-ARM-SEPARATOR"]);
+      expect(codes(P(fn(`        return match k {\n            ${q}A :> 1,\n            ${q}B :> 2\n        };`)))).toEqual([]);
+    }
+  });
+
+  test("r2: the same inside a `!{}` handler", () => {
+    const src = P(`    function g(id: string) -> string {\n        const v = load(id) !{\n            L.NotFound(m) :> m\n            L::Timeout :> "t"\n        };\n        return v;\n    }`);
+    const ds = seps(src);
+    expect(ds.length).toBe(1);
+    expect(src.slice(0, ds[0].span.start).endsWith("L.NotFound(m) :> m")).toBe(true);
+  });
+});
+
+describe("r2 — `lift` followed by a line break is refused, like `return` (fail closed)", () => {
+  test("`lift⏎expr;` is E-STMT-MISSING-SEMICOLON right after `lift`; `lift expr;` is clean", () => {
+    const src = (body) => P(`    function g(id: string) -> string {\n        const v = load(id) !{ .NotFound(m) :> { @n = 1; ${body} }, .Timeout :> "t" };\n        return v;\n    }`);
+    const s1 = src("lift\n            m;");
+    const ds = semis(s1);
+    expect(ds.length).toBe(1);
+    expect(s1.slice(0, ds[0].span.start).endsWith("lift")).toBe(true);
+    expect(ds[0].message).toContain("put the lifted value on the `lift` line");
+    expect(codes(src("lift m;"))).toEqual([]);
+  });
 });

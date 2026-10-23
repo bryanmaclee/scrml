@@ -870,6 +870,13 @@ ${
             let done = false
             if (isWord(t, "lift")) {
                 const kw: PTok = cur(t)
+                // s469 r2 — `lift⏎expr`, like `return⏎expr`: refused fail closed
+                // until the newline-terminated corpus is migrated (the same PA
+                // reading as the split `return` in parseStmt)
+                if (peekAt(t, 1).line != kw.line && !tk(peekAt(t, 1), "}") && !tk(peekAt(t, 1), ";")) {
+                    const ld: Diag = newDiag("E-STMT-MISSING-SEMICOLON", "Expected `;` to end the statement — a `lift` followed by a line break is refused for now: put the lifted value on the `lift` line. dpa-073 F1 would read `lift⏎expr;` as lifting `expr`; the bootstrap does not guess while newline-terminated code is still being migrated.", t.file, mkSpan(kw.end, kw.end))
+                    t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([ld]), file: t.file }
+                }
                 const v: RExpr = parseAssign(adv(t))
                 let t2: TP = v.tp
                 if (isP(t2, ";")) t2 = adv(t2)
@@ -981,6 +988,12 @@ ${
             // s452: `_ err` / `else err` — the wildcard's one binder (§18.6.1)
             if (j < ts.length && ts[j].cls == TC.Ident && ts[j].line == a.line) j = j + 1
         }
+        // s469 r2: a qualified head, `Type.V` / `Type::V` (§18.13) — the forms
+        // parsePattern accepts — so a newline-separated `E.A :> 1⏎ E.B :> 2`
+        // ends the first arm at `E.B` and reports the one missing `,` there
+        if (j < 0 && a.cls == TC.Ident && i + 1 < ts.length && ts[i + 1].cls == TC.Variant && touching(a, ts[i + 1])) j = i + 2
+        if (j < 0 && a.cls == TC.Ident && i + 2 < ts.length && ts[i + 1].cls == TC.Punct && tk(ts[i + 1], ".") && touching(a, ts[i + 1]) && (ts[i + 2].cls == TC.Ident || ts[i + 2].cls == TC.Keyword) && touching(ts[i + 1], ts[i + 2])) j = i + 3
+        if (j < 0 && a.cls == TC.Ident && i + 3 < ts.length && tk(ts[i + 1], ":") && tk(ts[i + 2], ":") && touching(a, ts[i + 1]) && touching(ts[i + 1], ts[i + 2]) && (ts[i + 3].cls == TC.Ident || ts[i + 3].cls == TC.Keyword) && touching(ts[i + 2], ts[i + 3])) j = i + 4
         // s452: a bare identifier pattern (`err :>`, §18.2) — only before the
         // canonical `:>` here: `x =>` mid-expression is an arrow function
         if (j < 0 && a.cls == TC.Ident) {
