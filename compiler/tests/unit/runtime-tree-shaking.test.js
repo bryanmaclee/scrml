@@ -267,7 +267,10 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 44 chunks", () => {
+  test("RUNTIME_CHUNK_ORDER has 45 chunks", () => {
+    // 45 chunks after S469: 'owner' (the §6.7.2 owner-scope tree — every <each> row and
+    // dispatched arm owns its effects) ADDED, pulled by 'reconciliation' and by a
+    // dispatcher's `_scrml_arm_scope` call; the always-included 'scope' chunk is unchanged.
     // 44 chunks after S468: 'boundary' (the §19.6.6 render-time `!` call check of an
     // <errorBoundary>) ADDED, shipped only by a page that names one of its helpers.
     // 43 chunks after S462 P0 fix round 1: 'stdlib-crypto' RESTORED as a PARTIAL
@@ -373,6 +376,6 @@ describe("runtime size", () => {
     //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
     //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(44);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(45);
   });
 });

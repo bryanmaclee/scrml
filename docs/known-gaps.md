@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 4 |
-| MED | 679 | 8 |
-| LOW | 468 | 0 |
+| MED | 678 | 8 |
+| LOW | 471 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -318,9 +318,9 @@ Never fail-open: the runtime check is authoritative in both directions; the nati
 
 Without a §34 row, `E-TAPE-JS-METHOD` resolves fail-closed to Error (correct). `W-STRING-INTERP-LITERAL` takes Warning from the generator's PROVISIONAL table; once a §34 row lands the row decides, and the generator throws if they disagree (remove the entry then). The §66.20 row's "the bootstrap's method allowlist still uses the JS names and is owed the rename" is now stale (renamed in s469-boot-strings-1), as is the README item 4 (`@audit.push` → `@audit.append`).
 
-### g-row-and-arm-effect-scopes-never-disposed-s469 — per-row effects outlive their row, and a `<match>` arm teardown leaves the effects of an `<each>` inside the arm subscribed — `NEW S469 (final review of f19110273, LAND-W-F/U); MED; open`
+### g-row-and-arm-effect-scopes-never-disposed-s469 — per-row effects outlive their row, and a `<match>` arm teardown leaves the effects of an `<each>` inside the arm subscribed — `NEW S469 (final review of f19110273, LAND-W-F/U); MED; RESOLVED S469 (s469-effect-scope-dispose, cd0af1e94 + bcecd3717)`
 
-<!-- @gap id=g-row-and-arm-effect-scopes-never-disposed-s469 sev=MED status=open locus=compiler/src/runtime-template.js(_scrml_reconcile_list _removeGroup / _clearAll remove a row's nodes but dispose nothing; _scrml_mount_track registers an effect only while an if= mount scope is active, so per-row effects and an arm's each effects have no owner)+compiler/src/codegen/emit-each.ts(maybeWrapEachPerItemEffect / emitRowGateEffectLines) prov=review:S469-final-review-of-f19110273;empirical:S469-s469-match-if-in-row-wrap-up(both-repros-executed-under-happy-dom-on-f19110273) -->
+<!-- @gap id=g-row-and-arm-effect-scopes-never-disposed-s469 sev=MED status=resolved locus=compiler/src/runtime-template.js(_scrml_reconcile_list _removeGroup / _clearAll remove a row's nodes but dispose nothing; _scrml_mount_track registers an effect only while an if= mount scope is active, so per-row effects and an arm's each effects have no owner)+compiler/src/codegen/emit-each.ts(maybeWrapEachPerItemEffect / emitRowGateEffectLines) prov=review:S469-final-review-of-f19110273;empirical:S469-s469-match-if-in-row-wrap-up(both-repros-executed-under-happy-dom-on-f19110273) -->
 
 Two faces of one missing piece: an effect created for a row (or inside a dispatched arm) is registered with
 nothing that is torn down with that row (or arm).
@@ -352,6 +352,102 @@ nothing that is torn down with that row (or arm).
 Fix direction: give a row and an arm an owning scope — `_scrml_mount_track` already registers into the active if=
 mount scope; open one per created row (disposed by `_removeGroup` / `_clearAll` / a replace) and per dispatched arm
 (disposed by the arm's dispose and the `…_teardown`), and create the row's / arm's effects inside it.
+
+✅ **RESOLVED S469 (`s469-effect-scope-dispose`; runtime `cd0af1e94` + `1de100f33`, codegen `bcecd3717`).** The fix
+direction above, as an owner-scope TREE in a new runtime chunk `owner` (pulled by `reconciliation` and by a
+dispatcher's `_scrml_arm_scope` call; the always-included `scope` chunk is byte-identical, so the shell size ratchet
+stays at 6,087 B gzip):
+- **Rows.** `_scrml_reconcile_list` builds every row inside a row scope whose parent is the scope that owns the list
+  (`_scrml_mount_owner`: recorded on the mount the first time it is rendered into, so a later reconcile pass files
+  its rows under the same owner); the id rides on the group head (`_scrml_ifrow_apply` moves it with the head) and
+  `_removeGroup` / `_clearAll` / `_replaceGroup` / `_scrml_each_clear` destroy it. A row that registered nothing
+  keeps no scope.
+- **Arms.** The block-form `<match>` / `<engine>` dispatcher (emit-variant-guard) wires the arm, remounts its each
+  fences and runs `postMountJs` inside `_scrml_arm_scope` (a child of the mount's owner) and keeps the returned
+  teardown in its existing dispose slot — so an arm switch, the row-scoped `if=` teardown and the removal of the
+  enclosing row destroy the whole arm. A module-scope mount whose arms hold an `<each>` also releases the rows
+  rendered into its initial static arm at boot (`_scrml_release_rows`), which no arm scope owns.
+- **Effects.** `_scrml_effect` / `_scrml_effect_static` remember the scope they were created in, run every re-run
+  inside it (so the rows a list effect creates on a later pass, or the arm a dispatcher mounts, are owned by that
+  scope), and dispose themselves instead of running once it is destroyed. `_scrml_owner_destroy` destroys children
+  depth-first; if= mount scopes join the tree as roots.
+
+Measured after: both repros flat (gate runs per write `1,1,1,1`; inner-each runs per write `3,3,3,3,3`); a removed
+row's node is never written again (on main the dead generation wrote `b:0 → b:8` when its key returned). Pins:
+`compiler/tests/browser/row-arm-effect-scope-dispose-s469.browser.test.js` (14 cases incl. a seeded 300-step
+add/remove/reorder/switch stress back to baseline; 11 of the first 12 fail on main) and
+`security-failable-pack` family `n22` (9 stale-effect-after-removal shapes, all 9 log in on `29b6320ad`). SPEC
+§17.7.2 now states the lifetime. Residual filed: [[g-row-dispatcher-effect-tracks-arm-body-reads-s469]]. Round 2 (review of `ffbe1cf2b`):
+[[g-module-mount-owner-recorded-from-writer-scope-s469]] reproduced (HIGH) and fixed — a mount's owner is now
+structural; `_scrml_arm_scope` tears its scope down if the wiring throws; an effect on a page without the `owner`
+chunk no longer re-enters (and registers cleanups under) a destroyed `if_N` scope.
+
+### g-outlet-region-not-an-owner-scope-s469 — a soft-nav outlet region is not a scope in the owner tree, so the lists and dispatched arms rendered in a swapped-out outlet stay root-owned and are never torn down by the navigation — `NEW S469 (final review of s469-effect-scope-dispose); LOW; open (pre-existing)`
+
+<!-- @gap id=g-outlet-region-not-an-owner-scope-s469 sev=LOW status=open locus=compiler/src/runtime-template.js(_scrml_teardown_region drains _scrml_region_cleanups only; _scrml_structural_owner finds no owner marker on an outlet region, so rows / arms inside it are roots) prov=review:S469-final-review-of-69cec9f85 -->
+
+The owner-scope tree (`g-row-and-arm-effect-scopes-never-disposed-s469`) knows three owners — an `if=` mount, a
+dispatched arm, a row. An `<outlet>` route region (§20.8.1, §6.7.2.1) is none of them: a list or arm rendered in the
+outlet is owned by nothing, so a soft-nav swap removes its nodes without destroying its row / arm scopes, and their
+effects stay subscribed (pre-existing — round 1 did not make it worse, but did not cover it). Fix direction: make the
+outlet region a ROOT scope in the tree (mark the region node like `_scrml_mount_wire` marks an `if=` range, destroy it
+in `_scrml_teardown_region`). ⚠ The soft-nav browser tests (`browser-navigate-soft-nav`, `browser-navigate-cross-chunk`)
+fail on main in the agent environment, so a regression on this path cannot currently be detected there.
+
+### g-match-in-component-body-e-error-002-compiler-defect-s469 — a `<match>` inside a component body reports E-ERROR-002 as a "compiler defect" — `NEW S469 (final review of s469-effect-scope-dispose); LOW; open (pre-existing, reproduces on base)`
+
+<!-- @gap id=g-match-in-component-body-e-error-002-compiler-defect-s469 sev=LOW status=open locus=not-traced(E-ERROR-002 emission for a block-form <match> in a component body) prov=review:S469-final-review-of-69cec9f85(reproduced on 29b6320ad too) -->
+
+Found while probing arm ownership inside components. The compile fails with E-ERROR-002 worded as a compiler defect,
+on base as well as on the branch, so it fails closed (no output) — but an author gets a defect message for a shape
+that is either legal (then it must compile) or not (then it owes a real diagnostic). Not traced.
+
+### g-row-teardown-cost-nested-arms-s469 — disposing rows now costs real work: on 1k rows with nested arms, replace is +31 % and clear +74 % — `NEW S469 (final review of s469-effect-scope-dispose); LOW; open (watch)`
+
+<!-- @gap id=g-row-teardown-cost-nested-arms-s469 sev=LOW status=open locus=compiler/src/runtime-template.js(_scrml_owner_destroy per row; _scrml_release_rows TreeWalker; _scrml_clearAll / _scrml_each_clear per-node _scrml_row_dispose) prov=review:S469-final-review-of-69cec9f85(measured, 1k rows with nested arms) -->
+
+The cost of actually disposing what used to leak: each removed row destroys its scope tree (children first,
+cleanups LIFO, timer / animation-frame lookups). Measured by the final review on 1k rows with nested arms: full
+replace +31 %, clear +74 % versus base. Correct and expected, not a defect — but it belongs in a benchmark so a
+later change cannot grow it silently. Candidates if it matters: skip the timer / rAF lookups for row / arm scopes
+that never registered any, and batch the clear path.
+
+### g-row-dispatcher-effect-tracks-arm-body-reads-s469 — the dispatcher effect of a `<match>` in a row built by a reconcile pass also subscribes to what the arm body reads; a row built at boot does not — `NEW S469 (found by s469-effect-scope-dispose); LOW; open`
+
+<!-- @gap id=g-row-dispatcher-effect-tracks-arm-body-reads-s469 sev=LOW status=open locus=compiler/src/codegen/emit-variant-guard.ts(emitArmWireFunction: the wire fn's initial direct _scrml_render_value(el, read) runs inside the calling dispatcher effect)+compiler/src/codegen/emit-each.ts(the item-scoped dispatch effect) prov=empirical:S469-s469-effect-scope-dispose(happy-dom, identical on 29b6320ad) -->
+
+`<each in=@rows key=@.id as r><div><match for=Phase on=@ph><Idle><span>${@n}</span>…</match></div></each>`: two
+boot-built rows hold 6 `@n` subscribers (3 per row); the same row removed and re-added holds 4 — the extra one is
+the row's dispatcher effect, which tracked the arm wire fn's initial `${@n}` render. Not a leak (it is disposed with
+the row, flat across cycles) and not wrong output (the same-value short-circuit returns), but every `@n` write
+re-runs the dispatcher of every reconcile-built row, and boot-built and later rows differ. Fix direction: run the
+wire fn's initial renders untracked (or outside the dispatcher's tracking context).
+
+### g-module-mount-owner-recorded-from-writer-scope-s469 — (security, branch-only regression) a top-level `<match>` / `<engine>` whose FIRST dispatch is fired by a write from inside a row build was filed under that row; removing the row killed every arm the mount ever dispatched, so a revoked guard kept showing "LOGGED IN" — `NEW S469 (round 1 of s469-effect-scope-dispose, never on main); HIGH; RESOLVED S469 (round 2)`
+
+<!-- @gap id=g-module-mount-owner-recorded-from-writer-scope-s469 sev=HIGH status=resolved locus=compiler/src/runtime-template.js(_scrml_mount_owner recorded the ACTIVE scope; now _scrml_structural_owner for an in-document mount) prov=review:S469-review-of-ffbe1cf2b(F1, reproduced);empirical:S469-s469-effect-scope-dispose-round-2(security-failable-pack n22 round-2 shapes FAIL on ffbe1cf2b, PASS on 29b6320ad and after) -->
+
+Filed LOW / theoretical in round 1; the review of `ffbe1cf2b` reproduced it (F1):
+
+```
+${ function poke(x) { if (x == 1) { @ph = .Active } return x } }
+<each in=@rows key=@.id as r><p>${poke(r.id)}</p></each>          -- rows = [{id:1},{id:2}]
+<match for=Phase on=@ph><Idle><b>${@n}</b></Idle><Active><s>${@n}</s></Active></match>
+-- n=3; rows=[{id:2}]; n=4; ph=Idle; n=5   →  ffbe1cf2b: 3, 3, 4 (stale)   main: 3, 4, 5
+```
+
+The first dispatch ran inside row 1's scope (module-init row render), `_scrml_mount_owner` recorded `rs_N` on the
+module-scope mount, and after the row went `_scrml_arm_scope` saw a dead owner and destroyed every new arm at once.
+Same for `<engine>`. Over-disposal, and a guard direction: the dead arm's `${…}` never re-evaluated after a revoke.
+
+✅ **RESOLVED (round 2).** The owner of a mount is decided by where it lives: a mount already in the document takes
+its nearest STRUCTURAL owner (`_scrml_structural_owner` — the containing if= mount, marked by `_scrml_mount_wire`;
+the containing dispatched arm, marked by `_scrml_arm_scope`; the containing row), else none; only a mount still being
+built in a row factory takes the active (row) scope. The `_scrml_remount_dispatch` path still gets the if= scope (by
+structure now). Probed the other first-touch-from-a-foreign-scope paths — a top-level `<each>` rendered by a write
+from a row, a top-level `if=` first flipped from a row, a derived cell first read in a row: all correct on round 1
+and after (an effect re-runs in its own creation scope; no mount records the writer). Pins: 5 browser cases in
+`row-arm-effect-scope-dispose-s469.browser.test.js`, 2 `n22` shapes. Shell runtime byte-identical.
 
 ### g-engine-in-lifted-markup-renders-garbled-text-s469 — an `<engine>` inside lifted markup (`${ for (r of @xs) { lift <span><engine for=Phase initial=.Idle>…</></span> } }`) renders the text `> < / span >` and no engine, at exit 0 with zero diagnostics — `NEW S469; MED; open`
 
@@ -18056,14 +18152,17 @@ closed, so it is not a guard hole, but the author gets no signal.
 
 ⚑ **S429-peter — LOCUS FOUND, RULING-GATED.** `compiler/src/codegen/emit-each.ts:1999` `renderTemplateChildToJs` falls through for `kind="engine-decl"` and emits only a comment. The fix picks language semantics: an engine is a singleton (§51.0.A), the declaration is the mount (§51.0.D), and §51.0.K refuses an engine in a component body for the multiplicity reason that applies equally to an `<each>` row — but no sentence covers iteration. Refuse (compile error, E-COMPONENT-ENGINE-SCOPE sibling) vs render the one singleton per row: **bryan's ruling**, asked in `handOffs/incoming/2026-09-23-from-S429-peter-to-bryan-two-rulings.md` (Q3). PA lean: refuse.
 
-### g-arm-scoped-each-per-item-effects-leak-on-arm-switch — per-item effects of an `<each>` inside a match arm are never disposed on arm switch — `NEW S429-peter; LOW; open`
-<!-- @gap id=g-arm-scoped-each-per-item-effects-leak-on-arm-switch sev=LOW status=open locus=compiler/src/runtime-template.js(_scrml_mount_track records effects only while a mount scope is active; the arm dispatch path never opens one) prov=empirical:S429-review-agent-measured-3-23-123-effect-runs-at-0-10-50-A-B-A-flip-pairs-identical-base-and-head -->
+### g-arm-scoped-each-per-item-effects-leak-on-arm-switch — per-item effects of an `<each>` inside a match arm are never disposed on arm switch — `NEW S429-peter; LOW; RESOLVED S469 (with g-row-and-arm-effect-scopes-never-disposed-s469)`
+<!-- @gap id=g-arm-scoped-each-per-item-effects-leak-on-arm-switch sev=LOW status=resolved locus=compiler/src/runtime-template.js(_scrml_mount_track records effects only while a mount scope is active; the arm dispatch path never opens one) prov=empirical:S429-review-agent-measured-3-23-123-effect-runs-at-0-10-50-A-B-A-flip-pairs-identical-base-and-head -->
 
 +2 dead per-item effects per arm re-entry, still writing to detached nodes. Pre-existing for a top-level match;
 the S429 match-in-each fix inherits it on the new row-arm path.
 
 ⛑ **S469 — folded into [[g-row-and-arm-effect-scopes-never-disposed-s469]] (MED)**, which measures the same leak on the
 row-scoped `<match if=…>` teardown (+1 per inner row per flip) and the row-removal face, and names one fix for both.
+✅ **RESOLVED S469** with it (`s469-effect-scope-dispose`): an arm is wired inside `_scrml_arm_scope`, which owns the
+rows of every `<each>` in the arm; the browser test's top-level arm-switch case pins it (flat across 5 switches with
+a list change while the arm is up).
 
 ### g-e-assign-004-position-and-binder-coverage — three E-ASSIGN-004 coverage holes found by the S429 lift-body work — `NEW S429-peter; MED; open; bryan's lane (#996 owner)`
 <!-- @gap id=g-e-assign-004-position-and-binder-coverage sev=MED status=open locus=compiler/src/type-system.ts(E-ASSIGN-004 statement-position check) prov=empirical:S429-lift-body-round-3-dev-agent-on-merged-db800e6e-NOT-PA-verified -->
