@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 263 | 4 |
+| HIGH | 262 | 4 |
 | MED | 678 | 8 |
-| LOW | 471 | 0 |
+| LOW | 473 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -457,6 +457,27 @@ Found by the S469 audit of `if=` on structural elements in row templates. Fails 
 not), so not a security hole — but the page shows parser debris and nothing tells the author. `<match>` in the same
 position is refused (`E-MATCH-BLOCK-IN-LIFT`); the engine owes the same refusal, or support. Sibling of
 [[g-engine-inside-each-row-renders-nothing]].
+
+### g-engine-in-each-empty-fallback-unrendered-s469 — an `<engine>` in the `<empty>` fallback of an `<each>` that is not in a row cannot be lowered by impl#1; it is refused (E-CG-003) — whether it should render is the owner's call — `NEW S469 (s469-engine-in-row); LOW; ruling-gated`
+
+<!-- @gap id=g-engine-in-each-empty-fallback-unrendered-s469 sev=LOW status=ruling-gated locus=compiler/src/codegen/emit-each.ts(renderEmptyChildToJs → renderTemplateChildToJs has no engine-decl lowering) prov=empirical:S469-s469-engine-in-row-probe(executed-under-happy-dom) -->
+
+Found while closing [[g-engine-inside-each-row-renders-nothing]]. `<each in=@xs …>…<empty><engine for=Phase
+initial=.Active>…</></empty></each>` with an empty list rendered nothing at all at exit 0 (the whole fallback
+vanished). The §51.0.K row rule does not reach it — the fallback renders once, while the list is empty, like an
+engine in an `if=` branch (which renders) — so the language question is open: render it (impl work in the list
+renderer) or refuse it. impl#1 now refuses it as an unsupported emission, **E-CG-003** (fail closed, loud,
+reversible; §17.7.4 carries the ⚑ OPEN). An `<empty>` of a list that is itself in a row IS in that row
+(E-COMPONENT-ENGINE-SCOPE).
+
+### g-component-each-row-engine-refusal-arm-local-span-s469 — the E-COMPONENT-ENGINE-SCOPE for an engine in an `<each>` row inside a COMPONENT body is located at a body-local offset (line 1), not the engine — `NEW S469 (s469-engine-in-row); LOW; open`
+
+<!-- @gap id=g-component-each-row-engine-refusal-arm-local-span-s469 sev=LOW status=open locus=compiler/src/component-expander.ts(the component body re-parse keeps body-local spans; CE's own E-COMPONENT-ENGINE-SCOPE body walk does not reach an engine inside a list in the body) prov=empirical:S469-s469-engine-in-row-probe -->
+
+`const Card = <div><each in=@groups key=@.id as g><li>${g.id}<engine for=Phase …>…</></li></each></div>` is refused
+(the emit-each row backstop catches it — it compiled at exit 0 with no engine before S469), but the error says
+`1:61`: the CE re-parse of the component body carries body-local spans, and CE's own component-engine check did not
+fire on an engine nested in a list in the body. Refused either way; only the location is wrong.
 
 ### g-ifmount-chunk-ships-for-row-scoped-structural-if-s469 — a page whose only `if=` is on a row-scoped `<each>` / `<match>` ships the `ifmount` runtime chunk, which nothing calls — `NEW S469 (split from g-structural-if-inside-each-row-template-fails-open); LOW; open`
 
@@ -14654,7 +14675,7 @@ reorders; 9 of 10 fail on main, the 10th is the no-`if=` control).
 | `<each if=>` (row, lifted markup) | gated, reactive both ways | resolved by #1491 ([[g-nested-each-if-guard-dropped-s469]]) |
 | `<match if=>` (row 1–3 deep, component, engine arm, `<empty>`) | gated, reactive both ways | this entry |
 | `<match if=>` in lifted markup | refused `E-MATCH-BLOCK-IN-LIFT` (fails closed) | — |
-| `<engine if=>` in a row | the engine renders NOTHING, `if=` or not (fails closed) | [[g-engine-inside-each-row-renders-nothing]] |
+| `<engine if=>` in a row | was: renders NOTHING, `if=` or not (fails closed); refused `E-COMPONENT-ENGINE-SCOPE` since S469 | [[g-engine-inside-each-row-renders-nothing]] (resolved S469) |
 | `<engine if=>` in lifted markup | garbled text, no engine, no diagnostic (fails closed) | [[g-engine-in-lifted-markup-renders-garbled-text-s469]] |
 | markup `if=` on the row ROOT (`<errorBoundary>` included) | gated, reactive (`_scrml_ifrow_apply`) | — |
 | markup `if=` on a NON-root element (`<errorBoundary>` included) | was a create-time gate (closed on grant, **OPEN on revoke**); reactive both ways since round 2 | [[g-each-nested-peritem-if-not-reactive]] (resolved S469) |
@@ -18122,8 +18143,25 @@ OLD object's deep-reactive subscription after the key-stable replace.
 
 ⛑ **S429-peter — RE-FRAMED: an INCONSISTENCY, and RULING-GATED.** The per-item effect is NOT stale (measured: it re-resolves by key onto the new object). The cause is `_scrml_reactive_set` storing raw values for computed writes while codegen `_wrapDeepReactive` wraps only syntactic literals — so literal-initialised rows are deep-reactive and computed ones are not. §6.5.6/§6.5.7 say NEITHER should be ("no implicit deep reactivity"). A fix making every cell write deep-reactive is BUILT and HELD on `origin/hold/s429-deep-reactive-cell-writes` @ `58b90cfc` (23 tests, flat subscriptions, frozen values left raw, worker `.send` copies to plain). Amend §6.5 vs make literals shallow: **bryan's (Q5)**, asked in `handOffs/incoming/2026-09-23-from-S429-peter-to-bryan-q5-q7.md`.
 
-### g-engine-inside-each-row-renders-nothing — an `<engine>` in an `<each>` row renders no state body, no error — `NEW S429-peter; HIGH; open`
-<!-- @gap id=g-engine-inside-each-row-renders-nothing sev=HIGH status=open locus=searched:compiler/src/codegen/emit-each.ts,compiler/src/codegen/emit-match.ts—not-traced prov=empirical:S429-match-in-each-dev-agent-found-review-agent-and-PA-reproduced-on-45749bb1 -->
+### g-engine-inside-each-row-renders-nothing — an `<engine>` in an `<each>` row renders no state body, no error — `NEW S429-peter; HIGH; RESOLVED S469 (s469-engine-in-row — refused, E-COMPONENT-ENGINE-SCOPE)`
+<!-- @gap id=g-engine-inside-each-row-renders-nothing sev=HIGH status=resolved locus=compiler/src/symbol-table.ts(PASS 13.B walkRejectEnginesInEachRows)+compiler/src/codegen/emit-each.ts(renderTemplateChildToJs engine-decl backstop)+compiler/src/codegen/emit-match.ts(refuseEnginesInRowScopedArms) prov=empirical:S429-match-in-each-dev-agent-found-review-agent-and-PA-reproduced-on-45749bb1 -->
+
+✅ **RESOLVED S469 (`s469-engine-in-row`) — REFUSED, not rendered.** The ruling this entry waited on was already
+given: **S439 ruling #10** ("all recs" — *"An `<engine>` inside an `<each>` row … Rec: refuse it … Per-row state is
+spelled as an ordinary declaration, which gets a keyed instance per row under §66.7. The error message should name
+that form."*), written into §51.0.K with "Nominal for this case on impl#1". impl#1 now emits
+**E-COMPONENT-ENGINE-SCOPE** for an engine anywhere in a row subtree: SYM PASS 13.B walks every row the TAB parsed
+by total descent (row root, nested / `if=` element, multi-root, nested `<each>` row and its `<empty>`, `<match>` arm
+in the row, engine state-child in the row, `:`-shorthand bodies; outermost engine only); two codegen backstops reach
+the rows only codegen parses — an `<each>` inside a `<match>` arm (the TAB blanks an each-bearing arm), via
+emit-each `renderTemplateChildToJs` (whose `engine-decl` fall-through was the drop), and an engine in an arm of a
+`<match>` in a row, via emit-match `refuseEnginesInRowScopedArms` (located at the `<match>`; that parse's spans are
+arm-local). An engine in the `<empty>` of a list NOT in a row is not a row position; impl#1 cannot lower it either
+and now refuses it as **E-CG-003** (⚑ OPEN to the owner, §17.7.4). Corpus: 0 sources affected (emit-differential
+base `c9f8cd25b` vs head, every artifact byte-identical). Pins: `compiler/tests/browser/engine-in-each-row-refused-s469.browser.test.js`
+(28 cases — every position above refused exactly once, the non-row neighbours still render, and the supported
+spelling — one engine outside the `<each>`, advanced from the rows — dispatches, enforces `rule=`, follows keyed
+reorder / same-key replace, and a removed row's reader is disposed by the owner tree). Original entry:
 
 ```
 type Phase:enum = { Idle, Active }
