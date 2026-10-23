@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 4 |
 | MED | 678 | 8 |
-| LOW | 468 | 0 |
+| LOW | 471 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -381,6 +381,36 @@ add/remove/reorder/switch stress back to baseline; 11 of the first 12 fail on ma
 [[g-module-mount-owner-recorded-from-writer-scope-s469]] reproduced (HIGH) and fixed — a mount's owner is now
 structural; `_scrml_arm_scope` tears its scope down if the wiring throws; an effect on a page without the `owner`
 chunk no longer re-enters (and registers cleanups under) a destroyed `if_N` scope.
+
+### g-outlet-region-not-an-owner-scope-s469 — a soft-nav outlet region is not a scope in the owner tree, so the lists and dispatched arms rendered in a swapped-out outlet stay root-owned and are never torn down by the navigation — `NEW S469 (final review of s469-effect-scope-dispose); LOW; open (pre-existing)`
+
+<!-- @gap id=g-outlet-region-not-an-owner-scope-s469 sev=LOW status=open locus=compiler/src/runtime-template.js(_scrml_teardown_region drains _scrml_region_cleanups only; _scrml_structural_owner finds no owner marker on an outlet region, so rows / arms inside it are roots) prov=review:S469-final-review-of-69cec9f85 -->
+
+The owner-scope tree (`g-row-and-arm-effect-scopes-never-disposed-s469`) knows three owners — an `if=` mount, a
+dispatched arm, a row. An `<outlet>` route region (§20.8.1, §6.7.2.1) is none of them: a list or arm rendered in the
+outlet is owned by nothing, so a soft-nav swap removes its nodes without destroying its row / arm scopes, and their
+effects stay subscribed (pre-existing — round 1 did not make it worse, but did not cover it). Fix direction: make the
+outlet region a ROOT scope in the tree (mark the region node like `_scrml_mount_wire` marks an `if=` range, destroy it
+in `_scrml_teardown_region`). ⚠ The soft-nav browser tests (`browser-navigate-soft-nav`, `browser-navigate-cross-chunk`)
+fail on main in the agent environment, so a regression on this path cannot currently be detected there.
+
+### g-match-in-component-body-e-error-002-compiler-defect-s469 — a `<match>` inside a component body reports E-ERROR-002 as a "compiler defect" — `NEW S469 (final review of s469-effect-scope-dispose); LOW; open (pre-existing, reproduces on base)`
+
+<!-- @gap id=g-match-in-component-body-e-error-002-compiler-defect-s469 sev=LOW status=open locus=not-traced(E-ERROR-002 emission for a block-form <match> in a component body) prov=review:S469-final-review-of-69cec9f85(reproduced on 29b6320ad too) -->
+
+Found while probing arm ownership inside components. The compile fails with E-ERROR-002 worded as a compiler defect,
+on base as well as on the branch, so it fails closed (no output) — but an author gets a defect message for a shape
+that is either legal (then it must compile) or not (then it owes a real diagnostic). Not traced.
+
+### g-row-teardown-cost-nested-arms-s469 — disposing rows now costs real work: on 1k rows with nested arms, replace is +31 % and clear +74 % — `NEW S469 (final review of s469-effect-scope-dispose); LOW; open (watch)`
+
+<!-- @gap id=g-row-teardown-cost-nested-arms-s469 sev=LOW status=open locus=compiler/src/runtime-template.js(_scrml_owner_destroy per row; _scrml_release_rows TreeWalker; _scrml_clearAll / _scrml_each_clear per-node _scrml_row_dispose) prov=review:S469-final-review-of-69cec9f85(measured, 1k rows with nested arms) -->
+
+The cost of actually disposing what used to leak: each removed row destroys its scope tree (children first,
+cleanups LIFO, timer / animation-frame lookups). Measured by the final review on 1k rows with nested arms: full
+replace +31 %, clear +74 % versus base. Correct and expected, not a defect — but it belongs in a benchmark so a
+later change cannot grow it silently. Candidates if it matters: skip the timer / rAF lookups for row / arm scopes
+that never registered any, and batch the clear path.
 
 ### g-row-dispatcher-effect-tracks-arm-body-reads-s469 — the dispatcher effect of a `<match>` in a row built by a reconcile pass also subscribes to what the arm body reads; a row built at boot does not — `NEW S469 (found by s469-effect-scope-dispose); LOW; open`
 
