@@ -465,7 +465,8 @@ describe("R24-BUG-2 §11: end-to-end — side-effect + terminal return arm", () 
 
     const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "r24-bug-2-side.client.js"), "utf8")));
     // No invalid wrap
-    expect(clientJs).not.toMatch(/_scrml_\w+\s*=\s*[^;]*return\s*;/);
+    // An ASSIGNMENT wrapping a return (`=(?!=)`: the §20.8.2 build gate compares with `===`).
+    expect(clientJs).not.toMatch(/_scrml_\w+\s*=(?!=)\s*[^;]*return\s*;/);
     // Reactive sets for .phase fire
     expect(clientJs).toContain('_scrml_reactive_set("phase"');
     // Bare `return;` in both arms
