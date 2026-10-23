@@ -167,7 +167,8 @@ const RUNTIME_GZIP_TOLERANCE_BAND = 188;
 //   3,510 B; the rest of the gap is the utilities chunk, which carries the
 //   soft-nav engine together with helpers the shell never calls.
 //
-// ⚑ RAISED S469 — 6,095 B -> 6,489 B — ⚠ OPERATOR RULING OWED (not yet given).
+// ⚑ RAISED S469 — 6,095 B -> 6,489 B — RATIFIED by bryan (user-voice-scrml.md, scrml-support 0908198:
+//   "Raise to 6,489 B (Recommended)"; g-shell-runtime-ratchet-raised-s469-ruling-owed resolved).
 //   s469-softnav-build-guard (g-soft-nav-cross-build-handler-id-collision-s469, a
 //   HIGH security fix, SPEC §20.8.2 step 0) needs runtime bytes the band cannot
 //   hold: the build-identity admit + region-ownership check (core) and the
@@ -182,8 +183,8 @@ const RUNTIME_GZIP_TOLERANCE_BAND = 188;
 //   NO correct fix fits: the minimum (admit + nav check, no defence-in-depth, no
 //   diagnostics) measured 6,196 B. Offset already taken: the retired, never-called
 //   `_scrml_nav_same_chunk` is deleted (-48 B). New ceiling = 6,301 + the band.
-//   If the operator declines, revert THIS hunk and the fix lands only with a
-//   ruling — the ratchet must not be the thing that silently decides.
+//   Round 2 (review F1/F2: admit count + stamp-seeded build) measured 6,373 B,
+//   inside the ratified ceiling. Lower it freely; raise it only by a new ruling.
 const SHELL_RUNTIME_GZIP_CEILING = 6301 + RUNTIME_GZIP_TOLERANCE_BAND; // 6,489 B
 
 /** The counter shape's aspiration, for the §3 cross-check. Not a ratchet. */
@@ -267,7 +268,7 @@ describe("§1 client-runtime size ratchet (outlet-bearing shell)", () => {
           "CLIENT-RUNTIME SIZE REGRESSION — outlet-bearing shell shape.",
           "",
           `  measured : ${gzipped} B gzip (level ${RUNTIME_GZIP_LEVEL}), ${runtimeBytes.length} B raw`,
-          `  ceiling  : ${SHELL_RUNTIME_GZIP_CEILING} B  (6,301 recorded S469 — operator ruling owed; 5,907 at S461 — stripped + ${RUNTIME_GZIP_TOLERANCE_BAND} B band)`,
+          `  ceiling  : ${SHELL_RUNTIME_GZIP_CEILING} B  (6,301 recorded S469, ratified by bryan — user-voice 0908198; 5,907 at S461 — stripped + ${RUNTIME_GZIP_TOLERANCE_BAND} B band)`,
           `  over by  : ${gzipped - SHELL_RUNTIME_GZIP_CEILING} B`,
           "",
           "SHELL_RUNTIME_GZIP_CEILING is a RATCHET. It may be LOWERED freely.",

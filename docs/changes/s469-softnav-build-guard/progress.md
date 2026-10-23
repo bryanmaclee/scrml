@@ -5,7 +5,7 @@ Closes `g-soft-nav-cross-build-handler-id-collision-s469` (HIGH, security limb S
 ## Log
 - Branch cut from origin/main `0ff6c93aa`; merged origin/s469-browser-suite-health (#1511, queued; fast-forward to `cd040ea25`) early for its harness repairs. Merge origin/main again once #1511 lands.
 - Attack reproduced RED on base (`browser-navigate-cross-build.test.js`: `deleted` 1 → 2 on a click on B's "Add row").
-- Commits: fix (runtime + codegen + tooling folds) · ratchet raise (isolated, ruling owed) · tests/harnesses · security pack n23 · SPEC · gaps/docs.
+- Commits: fix (runtime + codegen + tooling folds) · ratchet raise (isolated, ruling owed) · tests/harnesses · security pack n26 · SPEC · gaps/docs.
 
 ## Design
 - **Identity source.** No existing per-build token existed (the runtime filename hash covers the runtime only; chunk tokens are per source path and identical across builds). New `compiler/src/codegen/build-identity.ts`: fnv1a (the §47 content-address primitive) over the runtime + every client chunk, sorted, with the placeholder still in place; substituted once in `runCG` after the runtime post-pass and before the per-route splitter. Markup and CSS are NOT hashed (ids resolve through the chunk tables, so byte-identical client code cannot mis-resolve markup; also keeps markup-only changes from re-keying chunks). Deterministic: two builds of the same sources (same project-relative layout) are byte-identical, identity included.
@@ -17,7 +17,7 @@ Closes `g-soft-nav-cross-build-handler-id-collision-s469` (HIGH, security limb S
 
 ## Tests
 - `compiler/tests/browser/browser-navigate-cross-build.test.js` (13): base `cd040ea25` 2 pass / 11 fail; head 13/13.
-- security-failable-pack `n23` (SIDE `nav`, 5 shapes, new `runNavShape` in pack.js): base 5 FAIL; head 5 PASS. EXPECTED_SHAPE_COUNT 467 → 472.
+- security-failable-pack `n26` (SIDE `nav`, 5 shapes, new `runNavShape` in pack.js): base 5 FAIL; head 5 PASS. EXPECTED_SHAPE_COUNT 467 → 472.
 - Browser tier: 1805 pass / 8 fail = exactly the 8 names in FAILURE-BASELINE.json.
 - Pre-commit gate (unit + integration + conformance + slices): green.
 
@@ -45,9 +45,18 @@ The shell had 8 B of headroom (ceiling 6,095). Minimum correct variant (admit + 
 - a `<script>` left in the old document: already executed under the same build; scripts in the fetched outlet arrive via innerHTML (inert); missing chunks are only loaded after the identity check.
 - chunk race (page A fetched, chunk URL serves B): refused before any statement → hard nav (test).
 - two tabs: separate realms and documents; nothing shared resolves handlers.
-- a second scrml build on the same origin (link-boost to it): different identity → hard nav (test, pack n23).
+- a second scrml build on the same origin (link-boost to it): different identity → hard nav (test, pack n26).
 - esm: registration-only admit; foreign esm chunks are scoped by the listener checks but not refused (deferred).
 - pre-identity tab: no check exists in code already running — residual, closes as tabs reload.
 
 ## Hermeticity finding (merge commit's hook run)
 Order-dependent RED: a test file that evaluates the runtime at GLOBAL scope leaves `_scrml_build_admit` and a fixed `_scrml_build_id` on `globalThis`; a later file in the same `bun test` process that runs another build's chunk with NO runtime (`new Function` loaders) had its chunk refused by the stale admit. Fixed at the three no-runtime loaders (bootstrap `compiler/self-host-v2/slice-m1/harness.js` `evaluateChunks`, `imported-enum-match-binding`, S452 `runGo`): they shadow the name as `undefined` (they ARE the runtime there). Proven against a hostile preload (a global admit that always refuses): unit + integration + conformance 36,904 / 0; slices + `compiler/tests/*.test.js` 5,223 / 0; browser 1,805 / 8 (the baselined names). In a browser this cannot arise — one document runs one runtime.
+
+## Round 2 (review LAND-W-F/U; ratchet RATIFIED by bryan, user-voice 0908198)
+- **F1** — onload only checked `_scrml_build_rejected`, so an UNGATED chunk (a pre-identity build's bytes: no admit, no ownership checks) loaded mid-navigation was accepted. The runtime now counts admissions (`_scrml_build_admits`); a nav-loaded chunk must advance it or the nav fails "build unverified" → hard nav. Browser test `[review F1]` + pack n26 shape 6 (FAIL on the round-1 head, PASS now).
+- **F2** — the running build is seeded from `<html data-scrml-build>` when present (first-chunk only on an unstamped host page). Test: a stale cached chunk of A running FIRST on a fresh B page is refused; B's chunks run and wire. Both new tests are RED on the round-1 runtime.
+- **F3** — SPEC §20.8.2 step 0: reproducibility needs a project marker (without `scrml.toml`/`.git` the chunk tokens hash the absolute path, so identities differ across build directories — fail closed); the esm carve-out (registers, body runs, listeners scoped); a serving line (unhashed chunk URLs no-cache / revalidated). §20.8.7 names the "build unverified" reason.
+- **F4** — filed `g-per-route-chunks-no-build-gate-s469` (LOW).
+- Ratchet gap resolved citing the ratification; the two ratchet comments updated.
+- Pack family renamed n23 → n26 (s469-lift-if-render-gate keeps n23); EXPECTED_SHAPE_COUNT = main 467 + 6 = 473.
+- Shell runtime after round 2: 23,748 raw / 6,373 B gzip (≤ 6,489); counter 4,129 B.
