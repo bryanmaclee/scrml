@@ -4,6 +4,9 @@
 // `append`/`pop` (end), `prepend`/`shift` (front), `insert`/`remove`
 // (anywhere) — and `insert` / `remove` cover end and front. The retired bare
 // `end` / `front` / `anywhere` are refused naming both halves.
+// RULED S469 (O10 complete; user-voice "I dont like writable, I think I prefer
+// write" … "Keep free and replace (Rec)"): the position-overwrite grant is
+// `write`; the old spelling `writable` is refused with a fix-it.
 //
 // s444: a GRANTED removal (pop / shift / filter) now lowers — Core has the
 // removal edits (RemoveEnd / RemoveFront / RemoveAnywhere); they RUN in
@@ -45,8 +48,8 @@ describe("a stack `[free, append, pop]`", () => {
   });
 });
 
-describe("`[free, insert, remove, writable]` — anywhere covers end and front", () => {
-  const T = "string[free, insert, remove, writable]";
+describe("`[free, insert, remove, write]` — anywhere covers end and front", () => {
+  const T = "string[free, insert, remove, write]";
   test("push and unshift (grow) granted and lowered; pop, shift, filter (shrink) granted", () => {
     expect(codes(T, `@xs.append("a")`)).toEqual([]);
     expect(codes(T, `@xs.prepend("a")`)).toEqual([]);
@@ -99,5 +102,18 @@ describe("the retired place tokens are refused, naming both halves", () => {
   test("an unknown word keeps the old message (no `any` / `all`)", () => {
     const d = frontEnd(mods, [{ path: "g.scrml", src: prog(`string[free, any]`, `@xs = @xs`) }]).diags;
     expect(d.filter((x) => x.code === "E-GRANT-UNKNOWN")[0].message).toContain("no `any`");
+  });
+});
+
+describe("O10 (RULED S469): the position-overwrite grant is spelled `write`", () => {
+  test("`write` grants a position write (`@xs = @xs.reverse()`); its absence refuses it", () => {
+    expect(codes("string[free, append, write]", `@xs = @xs.reverse()`)).toEqual([]);
+    expect(codes("string[free, append]", `@xs = @xs.reverse()`)).toEqual(["E-WRITE-NOT-GRANTED"]);
+  });
+  test("`writable` is refused (E-GRANT-UNKNOWN) with the fix-it naming `write` — no deprecation window", () => {
+    const d = frontEnd(mods, [{ path: "g.scrml", src: prog(`string[free, append, writable]`, `@xs.append("a")`) }]).diags;
+    const g = d.filter((x) => x.code === "E-GRANT-UNKNOWN");
+    expect(g.length).toBe(1);
+    expect(g[0].message).toContain("`writable` is spelled `write`");
   });
 });

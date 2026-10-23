@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-templates-neg-not-narrowed",
+  "description": "E-OPERAND-NOT-NARROWED: a `T | not` slot not narrowed.",
+  "language-version": "1.0",
+  "spec": "§14.13.3 · §14.13.2 · §66.20",
+  "rationale": "§14.13.2: \"a `T | not` value in a template slot SHALL be narrowed first (E-OPERAND-NOT-NARROWED)\".",
+  "expect": {
+    "codes": [
+      "E-OPERAND-NOT-NARROWED"
+    ],
+    "codeCounts": {
+      "E-OPERAND-NOT-NARROWED": 1
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-templates-neg-unreadable-slot",
+  "description": "E-PARSE-TEMPLATE: a slot whose extent a JavaScript reader could read the other way (a `/` after `}`).",
+  "language-version": "1.0",
+  "spec": "§14.13.3",
+  "rationale": "One reader of a slot's extent (impl#1's interpolation-extent rule, both goals): a `/` after a `}` is a division after an object and a regular expression after a block — where the slot ends is not known, so it is refused by name.",
+  "expect": {
+    "codes": [
+      "E-PARSE-TEMPLATE"
+    ],
+    "codeCounts": {
+      "E-PARSE-TEMPLATE": 1
+    }
+  }
+}

@@ -306,7 +306,7 @@ The next step beyond a counter is a list. Here is a small todo app — keep the 
 
   type Todo:struct = { id: int, body: string, done: bool }
 
-  <items:Todo[free, append, remove, writable]=[]/>
+  <items:Todo[free, append, remove, write]=[]/>
   let <draft:string=""/>
   let <nextId:int=1/>
 
@@ -372,10 +372,10 @@ A struct type names a record shape with typed fields. Instances are plain object
 ```scrml
 type Todo:struct = { id: int, body: string, done: bool }
 
-<items:Todo[free, append, remove, writable]=[]/>
+<items:Todo[free, append, remove, write]=[]/>
 ```
 
-A tape's type says what may change about it, in brackets after the element type (the grant names `append` / `pop` / `prepend` / `shift` / `insert` / `remove` are ruled; the bracket form and the `free` / `writable` / `replace` tokens are **provisional**, SPEC ⚑ O10): `Todo[free, append, remove, writable]` reads "free length; may grow at the end; may shrink anywhere; positions may be rewritten". Nothing else is allowed — a tape with no grants is immutable. The methods are named after the grants: `.append(x)` / `.pop()` at the end, `.prepend(x)` / `.shift()` at the front, `.insert(i, x)` / `.remove(i)` anywhere. JavaScript's `push`, `unshift` and `splice` are refused (`E-TAPE-JS-METHOD`, whose fix-it names the scrml method). Whole-value writes are checked the same way: `@items = @items.filter(…)` is a shrink (granted by `remove`) and `@items = @items.map(…)` rewrites positions (granted by `writable`); a write the type does not grant is `E-WRITE-NOT-GRANTED`.
+A tape's type says what may change about it, in brackets after the element type (SPEC §66.12.2): `Todo[free, append, remove, write]` reads "free length; may grow at the end; may shrink anywhere; positions may be rewritten". Nothing else is allowed — a tape with no grants is immutable. The methods are named after the grants: `.append(x)` / `.pop()` at the end, `.prepend(x)` / `.shift()` at the front, `.insert(i, x)` / `.remove(i)` anywhere. JavaScript's `push`, `unshift` and `splice` are refused (`E-TAPE-JS-METHOD`, whose fix-it names the scrml method). Whole-value writes are checked the same way: `@items = @items.filter(…)` is a shrink (granted by `remove`) and `@items = @items.map(…)` rewrites positions (granted by `write`); a write the type does not grant is `E-WRITE-NOT-GRANTED`.
 
 Function parameters are always typed — `function toggle(id: int)` — and a lambda's parameter (`t => …`) takes its type from the tape it is called on. `flipped(t)` builds the new record in a typed local (`let out: Todo = { … };`) so the object literal has a struct type to check against.
 
@@ -411,7 +411,7 @@ The `${ ... }` inside `<ul>` is a logic block because its body is a statement. E
 
 `<each in=@coll as t>` binds each element of the reactive collection to the local `t` and renders its body once per item — no `${ ... }` wrapper and no `lift`. The binder is the **space form `as t`**, never `as=t` (`<each in=@items as=t>` is `E-SCOPE-001` — the binding never registers). Add `key=t.id` (or any stable per-item field) so the runtime can match items across updates; without a key the list falls back to positional keying. Keep `for`/`lift` for the imperative case where the loop body is multi-statement; reach for `<each>` for the common "one node per item" case.
 
-> **An important detail about reactivity.** Every write the tape's type grants updates the page: `@items.append(x)`, `@items = @items.filter(…)`, `@items = @items.map(…)`. The grant list is the whole contract — the compiler checks every write against it however it is spelled, so you can read `Todo[free, append, remove, writable]` and know every way the list can change. Derived cells are the exception: they are recomputed, never written.
+> **An important detail about reactivity.** Every write the tape's type grants updates the page: `@items.append(x)`, `@items = @items.filter(…)`, `@items = @items.map(…)`. The grant list is the whole contract — the compiler checks every write against it however it is spelled, so you can read `Todo[free, append, remove, write]` and know every way the list can change. Derived cells are the exception: they are recomputed, never written.
 
 ### 3.3 Components — declarations that render
 
@@ -1269,7 +1269,7 @@ A fast reference for the keywords and sigils in this tutorial. Each line links b
 - **`<name:T=(expr)/>` reading `@cells`** — derived reactive; recomputes when inputs change; unwritable. §2.1.
 - **`let <x:(not to T)=(f() !{ _ :> not })/>`** — a pending cell: starts `not`, becomes `T` when the server answers. §2.2.
 - **`function f(x: int) -> T { return …; }`** — typed parameters; explicit `return` on every path. §2, §3.1.
-- **`Item[free, append, remove, writable]`** — a tape type and its grants; `.append` / `.pop` / `.prepend` / `.shift` / `.insert` / `.remove`. §3.1.
+- **`Item[free, append, remove, write]`** — a tape type and its grants; `.append` / `.pop` / `.prepend` / `.shift` / `.insert` / `.remove`. §3.1.
 - **`<name attr:T/> renders <markup>`** — a component: a declaration with typed attributes and its markup. §3.3.
 - **`<signup:struct> let <field:T=… validators/> renders <input …/> </>`** — a compound with validated fields. §5.
 - **`<*name/>`** — render the existing instance (a field of this compound, or a `single` engine). §5.2, §4.3.

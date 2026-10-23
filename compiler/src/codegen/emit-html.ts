@@ -13,6 +13,7 @@ import { isRcdataElement, isHtmlElement, isStandardHtmlRenderElement } from "../
 import { isAuthorMainTag } from "../landmark-tag.ts";
 import { CGError } from "./errors.ts";
 import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite } from "./refused-lowering-errors.ts";
+import { ifGateConditionFields } from "./if-gate-condition.ts";
 import { isRawContentElement, encodeRawContentBody } from "../raw-content-encode.ts";
 import * as acorn from "acorn";
 import type { BindingRegistry } from "./binding-registry.ts";
@@ -1538,26 +1539,13 @@ export function generateHtml(
    * between them. Mirrors the three attr-value kinds the mount gate accepts.
    */
   const pushIfGuard = (attrValue: any): boolean => {
-    if (!attrValue) return false;
-    if (attrValue.kind === "expr") {
-      ifGuardStack.push({ condExpr: attrValue.raw, condExprNode: attrValue.exprNode, refs: attrValue.refs });
-      return true;
-    }
-    if (attrValue.kind === "call-ref") {
-      const condRaw = `${attrValue.name}(${(attrValue.args ?? []).join(", ")})`;
-      const condRefs = (attrValue.args ?? [])
-        .filter((a: any) => typeof a === "string" && a.startsWith("@"))
-        .map((a: any) => a.replace(/^@/, "").split(/[.[(]/)[0]);
-      ifGuardStack.push({ condExpr: condRaw, refs: condRefs });
-      return true;
-    }
-    if (attrValue.kind === "variable-ref") {
-      const ifVarName = (attrValue.name ?? "").replace(/^@/, "");
-      const ifBaseVar = ifVarName.split(".")[0];
-      ifGuardStack.push({ varName: ifBaseVar, ...(ifVarName.includes(".") ? { dotPath: ifVarName } : {}) });
-      return true;
-    }
-    return false;
+    // S469 — the value-kind → condition-field mapping is `ifGateConditionFields`, shared
+    // with the mount-gate registration below and the row-scoped structural gate
+    // (emit-each.ts), so the three cannot read one `if=` value three ways.
+    const fields = ifGateConditionFields(attrValue);
+    if (!fields) return false;
+    ifGuardStack.push(fields);
+    return true;
   };
 
   /**
@@ -1624,25 +1612,20 @@ export function generateHtml(
       ...(transitions?.enter ? { transitionEnter: transitions.enter } : {}),
       ...(transitions?.exit ? { transitionExit: transitions.exit } : {}),
     };
-    if (ifVal.kind === "variable-ref") {
-      const ifVarName = (ifVal.name ?? "").replace(/^@/, "");
-      const ifBaseVar = ifVarName.split(".")[0];
-      const hasDotPath = ifVarName.includes(".");
-      registry.addLogicBinding({ placeholderId: markerId, expr: `@${ifVarName}`, isMountToggle: true, templateId, markerId, varName: ifBaseVar, ...(hasDotPath ? { dotPath: ifVarName } : {}), ...transitionFields } as any);
-    } else if (ifVal.kind === "call-ref") {
-      // g-attr-if-fn-display-not-mount (S191): a bare-call condition gets the
-      // SAME mount/unmount controller as if=(fn())/if=@var so `if=fn()` ≡
-      // `if=(fn())`. Build a raw condExpr from the call (the fn name is mangled
-      // by the whole-buffer post-pass; `_scrml_effect` dynamic-tracks the cells
-      // it reads).
-      const condRaw = `${ifVal.name}(${(ifVal.args ?? []).join(", ")})`;
-      const condRefs = (ifVal.args ?? [])
-        .filter((a: any) => typeof a === "string" && a.startsWith("@"))
-        .map((a: any) => a.replace(/^@/, "").split(/[.[(]/)[0]);
-      registry.addLogicBinding({ placeholderId: markerId, expr: condRaw, isMountToggle: true, templateId, markerId, condExpr: condRaw, refs: condRefs, ...transitionFields } as any);
-    } else {
-      registry.addLogicBinding({ placeholderId: markerId, expr: ifVal.raw, isMountToggle: true, templateId, markerId, condExpr: ifVal.raw, condExprNode: ifVal.exprNode, refs: ifVal.refs, ...transitionFields } as any);
-    }
+    // The condition fields come from `ifGateConditionFields` — the SAME mapping the
+    // descendant-effect guard (`pushIfGuard`) and the row-scoped structural gate
+    // (emit-each.ts) use. `expr` is the binding's display text only.
+    //   variable-ref → varName (+ dotPath)
+    //   call-ref     → condExpr `fn(args)` + refs. g-attr-if-fn-display-not-mount (S191): a
+    //                  bare-call condition gets the SAME mount/unmount controller as
+    //                  if=(fn())/if=@var so `if=fn()` ≡ `if=(fn())` (the fn name is mangled by
+    //                  the whole-buffer post-pass; `_scrml_effect` dynamic-tracks the cells it reads).
+    //   expr         → condExpr + condExprNode + refs
+    const fields = ifGateConditionFields(ifVal) ?? {};
+    const expr = ifVal.kind === "variable-ref" ? `@${(ifVal.name ?? "").replace(/^@/, "")}`
+      : ifVal.kind === "call-ref" ? fields.condExpr
+      : ifVal.raw;
+    registry.addLogicBinding({ placeholderId: markerId, expr, isMountToggle: true, templateId, markerId, ...fields, ...transitionFields } as any);
   };
 
   /**

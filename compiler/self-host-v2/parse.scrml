@@ -62,7 +62,10 @@ ${
     type TC:enum = { Punct, Ident, Keyword, Num, Str, Variant, At, Other, End, TChunk, TIStart, TIEnd }
 
     // `v` = the payload the parser needs: a name, a cooked string, a raw number.
-    type PTok:struct = { cls: TC, v: string, text: string, start: int, end: int, line: int }
+    // s469 (templates): `bad` — a template chunk's malformed escape (lex.scrml
+    // escapeWhy), "" for every other token. A slot's `}` (TIEnd) carries its
+    // unreadable reason in `v`.
+    type PTok:struct = { cls: TC, v: string, text: string, start: int, end: int, line: int, bad: string }
 
     fn tokClass(k: TokenKind) -> TC {
         return match k {
@@ -74,7 +77,7 @@ ${
                   .Increment | .Decrement | .NullishCoalesce | .OptionalChain | .Bang |
                   .LogicalAnd | .LogicalOr | .BitAnd | .BitOr | .DotDot | .DotDotEq :> TC.Punct
             .TemplateInterpStart :> TC.TIStart
-            .TemplateInterpEnd :> TC.TIEnd
+            .TemplateInterpEnd(why: w) :> TC.TIEnd
             .Eof :> TC.End
             .NumberLit(raw: r) :> TC.Num
             .StringLit(cooked: c) :> TC.Str
@@ -101,7 +104,8 @@ ${
                   .LessThan | .LessEqual | .GreaterThan | .GreaterEqual |
                   .Increment | .Decrement | .NullishCoalesce | .OptionalChain | .Bang |
                   .LogicalAnd | .LogicalOr | .BitAnd | .BitOr | .DotDot | .DotDotEq |
-                  .TemplateInterpStart | .TemplateInterpEnd | .Eof :> ""
+                  .TemplateInterpStart | .Eof :> ""
+            .TemplateInterpEnd(why: w) :> w
             .NumberLit(raw: r) :> r
             .StringLit(cooked: c) :> c
             .BareVariant(name: n) :> n
@@ -113,9 +117,31 @@ ${
         }
     }
 
+    fn tokBad(k: TokenKind) -> string {
+        return match k {
+            .TemplateChunk(cooked: c, bad: b) :> b
+            .LParen | .RParen | .LBrace | .RBrace | .LBracket | .RBracket |
+                  .Semicolon | .Comma | .Dot | .Colon | .Arrow | .Question |
+                  .Assign | .Equal | .StrictEqual | .NotEqual | .StrictNotEqual |
+                  .Plus | .Minus | .Star | .Slash | .Percent |
+                  .LessThan | .LessEqual | .GreaterThan | .GreaterEqual |
+                  .Increment | .Decrement | .NullishCoalesce | .OptionalChain | .Bang |
+                  .LogicalAnd | .LogicalOr | .BitAnd | .BitOr | .DotDot | .DotDotEq |
+                  .TemplateInterpStart | .Eof :> ""
+            .TemplateInterpEnd(why: w) :> ""
+            .NumberLit(raw: r) :> ""
+            .StringLit(cooked: c) :> ""
+            .BareVariant(name: n) :> ""
+            .Ident(name: n) :> ""
+            .Keyword(name: n) :> ""
+            .Unknown(ch: c) :> ""
+            .RegexLit(pattern: p) :> ""
+        }
+    }
+
     fn toPTok(t: Token) -> PTok {
         return { cls: tokClass(t.kind), v: tokPayload(t.kind), text: t.text,
-                 start: t.span.start, end: t.span.end, line: t.span.line }
+                 start: t.span.start, end: t.span.end, line: t.span.line, bad: tokBad(t.kind) }
     }
 
     fn toPToks(ts: Token[]) -> PTok[] {
@@ -168,7 +194,16 @@ ${
     fn isP(tp: TP, s: string) -> boolean {
         const t: PTok = cur(tp)
         if (t.cls == TC.Str) return false
-        return t.text == s
+        return tk(t, s)
+    }
+
+    // s469 — does token `x` read as the punctuation / word `s`? A template's
+    // pieces (a chunk, a `${`, a slot's `}`) never do: their text is template
+    // text, and every token-level scanner here (bracket-depth counters, arm and
+    // head boundaries, `isP`) steps over them — a slot's `}` is not a brace.
+    fn tk(x: PTok, s: string) -> boolean {
+        if (x.cls == TC.TChunk || x.cls == TC.TIStart || x.cls == TC.TIEnd) return false
+        return x.text == s
     }
 
     fn isWord(tp: TP, s: string) -> boolean {
@@ -257,8 +292,8 @@ ${
     fn isCompoundAssign(tp: TP) -> boolean {
         const t: PTok = cur(tp)
         const n: PTok = peekAt(tp, 1)
-        if (t.cls != TC.Punct || n.text != "=" || !touching(t, n)) return false
-        return t.text == "+" || t.text == "-" || t.text == "*" || t.text == "/" || t.text == "%"
+        if (t.cls != TC.Punct || !tk(n, "=") || !touching(t, n)) return false
+        return tk(t, "+") || tk(t, "-") || tk(t, "*") || tk(t, "/") || tk(t, "%")
     }
 
     export fn parseAssign(tp: TP) -> RExpr {
@@ -322,7 +357,7 @@ ${
             } else {
                 const opTok: PTok = cur(left.tp)
                 let t1: TP = left.tp
-                if (opTok.text == "===" || opTok.text == "!==") {
+                if (tk(opTok, "===") || tk(opTok, "!==")) {
                     t1 = diagAt(t1, "E-PARSE-STRICT-EQ", "`" + opTok.text + "` is not scrml — `==` is already strict and structural (§45)", opTok)
                 }
                 const right: RExpr = parseBinary(adv(t1), prec + 1)
@@ -356,19 +391,34 @@ ${
         while (going) {
             const t: PTok = cur(r.tp)
             const prev: PTok = peekAt(r.tp, -1)
-            if (t.cls == TC.Punct && t.text == "." && peekAt(r.tp, 1).cls == TC.Ident) {
+            if (t.cls == TC.Punct && tk(t, ".") && peekAt(r.tp, 1).cls == TC.Ident) {
                 const name: string = peekAt(r.tp, 1).v
                 r = mkE(adv(adv(r.tp)), start, AExprK.Member(r.e, name))
-            } else if (t.cls == TC.Punct && t.text == "." && peekAt(r.tp, 1).cls == TC.Keyword) {
+            } else if (t.cls == TC.Punct && tk(t, ".") && peekAt(r.tp, 1).cls == TC.Keyword) {
                 const kname: string = peekAt(r.tp, 1).v
                 r = mkE(adv(adv(r.tp)), start, AExprK.Member(r.e, kname))
-            } else if (t.cls == TC.Punct && t.text == "(" && t.line == prev.line) {
+            } else if (t.cls == TC.Punct && tk(t, "(") && t.line == prev.line) {
                 const args: RExprs = parseList(adv(r.tp), ")")
                 r = mkE(args.tp, start, AExprK.Call(r.e, args.es))
-            } else if (t.cls == TC.Punct && t.text == "[" && touching(prev, t)) {
+            } else if (t.cls == TC.Punct && tk(t, "[") && touching(prev, t)) {
                 // `a[i]` — the `[` touches what it indexes (a spaced `[` starts a new expression)
                 const ix: RExpr = parseAssign(adv(r.tp))
                 r = mkE(expectP(ix.tp, "]"), start, AExprK.Index(r.e, ix.e))
+            } else if (t.cls == TC.TChunk && t.line == prev.line) {
+                // s469 — `tag`…`` (a tagged template: the tag CALLED with the
+                // template's pieces) is not a text template; refused by name, the
+                // template read past (its own errors report)
+                const dt: TP = diagAt(r.tp, "E-BOOTSTRAP-UNSUPPORTED", "a tagged template (`tag` followed by a backtick template) is not in the bootstrap — a logic template is text (§14.13.3); pass the template to the function as an argument instead (`f(` then the template then `)`)", t)
+                const rt: RExpr = parseTemplate(dt)
+                r = mkE(rt.tp, start, AExprK.Recovered)
+            } else if (t.cls == TC.TChunk) {
+                // s469 (review L1) — a template on the LINE AFTER an expression:
+                // JavaScript reads it as a tagged template (the expression called
+                // with the template's pieces); scrml would read a new statement and
+                // drop the template. Read two ways — refused by name, fail closed.
+                const dn: TP = diagAt(r.tp, "E-PARSE-TEMPLATE", "this template starts the line after an expression, which reads two ways — JavaScript continues the expression (a tagged template: `" + prev.text + "` called with the template's pieces), scrml would start a new statement and drop it (§14.13.3). Put the template where its value is used (`const t = ` + the template)", t)
+                const rn: RExpr = parseTemplate(dn)
+                r = mkE(rn.tp, start, AExprK.Recovered)
             } else if (isHandlerOpen(r.tp)) {
                 // s451 (Ue): `expr !{ … }` — a failable handler (§19.4.3 item 3)
                 r = parseGuard(r, start)
@@ -416,7 +466,7 @@ ${
     fn isHandlerOpen(tp: TP) -> boolean {
         const a: PTok = cur(tp)
         const b: PTok = peekAt(tp, 1)
-        if (a.cls != TC.Punct || a.text != "!" || b.cls != TC.Punct || b.text != "{") return false
+        if (a.cls != TC.Punct || !tk(a, "!") || b.cls != TC.Punct || !tk(b, "{")) return false
         if (tp.i == 0) return false
         return peekAt(tp, -1).line == a.line
     }
@@ -426,13 +476,14 @@ ${
     // Anything else after it makes it a ternary's `?` (and `?{` the SQL sigil).
     fn isPropagate(tp: TP) -> boolean {
         const a: PTok = cur(tp)
-        if (a.cls != TC.Punct || a.text != "?") return false
+        if (a.cls != TC.Punct || !tk(a, "?")) return false
         if (tp.i == 0) return false
         if (peekAt(tp, -1).line != a.line) return false
         const b: PTok = peekAt(tp, 1)
-        if (b.cls == TC.End || b.line != a.line) return true
+        // s469: a template slot's `}` ends the expression too (`${ load(id)? }`)
+        if (b.cls == TC.End || b.cls == TC.TIEnd || b.line != a.line) return true
         if (b.cls != TC.Punct) return false
-        return b.text == ")" || b.text == "]" || b.text == "," || b.text == "}" || b.text == ";" || b.text == "|"
+        return tk(b, ")") || tk(b, "]") || tk(b, ",") || tk(b, "}") || tk(b, ";") || tk(b, "|")
     }
 
     // s460: `is given` / `is not` on the line of what it tests (§7.2.2: a
@@ -545,15 +596,15 @@ ${
                 let legacy = false
                 const c: PTok = cur(t)
                 const g: PTok = peekAt(t, 1)
-                if (c.cls == TC.Punct && c.text == ":" && g.text == ">" && touching(c, g)) {
+                if (c.cls == TC.Punct && tk(c, ":") && tk(g, ">") && touching(c, g)) {
                     t = adv(adv(t))
-                } else if (c.cls == TC.Punct && c.text == "=>") {
+                } else if (c.cls == TC.Punct && tk(c, "=>")) {
                     legacy = true
                     t = adv(t)
-                } else if (c.cls == TC.Punct && c.text == "-" && g.text == ">" && touching(c, g)) {
+                } else if (c.cls == TC.Punct && tk(c, "-") && tk(g, ">") && touching(c, g)) {
                     legacy = true
                     t = adv(adv(t))
-                } else if (c.cls == TC.Punct && c.text == "|") {
+                } else if (c.cls == TC.Punct && tk(c, "|")) {
                     // s452 r3 (LOW-D): `.A | .B :>` — §18.2's arm-pattern alternation
                     t = diagAt(t, "E-PARSE-ARM", "alternation `|` between patterns (`.A | .B :> …`, §18.2) is not yet supported in the bootstrap — write one arm per pattern", c)
                     // s452 r4: skip the rest of the alternation through its separator (one report, no follow-on E-PARSE-EXPR)
@@ -645,9 +696,9 @@ ${
         const s: PTok = peekAt(tp, k)
         const g: PTok = peekAt(tp, k + 1)
         if (s.cls != TC.Punct) return false
-        if (s.text == ":" && g.text == ">" && touching(s, g)) return true
-        if (s.text == "=>") return true
-        return s.text == "-" && g.text == ">" && touching(s, g)
+        if (tk(s, ":") && tk(g, ">") && touching(s, g)) return true
+        if (tk(s, "=>")) return true
+        return tk(s, "-") && tk(g, ">") && touching(s, g)
     }
 
     // An arm's pattern.
@@ -655,8 +706,8 @@ ${
         const a: PTok = cur(tp)
         const b: PTok = peekAt(tp, 1)
         if (a.cls == TC.Variant) return patBinds(adv(tp), a, a.v, guard, "")
-        if (a.cls == TC.Punct && a.text == "." && (b.cls == TC.Ident || b.cls == TC.Keyword) && touching(a, b)) return patBinds(adv(adv(tp)), b, b.v, guard, "")
-        if (a.cls == TC.Punct && a.text == ":" && b.text == ":" && touching(a, b)) {
+        if (a.cls == TC.Punct && tk(a, ".") && (b.cls == TC.Ident || b.cls == TC.Keyword) && touching(a, b)) return patBinds(adv(adv(tp)), b, b.v, guard, "")
+        if (a.cls == TC.Punct && tk(a, ":") && tk(b, ":") && touching(a, b)) {
             const n: PTok = peekAt(tp, 2)
             if ((n.cls == TC.Ident || n.cls == TC.Keyword) && touching(b, n)) return patBinds(adv(adv(adv(tp))), n, n.v, guard, "")
         }
@@ -679,7 +730,7 @@ ${
             const rl: RExpr = parsePrimary(tp)
             return { pat: APat.PLit(rl.e), tp: rl.tp }
         }
-        if (a.cls == TC.Punct && a.text == "-" && b.cls == TC.Num && touching(a, b) && sepAt(tp, 2)) {
+        if (a.cls == TC.Punct && tk(a, "-") && b.cls == TC.Num && touching(a, b) && sepAt(tp, 2)) {
             const rn: RExpr = mkE(adv(adv(tp)), a.start, AExprK.Num("-" + b.v))
             return { pat: APat.PLit(rn.e), tp: rn.tp }
         }
@@ -692,18 +743,18 @@ ${
         // s469 — `E.V` / `E::V`, a qualified pattern (§18.13: "`TypeName.VariantName`
         // (fully qualified) SHALL always be valid"); analyze checks `E`
         if (a.cls == TC.Ident && b.cls == TC.Variant && touching(a, b)) return patBinds(adv(adv(tp)), b, b.v, guard, a.v)
-        if (a.cls == TC.Ident && b.cls == TC.Punct && b.text == "." && touching(a, b)) {
+        if (a.cls == TC.Ident && b.cls == TC.Punct && tk(b, ".") && touching(a, b)) {
             const qn: PTok = peekAt(tp, 2)
             if ((qn.cls == TC.Ident || qn.cls == TC.Keyword) && touching(b, qn)) return patBinds(adv(adv(adv(tp))), qn, qn.v, guard, a.v)
         }
-        if (a.cls == TC.Ident && b.text == ":" && touching(a, b) && peekAt(tp, 2).text == ":" && touching(b, peekAt(tp, 2))) {
+        if (a.cls == TC.Ident && tk(b, ":") && touching(a, b) && tk(peekAt(tp, 2), ":") && touching(b, peekAt(tp, 2))) {
             const qc: PTok = peekAt(tp, 3)
             if ((qc.cls == TC.Ident || qc.cls == TC.Keyword) && touching(peekAt(tp, 2), qc)) return patBinds(adv(adv(adv(adv(tp)))), qc, qc.v, guard, a.v)
         }
-        if (a.cls == TC.Ident && (b.text == "." || b.text == ":") && touching(a, b)) {
+        if (a.cls == TC.Ident && (tk(b, ".") || tk(b, ":")) && touching(a, b)) {
             // `E.V` / `E::V` — a qualified pattern
             let t: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "a qualified arm pattern (`" + a.v + b.text + "…`) is not in the bootstrap — write the bare variant (`.V`), which resolves against the subject's error type", a)
-            while (!atEnd(t) && !isP(t, "}") && !(isP(t, ":") && peekAt(t, 1).text == ">") && !isP(t, "=>")) { t = adv(t) }
+            while (!atEnd(t) && !isP(t, "}") && !(isP(t, ":") && tk(peekAt(t, 1), ">")) && !isP(t, "=>")) { t = adv(t) }
             return { pat: APat.PWild, tp: t }
         }
         return { pat: APat.PWild, tp: diagAt(tp, "E-PARSE-ARM", "expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `" + a.text + "`", a) }
@@ -712,7 +763,7 @@ ${
     // After a pattern's variant name (`nameTok`): its `(binders)`, if written.
     fn patBinds(tp: TP, nameTok: PTok, name: string, guard: boolean, qual: string) -> RPat {
         const o: PTok = cur(tp)
-        if (o.cls == TC.Punct && o.text == "(" && touching(nameTok, o)) {
+        if (o.cls == TC.Punct && tk(o, "(") && touching(nameTok, o)) {
             let t: TP = adv(tp)
             let binds: ABind[] = []
             while (!isP(t, ")") && !atEnd(t)) {
@@ -752,7 +803,7 @@ ${
             // shorthand name, `{ foo }` (no `;`), reads both as the object
             // `{ foo: foo }` and as a block whose result is `foo`
             const sh: PTok = peekAt(tp, 1)
-            if (sh.cls == TC.Ident && sh.v != "not" && peekAt(tp, 2).text == "}") {
+            if (sh.cls == TC.Ident && sh.v != "not" && tk(peekAt(tp, 2), "}")) {
                 const rs: RBlock = parseBlock(diagAt(tp, "E-MATCH-ARM-SHORTHAND-AMBIGUOUS", shorthandArmReason(sh.v), sh))
                 return { body: AArmBody.ArmBlock(rs.b), lifted: false, tp: rs.tp }
             }
@@ -858,19 +909,38 @@ ${
                 // would be split at its text's `,`. The bootstrap has no markup
                 // arm bodies yet (it fails loudly — pinned in arms-union-s469.test.js);
                 // when they land, this boundary rule must learn markup depth.
-                if (x.cls == TC.Punct && x.text == ",") return i
+                if (x.cls == TC.Punct && tk(x, ",")) return i
                 if (x.line != tp.toks[i - 1].line && !continuesLine(tp.toks, i - 1)) return i
-                if (x.cls == TC.Punct && x.text == "|") return i
+                if (x.cls == TC.Punct && tk(x, "|")) return i
                 if (armStartsAt(tp.toks, i)) return i
             }
-            if (x.cls == TC.Punct && (x.text == "(" || x.text == "[" || x.text == "{")) depth = depth + 1
-            if (x.cls == TC.Punct && (x.text == ")" || x.text == "]" || x.text == "}")) {
+            if (x.cls == TC.Punct && (tk(x, "(") || tk(x, "[") || tk(x, "{"))) depth = depth + 1
+            if (x.cls == TC.Punct && (tk(x, ")") || tk(x, "]") || tk(x, "}"))) {
                 if (depth == 0) return i
                 depth = depth - 1
             }
+            // s469: a backtick template is ONE operand — its text and slots may
+            // span lines and hold `,` / `|` / brackets; none of them ends the arm
+            if (x.cls == TC.TChunk) i = tmplEnd(tp.toks, i)
             i = i + 1
         }
         return tp.toks.length - 1
+    }
+
+    // s469 — the index of the chunk that closes the template whose FIRST chunk
+    // is at `i` (a nested template's tokens lie inside one of its slots).
+    fn tmplEnd(ts: PTok[], i: int) -> int {
+        let j: int = i
+        let slots: int = 0
+        while (j < ts.length) {
+            const x: PTok = ts[j]
+            if (x.cls == TC.End) return j - 1
+            if (x.cls == TC.TIStart) slots = slots + 1
+            if (x.cls == TC.TIEnd) slots = slots - 1
+            if (x.cls == TC.TChunk && slots == 0 && chunkClosed(x.text)) return j
+            j = j + 1
+        }
+        return ts.length - 1
     }
 
     // §7.2.2 rule 2 — does token `k`, the last of its line, continue the
@@ -884,7 +954,7 @@ ${
             return ["in", "instanceof", "is", "typeof", "new", "and", "or"].indexOf(t.text) >= 0
         }
         if (t.cls != TC.Punct) return false
-        if (t.text == "?") return !(k > 0 && touching(ts[k - 1], t))
+        if (tk(t, "?")) return !(k > 0 && touching(ts[k - 1], t))
         return ["+", "-", "*", "/", "%", "**", "==", "!=", "===", "!==", "<", ">", "<=", ">=",
                 "&&", "||", "??", "&", "|", "^", "<<", ">>", ">>>",
                 "=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "&=", "|=", "^=", "<<=", ">>=", ">>>=",
@@ -897,13 +967,13 @@ ${
         const a: PTok = ts[i]
         let j: int = -1
         if (a.cls == TC.Variant) j = i + 1
-        if (j < 0 && a.cls == TC.Punct && a.text == "." && i + 1 < ts.length && touching(a, ts[i + 1]) && (ts[i + 1].cls == TC.Ident || ts[i + 1].cls == TC.Keyword)) j = i + 2
-        if (j < 0 && a.cls == TC.Punct && a.text == ":" && i + 2 < ts.length && ts[i + 1].text == ":" && touching(a, ts[i + 1]) && touching(ts[i + 1], ts[i + 2])) j = i + 3
+        if (j < 0 && a.cls == TC.Punct && tk(a, ".") && i + 1 < ts.length && touching(a, ts[i + 1]) && (ts[i + 1].cls == TC.Ident || ts[i + 1].cls == TC.Keyword)) j = i + 2
+        if (j < 0 && a.cls == TC.Punct && tk(a, ":") && i + 2 < ts.length && tk(ts[i + 1], ":") && touching(a, ts[i + 1]) && touching(ts[i + 1], ts[i + 2])) j = i + 3
         // s469: the absence arm `not :>` and a literal arm (`"a" :>`, `1 :>`, `-1 :>`, `true :>`)
         if (j < 0 && (a.cls == TC.Ident || a.cls == TC.Keyword) && a.v == "not") return sepTokAt(ts, i + 1)
         if (j < 0 && (a.cls == TC.Str || a.cls == TC.Num)) return sepTokAt(ts, i + 1)
         if (j < 0 && (a.cls == TC.Ident || a.cls == TC.Keyword) && (a.v == "true" || a.v == "false")) return sepTokAt(ts, i + 1)
-        if (j < 0 && a.cls == TC.Punct && a.text == "-" && i + 1 < ts.length && ts[i + 1].cls == TC.Num && touching(a, ts[i + 1])) return sepTokAt(ts, i + 2)
+        if (j < 0 && a.cls == TC.Punct && tk(a, "-") && i + 1 < ts.length && ts[i + 1].cls == TC.Num && touching(a, ts[i + 1])) return sepTokAt(ts, i + 2)
         if (j < 0 && ((a.cls == TC.Ident && a.v == "_") || (a.cls == TC.Keyword && a.v == "else"))) {
             j = i + 1
             // s452: `_ err` / `else err` — the wildcard's one binder (§18.6.1)
@@ -912,19 +982,19 @@ ${
         // s452: a bare identifier pattern (`err :>`, §18.2) — only before the
         // canonical `:>` here: `x =>` mid-expression is an arrow function
         if (j < 0 && a.cls == TC.Ident) {
-            if (i + 2 < ts.length && ts[i + 1].cls == TC.Punct && ts[i + 1].text == ":" && ts[i + 2].text == ">" && touching(ts[i + 1], ts[i + 2])) return true
+            if (i + 2 < ts.length && ts[i + 1].cls == TC.Punct && tk(ts[i + 1], ":") && tk(ts[i + 2], ">") && touching(ts[i + 1], ts[i + 2])) return true
             return false
         }
         if (j < 0 || j >= ts.length) return false
         // the legacy paren-free binder (`.V m :>`): one identifier before the separator
         if (j < ts.length && a.cls != TC.Ident && a.cls != TC.Keyword && ts[j].cls == TC.Ident && ts[j].line == a.line && j + 1 < ts.length && ts[j + 1].cls == TC.Punct) j = j + 1
-        if (ts[j].cls == TC.Punct && ts[j].text == "(") {
+        if (ts[j].cls == TC.Punct && tk(ts[j], "(")) {
             let depth: int = 0
             let going = true
             while (going && j < ts.length) {
                 if (ts[j].cls == TC.End) return false
-                if (ts[j].cls == TC.Punct && ts[j].text == "(") depth = depth + 1
-                if (ts[j].cls == TC.Punct && ts[j].text == ")") depth = depth - 1
+                if (ts[j].cls == TC.Punct && tk(ts[j], "(")) depth = depth + 1
+                if (ts[j].cls == TC.Punct && tk(ts[j], ")")) depth = depth - 1
                 j = j + 1
                 if (depth == 0) going = false
             }
@@ -933,9 +1003,9 @@ ${
         const s: PTok = ts[j]
         const g: PTok = ts[j + 1]
         if (s.cls != TC.Punct) return false
-        if (s.text == ":" && g.text == ">" && touching(s, g)) return true
-        if (s.text == "=>") return true
-        return s.text == "-" && g.text == ">" && touching(s, g)
+        if (tk(s, ":") && tk(g, ">") && touching(s, g)) return true
+        if (tk(s, "=>")) return true
+        return tk(s, "-") && tk(g, ">") && touching(s, g)
     }
 
     // s469 — is there an arm separator (`:>`, `=>`, `->`) at token `j`?
@@ -944,19 +1014,20 @@ ${
         const s: PTok = ts[j]
         const g: PTok = ts[j + 1]
         if (s.cls != TC.Punct) return false
-        if (s.text == ":" && g.text == ">" && touching(s, g)) return true
-        if (s.text == "=>") return true
-        return s.text == "-" && g.text == ">" && touching(s, g)
+        if (tk(s, ":") && tk(g, ">") && touching(s, g)) return true
+        if (tk(s, "=>")) return true
+        return tk(s, "-") && tk(g, ">") && touching(s, g)
     }
 
     fn endTokAt(x: PTok) -> PTok {
-        return { cls: TC.End, v: "", text: "", start: x.start, end: x.start, line: x.line }
+        return { cls: TC.End, v: "", text: "", start: x.start, end: x.start, line: x.line, bad: "" }
     }
 
     fn sqlOf(k: AExprK) -> ASql | not {
         return match k {
             .Sql(q: q) :> q
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -987,8 +1058,8 @@ ${
         let depth: int = 1
         while (depth > 0 && !atEnd(t)) {
             const x: PTok = cur(t)
-            if (x.cls == TC.Punct && x.text == "{") depth = depth + 1
-            if (x.cls == TC.Punct && x.text == "}") depth = depth - 1
+            if (x.cls == TC.Punct && tk(x, "{")) depth = depth + 1
+            if (x.cls == TC.Punct && tk(x, "}")) depth = depth - 1
             t = adv(t)
         }
         return t
@@ -1024,7 +1095,7 @@ ${
     fn isSqlOpen(tp: TP) -> boolean {
         const a: PTok = cur(tp)
         const b: PTok = peekAt(tp, 1)
-        return a.cls == TC.Punct && a.text == "?" && b.cls == TC.Punct && b.text == "{" && touching(a, b)
+        return a.cls == TC.Punct && tk(a, "?") && b.cls == TC.Punct && tk(b, "{") && touching(a, b)
     }
 
     // A template chunk's raw text ends the template when it ends in an
@@ -1060,6 +1131,16 @@ ${
             params = params.concat([pe.e])
             t = pe.tp
             if (cur(t).cls != TC.TIEnd) return mkE(sql008(t, open), start, AExprK.Recovered)
+            // s469 — the one reader of a slot's extent (§8.1.2) could not bound this
+            // bound parameter one way (lex.scrml InterpFrame.why): refused, as a
+            // logic template's slot is
+            if (cur(t).v != "") {
+                const d: TP = diagAt(t, "E-PARSE-TEMPLATE", "this `" + sqlSigil() + "}` bound parameter cannot be read one way — " + cur(t).v + " — so where it ends is not known, and it is refused (§8.1.2: one reader of a slot's extent). Compute the value into a local first and bind the local", cur(t))
+                const past: RSkip = skipToSqlClose(adv(d), open)
+                if (!past.closed) return mkE(past.tp, start, AExprK.Recovered)
+                const rcu: RSqlChain = parseSqlChain(past.tp, emptySqlChain())
+                return mkE(rcu.tp, start, AExprK.Recovered)
+            }
             t = adv(t)
             if (cur(t).cls != TC.TChunk) return mkE(sql008(t, open), start, AExprK.Recovered)
             chunks = chunks.concat([cur(t).v])
@@ -1067,7 +1148,7 @@ ${
             t = adv(t)
         }
         if (atEnd(t)) return mkE(sql008(t, open), start, AExprK.Recovered)
-        if (!(cur(t).cls == TC.Punct && cur(t).text == "}")) {
+        if (!(cur(t).cls == TC.Punct && tk(cur(t), "}"))) {
             const extra: PTok = cur(t)
             const d: TP = diagAt(t, "E-SQL-003", "the content of `" + sqlSigil() + " … }` must be ONE backtick SQL template — found `" + extra.text + "` after it (§8.1: `" + sqlSigil() + "` `…` `}`). The SQL text is fixed at compile time; bind values with `${…}` inside the template (§8.2), and reuse SQL by extracting a function (§8.4.1)", extra)
             const past: RSkip = skipToSqlClose(d, open)
@@ -1115,8 +1196,8 @@ ${
         while (depth > 0) {
             if (atEnd(t)) return { tp: sql008(t, open), closed: false }
             const x: PTok = cur(t)
-            if (x.cls == TC.Punct && x.text == "{") depth = depth + 1
-            if (x.cls == TC.Punct && x.text == "}") depth = depth - 1
+            if (x.cls == TC.Punct && tk(x, "{")) depth = depth + 1
+            if (x.cls == TC.Punct && tk(x, "}")) depth = depth - 1
             t = adv(t)
         }
         return { tp: t, closed: true }
@@ -1140,8 +1221,8 @@ ${
             const dot: PTok = cur(t)
             const name: PTok = peekAt(t, 1)
             const paren: PTok = peekAt(t, 2)
-            if (dot.cls == TC.Punct && dot.text == "." && (name.cls == TC.Ident || name.cls == TC.Keyword) && isChainWord(name.v)
-                    && paren.cls == TC.Punct && paren.text == "(" && paren.line == name.line) {
+            if (dot.cls == TC.Punct && tk(dot, ".") && (name.cls == TC.Ident || name.cls == TC.Keyword) && isChainWord(name.v)
+                    && paren.cls == TC.Punct && tk(paren, "(") && paren.line == name.line) {
                 const args: RExprs = parseList(adv(adv(adv(t))), ")")
                 t = args.tp
                 if (args.es.length > 0) t = diagAt(t, "E-PARSE-SQL-CHAIN", "`." + name.v + "()` on a `" + sqlSigil() + "}` takes no arguments (§8.3)", name)
@@ -1230,7 +1311,7 @@ ${
         if (t.cls == TC.Keyword) return parseKeywordPrimary(tp)
         if (t.cls == TC.Ident) {
             if (t.v == "not") return mkE(adv(tp), start, AExprK.NotLit)
-            if (peekAt(tp, 1).text == "=>") return parseLambda(adv(tp), start, [t.v])
+            if (tk(peekAt(tp, 1), "=>")) return parseLambda(adv(tp), start, [t.v])
             return mkE(adv(tp), start, AExprK.Name(t.v))
         }
         if (isP(tp, "(")) {
@@ -1245,8 +1326,119 @@ ${
         }
         if (isP(tp, "{")) return parseObject(tp)
         if (isSqlOpen(tp)) return parseSql(tp)          // s451 (U1a): `?{ `…` }` (§8.1)
+        if (t.cls == TC.TChunk) return parseTemplate(tp)  // s469: a logic backtick template (§14.13.3)
         const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`", t)
         return mkE(adv(bad), start, AExprK.Recovered)
+    }
+
+    // =========================================================================
+    // s469 — a logic backtick template (SPEC §14.13.3): `` `typed ${n} chars` ``
+    // is a `string`; each `${…}` slot is a text sink holding ONE expression.
+    // The lexer bounded it (lex.scrml: a TChunk, then TIStart … TIEnd TChunk
+    // per slot; the closing backtick ends the last chunk). Refused by name,
+    // E-PARSE-TEMPLATE — fail closed: a malformed escape in its text (the
+    // chunk's `bad`), a slot whose extent a JavaScript reader could read
+    // differently (the lexer's reason, on the slot's `}`), an empty slot, a
+    // slot holding more than one expression, an unterminated template. A
+    // refused template is Recovered (its slots are not judged).
+    // =========================================================================
+    fn parseTemplate(tp: TP) -> RExpr {
+        const first: PTok = cur(tp)
+        const start: int = first.start
+        const d0: int = errorCount(tp.diags)
+        let t: TP = tmplText(tp, first)
+        let quasis: string[] = [first.v]
+        let slots: AExpr[] = []
+        let closed: boolean = chunkClosed(first.text)
+        let going: boolean = !closed
+        t = adv(t)
+        while (going) {
+            if (cur(t).cls != TC.TIStart) {
+                t = tmplUnclosed(t, first)
+                going = false
+            } else {
+                const open: PTok = cur(t)
+                t = adv(t)
+                // a slot the lexer could not bound one way is refused WHOLE, before
+                // its tokens are read (they are one reading of two): one report
+                const ahead: TP = skipToSlotEnd(t)
+                const unread: boolean = cur(ahead).cls == TC.TIEnd && cur(ahead).v != ""
+                if (unread) {
+                    t = ahead           // reported at the `}` below
+                } else if (cur(t).cls == TC.TIEnd) {
+                    t = diagAt(t, "E-PARSE-TEMPLATE", "an empty `" + interpOpen() + "}` slot — a slot holds one expression (§14.13.3); for the characters `" + interpOpen() + "` write `\\" + interpOpen() + "`", open)
+                } else {
+                    const r: RExpr = parseAssign(t)
+                    slots = slots.concat([r.e])
+                    t = r.tp
+                    if (cur(t).cls != TC.TIEnd && !atEnd(t)) {
+                        t = diagAt(t, "E-PARSE-TEMPLATE", "a template slot holds ONE expression — found `" + cur(t).text + "` after it (§14.13.3); compute the value first and put the result in the slot", cur(t))
+                        t = skipToSlotEnd(t)
+                    }
+                }
+                if (cur(t).cls != TC.TIEnd) {
+                    t = tmplUnclosed(t, first)
+                    going = false
+                } else {
+                    const close: PTok = cur(t)
+                    if (close.v != "") {
+                        const d: Diag = newDiag("E-PARSE-TEMPLATE", "this template slot cannot be read one way — " + close.v + " — so where it ends is not known, and it is refused (§14.13.3). Compute the value into a local first and put the local in the slot", t.file, mkSpan(open.start, close.end))
+                        t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file }
+                    }
+                    t = adv(t)
+                    if (cur(t).cls != TC.TChunk) {
+                        t = tmplUnclosed(t, first)
+                        going = false
+                    } else {
+                        const chunk: PTok = cur(t)
+                        t = tmplText(t, chunk)
+                        quasis = quasis.concat([chunk.v])
+                        if (chunkClosed(chunk.text)) going = false
+                        t = adv(t)
+                    }
+                }
+            }
+        }
+        // only an ERROR refuses the template: a warning inside a slot (W-STRING-
+        // INTERP-LITERAL, W-IS-SOME-DEPRECATED, …) is a lint, and the program
+        // still means what it says (review H1: counting warnings made the whole
+        // template a Recovered node, lowered to `null`, its slots untyped)
+        if (errorCount(t.diags) > d0) return mkE(t, start, AExprK.Recovered)
+        return mkE(t, start, AExprK.Template(quasis, slots))
+    }
+
+    fn errorCount(ds: Diag[]) -> int {
+        let n: int = 0
+        for (const d of ds) { if (d.severity == Severity.Error) n = n + 1 }
+        return n
+    }
+
+    // A template chunk's text: a malformed escape (lex.scrml escapeWhy) is refused.
+    fn tmplText(tp: TP, chunk: PTok) -> TP {
+        if (chunk.bad == "") return tp
+        return diagAt(tp, "E-PARSE-TEMPLATE", "this template's text holds " + chunk.bad + " (§14.13.3) — a template's escapes are a JavaScript template's: `\\n`, `\\t`, `\\``, `\\" + interpOpen() + "`, `\\xHH`, `\\uHHHH`, `\\u{H…}`", chunk)
+    }
+
+    fn tmplUnclosed(tp: TP, first: PTok) -> TP {
+        return diagAt(tp, "E-PARSE-TEMPLATE", "this template is not closed — end it with a backtick (§14.13.3)", first)
+    }
+
+    // Past a slot's extra tokens, to its `}` (a nested template's slots skipped whole).
+    fn skipToSlotEnd(tp: TP) -> TP {
+        let t: TP = tp
+        let depth: int = 0
+        let going: boolean = true
+        while (going && !atEnd(t)) {
+            const x: PTok = cur(t)
+            if (x.cls == TC.TIEnd && depth == 0) {
+                going = false
+            } else {
+                if (x.cls == TC.TIStart) depth = depth + 1
+                if (x.cls == TC.TIEnd) depth = depth - 1
+                t = adv(t)
+            }
+        }
+        return t
     }
 
     // s442: array elements up to (and consuming) `]`; `...e` is a Spread element.
@@ -1288,20 +1480,20 @@ ${
                 names = names.concat([x.v])
                 k = k + 1
                 const sep: PTok = peekAt(tp, k)
-                if (sep.text == ",") {
+                if (tk(sep, ",")) {
                     k = k + 1
-                } else if (sep.text == ")") {
+                } else if (tk(sep, ")")) {
                     going = false
                 } else {
                     return not
                 }
-            } else if (x.text == ")" && names.length == 0) {
+            } else if (tk(x, ")") && names.length == 0) {
                 going = false
             } else {
                 return not
             }
         }
-        if (peekAt(tp, k + 1).text != "=>") return not
+        if (!tk(peekAt(tp, k + 1), "=>")) return not
         return names
     }
 
@@ -1365,7 +1557,7 @@ ${
         if (touching(at, nx) && (nx.cls == TC.Ident || nx.cls == TC.Keyword)) {
             return mkE(adv(adv(tp)), at.start, AExprK.At(nx.v))
         }
-        if (touching(at, nx) && nx.cls == TC.Punct && nx.text == ".") {
+        if (touching(at, nx) && nx.cls == TC.Punct && tk(nx, ".")) {
             return mkE(adv(tp), at.start, AExprK.AtItem)
         }
         const bad: TP = diagAt(tp, "E-PARSE-AT", "`@` must be followed by a name (`@count`) or `.` (`@.field`)", at)
@@ -1376,8 +1568,8 @@ ${
         const a: PTok = cur(tp)
         const b: PTok = peekAt(tp, 1)
         const c: PTok = peekAt(tp, 2)
-        if (a.text != "." || b.text != ".") return false
-        if (c.text != "." && c.cls != TC.Variant) return false
+        if (!tk(a, ".") || !tk(b, ".")) return false
+        if (!tk(c, ".") && c.cls != TC.Variant) return false
         return touching(a, b) && touching(b, c)
     }
 
@@ -1462,7 +1654,7 @@ ${
         if (isWord(tp, "let") || isWord(tp, "const")) return parseLocal(tp)
         if (deferAhead(tp)) return parseDefer(tp)      // s451 (§19.16.1)
         if (failAhead(tp)) return parseFail(tp)        // s451 (Ue, §19.3.1)
-        if (isWord(tp, "transaction") && peekAt(tp, 1).text == "{" && peekAt(tp, 1).line == t.line) {
+        if (isWord(tp, "transaction") && tk(peekAt(tp, 1), "{") && peekAt(tp, 1).line == t.line) {
             // s451 (Ue): §19.10.2 — refused, never read as a name + a block
             const dt: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "`transaction { … }` (§19.10) is not in the bootstrap — it arrives with unit U1e (transactions, which need the error model's `!` functions)", t)
             const rb: RBlock = parseBlock(adv(dt))
@@ -1479,7 +1671,7 @@ ${
         }
         if (isWord(tp, "return")) {
             const nx: PTok = peekAt(tp, 1)
-            if (nx.cls == TC.End || nx.line != t.line || nx.text == "}" || nx.text == ";") {
+            if (nx.cls == TC.End || nx.line != t.line || tk(nx, "}") || tk(nx, ";")) {
                 return mkS(adv(tp), start, AStmtK.Return(not))
             }
             const v: RExpr = parseAssign(adv(tp))
@@ -1531,14 +1723,14 @@ ${
         if (!isWord(tp, "when")) return false
         const nx: PTok = peekAt(tp, 1)
         if (nx.cls == TC.At) return true
-        if (nx.text != "(" || nx.cls == TC.Str) return false
+        if (!tk(nx, "(") || nx.cls == TC.Str) return false
         let k: int = 2
         let depth: int = 1
         while (depth > 0) {
             const t: PTok = peekAt(tp, k)
             if (t.cls == TC.End) return false
-            if (t.cls != TC.Str && t.text == "(") depth = depth + 1
-            if (t.cls != TC.Str && t.text == ")") depth = depth - 1
+            if (t.cls != TC.Str && tk(t, "(")) depth = depth + 1
+            if (t.cls != TC.Str && tk(t, ")")) depth = depth - 1
             k = k + 1
         }
         const after: PTok = peekAt(tp, k)
@@ -1633,6 +1825,7 @@ ${
             .Lambda(params: p) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -1660,7 +1853,7 @@ ${
             t = adv(adv(t))
         } else if (isP(t, ">")) {
             t = adv(t)
-            if (cur(t).text == "$" && isP(adv(t), "{")) {
+            if (tk(cur(t), "$") && isP(adv(t), "{")) {
                 const b: RBlock = parseBlock(adv(t))
                 body = b.b
                 t = b.tp
@@ -1716,7 +1909,7 @@ ${
         const t: PTok = cur(tp)
         if (t.cls != TC.Ident) return false
         const c: PTok = peekAt(tp, 1)
-        if (c.cls != TC.Punct || c.text != ":") return false
+        if (c.cls != TC.Punct || !tk(c, ":")) return false
         const f: PTok = peekAt(tp, 2)
         if (f.cls != TC.Keyword || f.v != "for") return false
         return f.line - t.line <= 1
@@ -1742,9 +1935,9 @@ ${
             const x: PTok = peekAt(tp, k)
             if (x.cls == TC.End) return { semis: semis, close: k }
             if (x.cls == TC.Punct) {
-                if (x.text == "(" || x.text == "[" || x.text == "{") depth = depth + 1
-                if (x.text == ")" || x.text == "]" || x.text == "}") depth = depth - 1
-                if (depth == 1 && x.text == ";") semis = semis + 1
+                if (tk(x, "(") || tk(x, "[") || tk(x, "{")) depth = depth + 1
+                if (tk(x, ")") || tk(x, "]") || tk(x, "}")) depth = depth - 1
+                if (depth == 1 && tk(x, ";")) semis = semis + 1
             }
             if (depth > 0) k = k + 1
         }
@@ -1776,14 +1969,14 @@ ${
         const a: PTok = peekAt(tp, 1)
         if (isNameTok(a) && (a.v == "let" || a.v == "const")) k = 2
         const o: PTok = peekAt(tp, k)
-        if (o.cls != TC.Punct || (o.text != "{" && o.text != "[")) return false
+        if (o.cls != TC.Punct || (!tk(o, "{") && !tk(o, "["))) return false
         let depth: int = 0
         let going = true
         while (going) {
             const x: PTok = peekAt(tp, k)
             if (x.cls == TC.End) return false
-            if (x.cls == TC.Punct && (x.text == "{" || x.text == "[")) depth = depth + 1
-            if (x.cls == TC.Punct && (x.text == "}" || x.text == "]")) depth = depth - 1
+            if (x.cls == TC.Punct && (tk(x, "{") || tk(x, "["))) depth = depth + 1
+            if (x.cls == TC.Punct && (tk(x, "}") || tk(x, "]"))) depth = depth - 1
             k = k + 1
             if (depth == 0) going = false
         }
@@ -1864,7 +2057,7 @@ ${
     // A built `for` (§49.2.1). `for-else` (§17.4a) after an iterate head is
     // refused — not in the bootstrap.
     fn forStmt(tp: TP, start: int, label: string, head: AForHead, body: ABlock) -> RStmt {
-        if (isIterHead(head) && isWord(tp, "else") && peekAt(tp, 1).text == "{") {
+        if (isIterHead(head) && isWord(tp, "else") && tk(peekAt(tp, 1), "{")) {
             const d: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "`for … else { … }` (the empty-state block, §17.4a) is not in the bootstrap yet — test `xs.length == 0` before the loop", cur(tp))
             const eb: RBlock = parseBlock(adv(d))
             return recoveredStmt(eb.tp, start)
@@ -1958,12 +2151,12 @@ ${
             const x: PTok = peekAt(tp, k)
             if (x.cls == TC.End) return false
             if (x.cls == TC.Punct) {
-                if (x.text == "(" || x.text == "[" || x.text == "{") depth = depth + 1
-                if (x.text == ")" || x.text == "]" || x.text == "}") {
+                if (tk(x, "(") || tk(x, "[") || tk(x, "{")) depth = depth + 1
+                if (tk(x, ")") || tk(x, "]") || tk(x, "}")) {
                     if (depth == 0) return false
                     depth = depth - 1
                 }
-                if (depth == 0 && (x.text == ".." || x.text == "..=")) return true
+                if (depth == 0 && (tk(x, "..") || tk(x, "..="))) return true
             }
             k = k + 1
         }
@@ -1979,9 +2172,9 @@ ${
         while (!atEnd(t)) {
             const x: PTok = cur(t)
             if (x.cls == TC.Punct) {
-                if (depth == 0 && x.text == "{") return t
-                if (x.text == "(" || x.text == "[" || x.text == "{") depth = depth + 1
-                if (x.text == ")" || x.text == "]" || x.text == "}") {
+                if (depth == 0 && tk(x, "{")) return t
+                if (tk(x, "(") || tk(x, "[") || tk(x, "{")) depth = depth + 1
+                if (tk(x, ")") || tk(x, "]") || tk(x, "}")) {
                     if (depth == 0) return t
                     depth = depth - 1
                 }
@@ -1999,9 +2192,9 @@ ${
         while (!atEnd(t)) {
             const x: PTok = cur(t)
             if (x.cls == TC.Punct) {
-                if (depth == 0 && (x.text == "{" || x.text == "}" || x.text == ";")) return t
-                if (x.text == "(" || x.text == "[") depth = depth + 1
-                if (x.text == ")" || x.text == "]") depth = depth - 1
+                if (depth == 0 && (tk(x, "{") || tk(x, "}") || tk(x, ";"))) return t
+                if (tk(x, "(") || tk(x, "[")) depth = depth + 1
+                if (tk(x, ")") || tk(x, "]")) depth = depth - 1
             }
             t = adv(t)
         }
@@ -2131,7 +2324,7 @@ ${
         if (nx.cls == TC.Ident && nx.line == kw.line) {
             label = nx.v
             t = adv(t)
-        } else if (nx.cls != TC.End && nx.line == kw.line && nx.text != ";" && nx.text != "}") {
+        } else if (nx.cls != TC.End && nx.line == kw.line && !tk(nx, ";") && !tk(nx, "}")) {
             t = diagAt(t, "E-PARSE-EXPECTED", "`" + kw.v + "` takes only a loop label — there is no `" + kw.v + " value` (§49.2.1, §49.6)", nx)
         }
         if (isBreak) return mkS(t, kw.start, AStmtK.Break(label))
@@ -2250,11 +2443,11 @@ ${
         if (nx.cls == TC.At) return true
         if (nx.cls == TC.Keyword) return !deferNonLead(nx.v)
         if (nx.cls != TC.Punct) return false
-        if (nx.text == "{") return true
-        if (nx.text == "[") return !touching(t, nx)
-        if (nx.text == "?") {
+        if (tk(nx, "{")) return true
+        if (tk(nx, "[")) return !touching(t, nx)
+        if (tk(nx, "?")) {
             const n2: PTok = peekAt(tp, 2)
-            return n2.cls == TC.Punct && n2.text == "{" && touching(nx, n2)
+            return n2.cls == TC.Punct && tk(n2, "{") && touching(nx, n2)
         }
         return false
     }
@@ -2290,7 +2483,7 @@ ${
         if (nx.cls == TC.End || nx.line != f.line) return false
         if (nx.cls == TC.Variant || nx.cls == TC.Ident || nx.cls == TC.Keyword || nx.cls == TC.Str || nx.cls == TC.Num) return true
         if (nx.cls != TC.Punct || touching(f, nx)) return false
-        return nx.text == "." || nx.text == ":"
+        return tk(nx, ".") || tk(nx, ":")
     }
 
     fn isNameTok(x: PTok) -> boolean { return x.cls == TC.Ident || x.cls == TC.Keyword }
@@ -2302,10 +2495,10 @@ ${
         const b: PTok = peekAt(t, 1)
         const c: PTok = peekAt(t, 2)
         if (a.cls == TC.Variant) return failArgs(adv(t), start, "", a)
-        if (a.cls == TC.Punct && a.text == "." && isNameTok(b) && touching(a, b)) return failArgs(adv(adv(t)), start, "", b)
-        if (a.cls == TC.Punct && a.text == ":" && b.text == ":" && touching(a, b) && isNameTok(c) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, "", c)
-        if (a.cls == TC.Ident && b.cls == TC.Punct && b.text == "." && isNameTok(c) && touching(a, b) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, a.v, c)
-        if (a.cls == TC.Ident && b.text == ":" && c.text == ":" && touching(a, b) && touching(b, c)) {
+        if (a.cls == TC.Punct && tk(a, ".") && isNameTok(b) && touching(a, b)) return failArgs(adv(adv(t)), start, "", b)
+        if (a.cls == TC.Punct && tk(a, ":") && tk(b, ":") && touching(a, b) && isNameTok(c) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, "", c)
+        if (a.cls == TC.Ident && b.cls == TC.Punct && tk(b, ".") && isNameTok(c) && touching(a, b) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, a.v, c)
+        if (a.cls == TC.Ident && tk(b, ":") && tk(c, ":") && touching(a, b) && touching(b, c)) {
             const d: PTok = peekAt(t, 3)
             if (isNameTok(d) && touching(c, d)) return failArgs(adv(adv(adv(adv(t)))), start, a.v, d)
         }
@@ -2319,7 +2512,7 @@ ${
         let t: TP = tp
         let args: AExpr[] = []
         const o: PTok = cur(t)
-        if (o.cls == TC.Punct && o.text == "(" && touching(vtok, o)) {
+        if (o.cls == TC.Punct && tk(o, "(") && touching(vtok, o)) {
             const r: RExprs = parseList(adv(t), ")")
             args = r.es
             t = r.tp
@@ -2340,7 +2533,7 @@ ${
         t = subj.tp
         const c: PTok = cur(t)
         const g: PTok = peekAt(t, 1)
-        if (c.text == ":" && g.text == ">" && touching(c, g)) {
+        if (tk(c, ":") && tk(g, ">") && touching(c, g)) {
             t = adv(adv(t))
         } else {
             t = diagAt(t, "E-PARSE-GIVEN", "expected `:>` after the `given` subject", c)
@@ -2413,7 +2606,7 @@ ${
         let c: PTok = cur(t)
         let g: PTok = peekAt(t, 1)
         let sepEnd: int = c.end
-        let sepFound: boolean = (c.text == ":" && g.text == ">" && touching(c, g)) || c.text == "=>"
+        let sepFound: boolean = (tk(c, ":") && tk(g, ">") && touching(c, g)) || tk(c, "=>")
         if (bad || !sepFound) {
             bad = true
             let found: string = "the end of the line"
@@ -2423,7 +2616,7 @@ ${
             while (skipping) {
                 c = cur(t)
                 g = peekAt(t, 1)
-                sepFound = (c.text == ":" && g.text == ">" && touching(c, g)) || c.text == "=>"
+                sepFound = (tk(c, ":") && tk(g, ">") && touching(c, g)) || tk(c, "=>")
                 if (c.cls == TC.End || c.line != headLine || isP(t, "{") || sepFound) {
                     skipping = false
                 } else {
@@ -2432,7 +2625,7 @@ ${
             }
         }
         if (sepFound) {
-            if (c.text == "=>") {
+            if (tk(c, "=>")) {
                 t = adv(t)
             } else {
                 sepEnd = g.end
@@ -2623,7 +2816,7 @@ ${
             if (n.cls == TC.Ident || n.cls == TC.Keyword) {
                 names = names.concat([{ nid: t.nid, span: mkSpan(n.start, n.end), name: n.v }])
                 t = bumpId(t)
-            } else if (n.text != ",") {
+            } else if (!tk(n, ",")) {
                 t = diagAt(t, "E-PARSE-IMPORT", "expected an imported name, found `" + n.text + "`", n)
             }
             t = adv(t)
@@ -2681,7 +2874,7 @@ ${
                 vs = vs.concat([{ nid: t.nid, span: spanFrom(t, n.start), name: n.v, fields: fields }])
                 t = bumpId(t)
             } else {
-                if (n.text != ",") t = diagAt(t, "E-PARSE-TYPE", "expected a variant name, found `" + n.text + "`", n)
+                if (!tk(n, ",")) t = diagAt(t, "E-PARSE-TYPE", "expected a variant name, found `" + n.text + "`", n)
                 t = adv(t)
             }
         }
@@ -2748,7 +2941,7 @@ ${
             t = adv(t)
             const ea: PTok = cur(t)
             const eb: PTok = peekAt(t, 1)
-            if (ea.text == "-" && eb.text == ">" && touching(ea, eb)) {
+            if (tk(ea, "-") && tk(eb, ">") && touching(ea, eb)) {
                 const re: RType = parseType(adv(adv(t)))
                 err = re.t
                 t = re.tp
@@ -2761,7 +2954,7 @@ ${
         let ret: AType | not = not
         const a: PTok = cur(t)
         const b: PTok = peekAt(t, 1)
-        if (a.text == "-" && b.text == ">" && touching(a, b)) {
+        if (tk(a, "-") && tk(b, ">") && touching(a, b)) {
             if (failable) t = diagAt(t, "E-PARSE-FN", "a failable function has no success-type annotation (§19.4.1: `function " + nameTok.v + "(…)! ErrorType { … }` — its success type is inferred from its returns, §19.4.2)", a)
             const r2: RType = parseType(adv(adv(t)))
             if (!failable) ret = r2.t
@@ -3520,6 +3713,7 @@ ${
             .Lambda(params: ps) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
         }
     }
 
@@ -4796,6 +4990,7 @@ ${
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -4942,6 +5137,7 @@ ${
             .Lambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -4971,6 +5167,7 @@ ${
             .Lambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 

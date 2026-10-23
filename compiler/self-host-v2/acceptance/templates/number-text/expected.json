@@ -1,0 +1,36 @@
+{
+  "id": "acceptance-templates-number-text",
+  "description": "a `number` slot is ECMAScript Number::toString: 0.1 + 0.2, 1e21, 1e-7, -0, 2.5.",
+  "language-version": "1.0",
+  "spec": "§14.13.3 · §20.7.2",
+  "rationale": "§20.7.2: \"a `number`: ECMAScript `Number::toString(x)` (radix 10) exactly — … `0.1 + 0.2` → `\"0.30000000000000004\"`, `1e21` → `\"1e+21\"`, `1e-7` → `\"1e-7\"`, `-0` → `\"0\"`\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#sum",
+        "text": "[0.30000000000000004]"
+      },
+      {
+        "selector": "#big",
+        "text": "[1e+21]"
+      },
+      {
+        "selector": "#tiny",
+        "text": "[1e-7]"
+      },
+      {
+        "selector": "#negzero",
+        "text": "[0]"
+      },
+      {
+        "selector": "#half",
+        "text": "[2.5]"
+      },
+      {
+        "selector": "#int",
+        "text": "[5]"
+      }
+    ]
+  }
+}

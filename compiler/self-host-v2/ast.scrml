@@ -75,6 +75,11 @@ ${
         // `e` is failable, which enum the arms name, and what each binds are
         // analyze's.
         Handled(h: AHandled),
+        // s469 — a logic backtick template (§14.13.3): `quasis` the static
+        // text runs (escapes decoded, a line break read as LF), one more than
+        // `slots`; `slots` the `${…}` expressions, each a TEXT SINK (§14.13.1).
+        // A `string`. What each slot may hold (a primitive) is analyze's.
+        Template(quasis: string[], slots: AExpr[]),
     }
 
     // s451 (Ue) — the handling forms. `subject` is the failable (a call of a
@@ -213,7 +218,7 @@ ${
     export type AType:struct = { nid: int, span: ASpan, k: ATypeK }
     export type ATypeK:enum = {
         TName(name: string),                   // int · string · bool · number · struct · Line · Openness …
-        TSeq(elem: AType, grants: string[]),   // T[] or T[g1, g2] (⚑ O10 spelling)
+        TSeq(elem: AType, grants: string[]),   // T[] or T[g1, g2] (O10 spelling, ruled S469)
         TMaybe(inner: AType),                  // T | not
     }
 

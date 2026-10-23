@@ -165,6 +165,13 @@ ${
         // overflow are `not`); ParseBool — exactly "true" / "false". An enum's
         // `E.parse` is a Core `match` (lower.scrml toEnumExpr), not an op.
         ParseInt, ParseNum, ParseBool,
+        // s469 (§14.13.3, logic templates) — Text(x): the one honest text of a
+        // primitive (§20.7.2) — an `int` / `number` as ECMAScript
+        // Number::toString, a `bool` as `true` / `false`, a unit enum value as
+        // its variant name. `x` is never a `string` (lower leaves those as they
+        // are) and never anything but a primitive (the typer refuses the rest,
+        // E-TEXT-NON-PRIMITIVE / E-OPERAND-NOT-NARROWED).
+        Text,
     }
 
     export type Pattern:enum = {
@@ -175,7 +182,10 @@ ${
 
     // s444 — the host calls Core admits (a CLOSED set; see progress.md
     // "host call surface"): `Date.now()` only — the §66.19.5 timestamp.
-    export type HostCall:enum = { DateNow }
+    // s469 r3 (F1) — `Unreadable`: what lower makes of a parse placeholder
+    // (AExprK.Recovered). Never a program's meaning: checkCore refuses any Core
+    // that holds one (C-R1), so a placeholder can never print as a silent `null`.
+    export type HostCall:enum = { DateNow, Unreadable }
     // s444 — the sequence functions a lambda is admitted as the argument of.
     // Each makes a NEW sequence value (R3: values are immutable).
     // s469: SortBy — `xs.sort((a, b) => n)`, a new tape ordered by the

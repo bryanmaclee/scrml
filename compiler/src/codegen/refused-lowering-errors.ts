@@ -210,3 +210,43 @@ export function refuseQuotedHandlerWrite(
   recordRefusedLowering(err, anchor && typeof anchor === "object" ? anchor as object : null);
   return true;
 }
+
+/**
+ * §17.1.1 (S469 review F4) — the codegen backstop for an `else` / `else-if=` that reached
+ * emission as a plain ATTRIBUTE. The ast-builder collapses `if=` / `else-if=` / `else`
+ * sibling chains into an if-chain node (and fires E-CTRL-001 / -002 on an orphan) only at
+ * the markup levels `collapseIfChains` walks; an `<each>` row template and lifted
+ * (`${ for … lift }`) markup are not among them. There the attribute was written as a
+ * literal DOM attribute and the element rendered UNCONDITIONALLY — after a nested
+ * `<each if=…>` (`<each …><each … if=(c)>…</each><p else>X</p></each>`) and after a markup
+ * `<p if=…>` alike: a fail-open branch. Refused with the code an orphan gets at top level,
+ * so the shape fails closed in every position.
+ *
+ * Returns true (and records the refusal) when `attrName` is `else` / `else-if`; the caller
+ * MUST NOT emit the element.
+ */
+export function refuseUnloweredElseChain(
+  attrName: unknown,
+  position: string,
+  anchor?: { span?: unknown } | null,
+): boolean {
+  if (attrName !== "else" && attrName !== "else-if") return false;
+  const code = attrName === "else" ? "E-CTRL-001" : "E-CTRL-002";
+  const spelled = attrName === "else" ? "`else`" : "`else-if=`";
+  const span = (anchor && typeof anchor === "object" && anchor.span && typeof anchor.span === "object")
+    ? anchor.span as object
+    : { start: 0, end: 0, line: 1, col: 1 };
+  recordRefusedLowering(
+    new CGError(
+      code,
+      `${code}: ${spelled} ${position} is not part of a lowered \`if=\` chain — if=/else-if=/else chains are ` +
+      `not built at this level, so the element would render whatever the preceding condition says. ` +
+      `It is refused rather than emitted ungated (§17.1.1). Give the element its own \`if=\` with the ` +
+      `negated condition.`,
+      span,
+      "error",
+    ),
+    anchor ?? null,
+  );
+  return true;
+}
