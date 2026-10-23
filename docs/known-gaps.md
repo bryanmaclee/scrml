@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 4 |
 | MED | 668 | 7 |
-| LOW | 468 | 0 |
+| LOW | 467 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -287,8 +287,10 @@ row's node is never written again (on main the dead generation wrote `b:0 → b:
 `compiler/tests/browser/row-arm-effect-scope-dispose-s469.browser.test.js` (14 cases incl. a seeded 300-step
 add/remove/reorder/switch stress back to baseline; 11 of the first 12 fail on main) and
 `security-failable-pack` family `n22` (9 stale-effect-after-removal shapes, all 9 log in on `29b6320ad`). SPEC
-§17.7.2 now states the lifetime. Residuals filed: [[g-row-dispatcher-effect-tracks-arm-body-reads-s469]],
-[[g-module-mount-owner-recorded-from-writer-scope-s469]].
+§17.7.2 now states the lifetime. Residual filed: [[g-row-dispatcher-effect-tracks-arm-body-reads-s469]]. Round 2 (review of `ffbe1cf2b`):
+[[g-module-mount-owner-recorded-from-writer-scope-s469]] reproduced (HIGH) and fixed — a mount's owner is now
+structural; `_scrml_arm_scope` tears its scope down if the wiring throws; an effect on a page without the `owner`
+chunk no longer re-enters (and registers cleanups under) a destroyed `if_N` scope.
 
 ### g-row-dispatcher-effect-tracks-arm-body-reads-s469 — the dispatcher effect of a `<match>` in a row built by a reconcile pass also subscribes to what the arm body reads; a row built at boot does not — `NEW S469 (found by s469-effect-scope-dispose); LOW; open`
 
@@ -301,18 +303,31 @@ the row, flat across cycles) and not wrong output (the same-value short-circuit 
 re-runs the dispatcher of every reconcile-built row, and boot-built and later rows differ. Fix direction: run the
 wire fn's initial renders untracked (or outside the dispatcher's tracking context).
 
-### g-module-mount-owner-recorded-from-writer-scope-s469 — a module-scope `<match>` / `<engine>` mount records its owner from the scope active at its FIRST dispatch; a first dispatch fired by a subscriber from inside a row build would file the arm under that row — `NEW S469 (residual of s469-effect-scope-dispose); LOW; open (theoretical)`
+### g-module-mount-owner-recorded-from-writer-scope-s469 — (security, branch-only regression) a top-level `<match>` / `<engine>` whose FIRST dispatch is fired by a write from inside a row build was filed under that row; removing the row killed every arm the mount ever dispatched, so a revoked guard kept showing "LOGGED IN" — `NEW S469 (round 1 of s469-effect-scope-dispose, never on main); HIGH; RESOLVED S469 (round 2)`
 
-<!-- @gap id=g-module-mount-owner-recorded-from-writer-scope-s469 sev=LOW status=open locus=compiler/src/runtime-template.js(_scrml_mount_owner records the active scope; _scrml_reactive_subscribe callbacks run in the WRITER's scope) prov=review:S469-s469-effect-scope-dispose(self-review; not reproduced) -->
+<!-- @gap id=g-module-mount-owner-recorded-from-writer-scope-s469 sev=HIGH status=resolved locus=compiler/src/runtime-template.js(_scrml_mount_owner recorded the ACTIVE scope; now _scrml_structural_owner for an in-document mount) prov=review:S469-review-of-ffbe1cf2b(F1, reproduced);empirical:S469-s469-effect-scope-dispose-round-2(security-failable-pack n22 round-2 shapes FAIL on ffbe1cf2b, PASS on 29b6320ad and after) -->
 
-`_scrml_arm_scope` parents an arm under `_scrml_mount_owner(mount)`: the scope active the first time the mount is
-rendered into. Effects re-run inside their own creation scope, but `_scrml_reactive_subscribe` callbacks (the Shape-A
-engine dispatcher) run in whatever scope the WRITER is in. Every module-scope mount is first dispatched at module
-init / `DOMContentLoaded`, outside any scope, so the recorded owner is null — but a write to the engine's cell from
-inside a row's template code, if it were the FIRST dispatch, would make that row the owner, and removing the row would
-tear down a top-level arm (fail closed: the arm's wiring stops). Not reproduced. The principled fix — subscribers run
-in their registration scope, as effects do — lives in the always-included `core` chunk and costs bytes the shell size
-ratchet (6,087 / 6,095 B) does not have; it needs a ratchet ruling or a byte-neutral formulation.
+Filed LOW / theoretical in round 1; the review of `ffbe1cf2b` reproduced it (F1):
+
+```
+${ function poke(x) { if (x == 1) { @ph = .Active } return x } }
+<each in=@rows key=@.id as r><p>${poke(r.id)}</p></each>          -- rows = [{id:1},{id:2}]
+<match for=Phase on=@ph><Idle><b>${@n}</b></Idle><Active><s>${@n}</s></Active></match>
+-- n=3; rows=[{id:2}]; n=4; ph=Idle; n=5   →  ffbe1cf2b: 3, 3, 4 (stale)   main: 3, 4, 5
+```
+
+The first dispatch ran inside row 1's scope (module-init row render), `_scrml_mount_owner` recorded `rs_N` on the
+module-scope mount, and after the row went `_scrml_arm_scope` saw a dead owner and destroyed every new arm at once.
+Same for `<engine>`. Over-disposal, and a guard direction: the dead arm's `${…}` never re-evaluated after a revoke.
+
+✅ **RESOLVED (round 2).** The owner of a mount is decided by where it lives: a mount already in the document takes
+its nearest STRUCTURAL owner (`_scrml_structural_owner` — the containing if= mount, marked by `_scrml_mount_wire`;
+the containing dispatched arm, marked by `_scrml_arm_scope`; the containing row), else none; only a mount still being
+built in a row factory takes the active (row) scope. The `_scrml_remount_dispatch` path still gets the if= scope (by
+structure now). Probed the other first-touch-from-a-foreign-scope paths — a top-level `<each>` rendered by a write
+from a row, a top-level `if=` first flipped from a row, a derived cell first read in a row: all correct on round 1
+and after (an effect re-runs in its own creation scope; no mount records the writer). Pins: 5 browser cases in
+`row-arm-effect-scope-dispose-s469.browser.test.js`, 2 `n22` shapes. Shell runtime byte-identical.
 
 ### g-engine-in-lifted-markup-renders-garbled-text-s469 — an `<engine>` inside lifted markup (`${ for (r of @xs) { lift <span><engine for=Phase initial=.Idle>…</></span> } }`) renders the text `> < / span >` and no engine, at exit 0 with zero diagnostics — `NEW S469; MED; open`
 
