@@ -1,0 +1,8 @@
+${
+    function total(n: int) -> int {
+        const a = n + 1
+        return a;
+    }
+}
+
+<p id="out">${total(1)}</p>

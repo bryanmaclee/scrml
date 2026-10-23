@@ -1,0 +1,36 @@
+# s469-spec-small — progress
+
+SPEC-only lane (compiler/SPEC.md + docs/known-gaps.md). Branch `s469-spec-small`, cut from origin/main @ d80739b7c.
+
+## Items
+
+- [x] 2 — E-LIFECYCLE-020 / -021 §34 rows cited `§28.4` (Compiler Settings has no §28.4) → §6.7.7, §6.7.10.
+- [x] 1 — §6.7 examples (34 non-struck `scrml` blocks, §6.7.1a–§6.7.11): `;` added per F1 (a) + F3 (i); amendment note at the §6.7 head. §66.19 untouched.
+- [x] 3 — gap exists: g-impl1-duplicate-function-silently-overrides-s469; no change.
+- [x] 2b — sibling §34 rows E-LIFECYCLE-010…-019 (not 016) and -022 cited §28.x → §6.7.5/§6.7.6/§6.7.7/§6.7.9 + §6.7.10 (PA: yes); touched rows given emitter/not-yet-emitted notes (§34.0).
+- [x] 5 — PA: register, not alias. New §34.2 "Bootstrap Parse Diagnostics" (32 `E-PARSE-*` codes, informative, Error). E-PARSE-001 row untouched (commas lane). severity.scrml NOT regenerated (generated bootstrap file; `gen-bootstrap-severity.ts --check` now reports it stale — owner's call).
+- [x] 4 — §19.4.5: the legacy `|` arm is accepted (Info) only inside a comma list; a pipe-only list is E-MATCH-ARM-SEPARATOR (bootstrap, #1510, probed). §18.2 "Today" sentence + §34 row updated; gap g-bootstrap-newline-arm-lists-accepted-s469 resolved.
+- [x] 6 — already done by batch-5 (§7.5, §34 row); no change.
+- [x] 7 — PA widened to the FULL §7.2.2 F1 rewrite: rules 1–9 + Arms + locus table + migration + examples; remaining newline-sensitive readings labelled RULED / INTERIM; S446 text quoted at the end. §34: E-STMT-MISSING-SEMICOLON re-meant, E-STMT-LEADING-OPERATOR struck (deleted), E-PARSE-TRAILING statement-`match` limb. Five dpa-063 gaps closed / carried.
+
+## Probes
+
+Probe sources live in the session scratchpad (`sm/`), run against main @ d80739b7c with `scripts/scrml-boot.ts`
+and `compiler/src/cli.js`.
+
+## Round 2 (bryan's "statement termination follow-ups" ruling, scrml-support ef99b4e)
+
+- [x] F6 confirmed — "PA reading" labels dropped (§7.2.2 rules 1, 2 (`lift <…>;`), 8; §6.7 amendment; §34 rows). `lift⏎expr` lifts `expr`. Bootstrap refusal of `return⏎`/`lift⏎` stays INTERIM until migration.
+- [x] Line starts RULED (§7.2.2 rule 4): `!{`, `is given`/`is not`, `?` attach to the expression before; `?` by adjacency only.
+- [x] Contextual keywords RULED — new §7.2.2 rule 10; bare `fail` reserved in statement position.
+- [x] E-STMT-NO-EFFECT RULED for the bootstrap (rule 9, §34 row); E-STMT-SPLIT-CONTINUATION minted (rule 5, new §34 row, not yet emitted). severity.scrml current (no bootstrap emitter yet).
+- [x] g-bootstrap-newline-sensitive-rules-remain-s469 rewritten: each item → its ruling, owed to build.
+- [x] xfail case `conformance/cases/block-grammar/s469-statement-needs-semicolon-neg` pins g-dpa063-termination-unbuilt-impl1-legacy → status=carried (bootstrap: PASS). `-impl1-native` NOT pinned: the conformance runner has only the impl1-ts adapter (default parser), so no case can reach `--parser=scrml-native`; left open with the carried note. docs/bootstrap-conformance.md regenerated.
+
+## Round 3 (fidelity review of e5048fb0c — FIX)
+
+- [x] §18.2 leave-stmt "Extent" rewritten (operand ends at the arm's `,` / the list's `}`; line break whitespace, rules 4/8/10).
+- [x] The two match-leave cases (arm-body-ends-at-line-break-neg, expr-arm-continuation-joins) RELABELLED impl#1-legacy (rationale; expectations kept) and excluded from the bootstrap with `dialect.s66` — rewriting them to the ruled reading would fail on impl#1, which still refuses arm commas.
+- [x] `return; f();` examples in the E-STMT-NO-EFFECT row and §40.8; §17.6 `;`-less `lift` alternative removed; SPEC-INDEX Quick Lookup rewritten (regen preserves it).
+- [x] R7 INTERIM row + §40.8 note; R6 note at §7.4; rule 8 break/continue/fail sentence labelled; native parser retired (Status + gap resolved as moot); E-STMT-MISSING-SEMICOLON row narrowed (probed); gap g-scrml-fix-semicolon-arm-comma-rule-unbuilt-s469 filed; nits (on mount, effect=${}, §39 arm head).
+- [x] scripts/state.ts recentSessions pages through the whole log until 8 anchors (no 600 cap).

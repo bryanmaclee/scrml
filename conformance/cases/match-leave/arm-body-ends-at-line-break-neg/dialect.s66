@@ -1,0 +1,1 @@
+{"exclude": "impl#1-legacy newline shape (S469, dpa-073 F5): pins how impl#1 ends an arm body at a line break in a comma-less arm list with no `;` — a shape the bootstrap refuses by construction (E-MATCH-ARM-SEPARATOR / E-STMT-MISSING-SEMICOLON). Kept unmigrated so impl#1's legacy reading stays guarded; not a bootstrap input."}
