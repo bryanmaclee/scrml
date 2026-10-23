@@ -32,7 +32,16 @@ function compileAt(src, slot) {
   mkdirSync(dir, { recursive: true });
   const fp = join(dir, "app.scrml");
   writeFileSync(fp, src);
-  const r = compileScrml({ inputFiles: [fp], outputDir: join(dir, "dist"), write: false, log: () => {} });
+  // S469 r6 — the arm-split COVERAGE invariant, observed: a clean compile may lose no text in
+  // any arm split (emit-control-flow.ts splitMultiArmString's opt-in audit).
+  const audit = [];
+  globalThis.__scrmlArmSplitAudit = audit;
+  let r;
+  try { r = compileScrml({ inputFiles: [fp], outputDir: join(dir, "dist"), write: false, log: () => {} }); }
+  finally { globalThis.__scrmlArmSplitAudit = undefined; }
+  if (!(r.errors || []).some((e) => /^E-/.test(e.code))) {
+    expect(audit.filter((x) => !x.covered).map((x) => x.text)).toEqual([]);
+  }
   const outs = {};
   let js = "";
   if (r.outputs instanceof Map) for (const [k, v] of r.outputs) { outs[k] = v; js += (v && v.clientJs) || ""; }

@@ -15,7 +15,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
-import { rawArmHasLeadingPipeArm } from "../../src/arm-list-split.ts";
+import { rawArmHasLeadingPipeArm, armPiecesCover } from "../../src/arm-list-split.ts";
+import { splitMultiArmString } from "../../src/codegen/emit-control-flow.ts";
 
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "match-lead-pipe-s469-")); });
@@ -27,7 +28,16 @@ function compileAt(src, slot) {
   mkdirSync(dir, { recursive: true });
   const fp = join(dir, "app.scrml");
   writeFileSync(fp, src);
-  const r = compileScrml({ inputFiles: [fp], outputDir: join(dir, "dist"), write: false, log: () => {} });
+  // S469 r6 — the arm-split COVERAGE invariant, observed: a clean compile may lose no text in
+  // any arm split (emit-control-flow.ts splitMultiArmString's opt-in audit).
+  const audit = [];
+  globalThis.__scrmlArmSplitAudit = audit;
+  let r;
+  try { r = compileScrml({ inputFiles: [fp], outputDir: join(dir, "dist"), write: false, log: () => {} }); }
+  finally { globalThis.__scrmlArmSplitAudit = undefined; }
+  if (!(r.errors || []).some((e) => /^E-/.test(e.code))) {
+    expect(audit.filter((x) => !x.covered).map((x) => x.text)).toEqual([]);
+  }
   let js = "";
   if (r.outputs instanceof Map) for (const [, v] of r.outputs) js += (v && v.clientJs) || "";
   return { codes: (r.errors || []).filter((e) => !/^[WI]-/.test(e.code)).map((e) => e.code), js };
@@ -52,6 +62,10 @@ const LISTS = {
   "literal alternation piped": ["@k", [["1", `"one"`], ["| 2 | 3", `"two"`], ["_", `"z"`]]],
   "variant, later arm piped": ["@sh", [[".Tri", `"one"`], ["| .Dot", `"two"`], ["else", `"z"`]]],
   "variant, every arm piped": ["@sh", [["| .Tri", `"one"`], ["| .Dot", `"two"`], ["| else", `"z"`]]],
+  // S469 r6 (final review of fc046f011) — a `|`-led FIRST arm before two or more literal arms: the
+  // raw splitter sliced the prefix off and the first arm vanished (the wrong password got in).
+  "first arm piped, then three literal arms": ["@k", [[`| "wrong"`, `"rejected"`], [`"x"`, `"rejected"`], [`"y"`, `"rejected"`], ["else", `"LOGGED IN"`]]],
+  "first arm piped, then three number arms": ["@k", [["| 1", `"one"`], ["2", `"two"`], ["3", `"three"`], ["_", `"z"`]]],
 };
 const SEPS = { newline: "", comma: ",", oneline: null };
 
@@ -113,4 +127,26 @@ describe("rawArmHasLeadingPipeArm (per split arm)", () => {
     [`| else :> "z"`, false],
   ];
   for (const [s, want] of cases) test(s, () => expect(rawArmHasLeadingPipeArm(s)).toBe(want));
+  test("startOnly: only a `|` that starts the text (a later one may be the next head's alternation)", () => {
+    expect(rawArmHasLeadingPipeArm(`| 1 :> "one" 2 :> "two" 3 :> "three"`, { startOnly: true })).toBe(true);
+    expect(rawArmHasLeadingPipeArm(`1 :> "a" "b" | "c" :> "x"`, { startOnly: true })).toBe(false);
+  });
+});
+
+describe("the arm-split COVERAGE invariant (armPiecesCover)", () => {
+  const cases = [
+    // the review's repro: the splitter sliced off the `|`-led first arm
+    [`| 1 :> "one" 2 :> "two" 3 :> "three"`, false],
+    [`1 :> "one" 2 :> "two" 3 :> "three"`, true],
+    [`"a" | "b" :> 1 "c" :> 2,`, true],
+    [`. A :> 1`, true],
+  ];
+  for (const [s, want] of cases) {
+    test(s, () => expect(armPiecesCover(s, splitMultiArmString(s))).toBe(want));
+  }
+  test("pieces that skip text, or reorder it, do not cover", () => {
+    expect(armPiecesCover(`a :> 1 b :> 2`, [`b :> 2`])).toBe(false);
+    expect(armPiecesCover(`a :> 1 , b :> 2`, [`a :> 1`, `b :> 2`])).toBe(true);
+    expect(armPiecesCover(`a :> 1 , , b :> 2`, [`a :> 1`, `b :> 2`])).toBe(false);
+  });
 });

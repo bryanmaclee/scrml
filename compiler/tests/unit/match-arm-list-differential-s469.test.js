@@ -53,7 +53,13 @@ const POS = {
 };
 const PRE = `type Shape:enum = { Circle(r: number), Square(s: number), Tri, Dot }\n<k>: number | string = 1\n<sh>: Shape = .Tri\n<n> = ""\n\${\n  function f(a, b) { return "f" }\n}\n`;
 
+// r6 — the COVERAGE invariant, observed: every arm split any compiler stage performs records
+// whether its pieces account for every non-whitespace character of its input
+// (emit-control-flow.ts `splitMultiArmString`). A clean compile must have lost none.
+let AUDIT = [];
 function compile(src) {
+  AUDIT = [];
+  globalThis.__scrmlArmSplitAudit = AUDIT;
   const dir = join(TMP, "w");
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
@@ -65,7 +71,9 @@ function compile(src) {
   const outs = {};
   let js = "";
   if (r.outputs instanceof Map) for (const [k, v] of r.outputs) { outs[k] = v; js += ((v && v.clientJs) || "") + ((v && v.serverJs) || ""); }
-  return { codes: (r.errors || []).map((e) => e.code), out: JSON.stringify(outs), js };
+  const lost = AUDIT.filter((x) => !x.covered).map((x) => x.text);
+  globalThis.__scrmlArmSplitAudit = undefined;
+  return { codes: (r.errors || []).map((e) => e.code), out: JSON.stringify(outs), js, lost };
 }
 
 // A literal as the dispatch compares it.
@@ -87,7 +95,7 @@ for (let it = 0; it < LISTS; it++) {
   const fam = rnd() < 0.6 ? "lit" : "var";
   const arms = [];
   if (fam === "lit") {
-    const pool = shuffle(LITS); const na = 1 + Math.floor(rnd() * 4); let p = 0;
+    const pool = shuffle(LITS); const na = 1 + Math.floor(rnd() * 5); let p = 0;
     for (let i = 0; i < na; i++) { const nh = rnd() < 0.4 ? 1 + Math.floor(rnd() * 3) : 1; const hs = pool.slice(p, p + nh); p += nh; if (hs.length) arms.push({ heads: hs, body: pick(BODIES) }); }
   } else {
     const vs = shuffle(VHEADS); const used = new Set(); const na = 1 + Math.floor(rnd() * 3);
@@ -99,16 +107,22 @@ for (let it = 0; it < LISTS; it++) {
   // S469 r5 — sometimes one arm is written with the `!{}` handler's legacy leading `|`
   // (`| 1 :> …`, `| .Tri :> …`): §18.2's `match` has none, so that list must be refused in EVERY
   // spelling and position (g-impl1-legacy-pipe-literal-match-arms-s469 — it used to run the wrong arm).
-  const pipeArm = arms.length > 0 && rnd() < 0.15 ? Math.floor(rnd() * arms.length) : -1;
+  // r6 — a `|`-led FIRST arm before two or more literal arms is generated on purpose (the shape
+  // whose prefix the raw splitter used to drop, letting the wrong password in).
+  const pr = rnd();
+  const pipeArm = arms.length > 0 && pr < 0.15 ? (arms.length >= 3 && pr < 0.08 ? 0 : Math.floor(rnd() * arms.length)) : -1;
   const lines = [...arms.map((a, i) => `${i === pipeArm ? "| " : ""}${a.heads.join(" | ")} ${arrow} ${bodyOf(a.body)}`), `${elseKw} ${arrow} ${bodyOf(pick(BODIES))}`];
   const expected = arms.flatMap((a) => a.heads.map((h) => (fam === "lit" ? norm(h) : TAG(h)))).join(" ");
   const trailing = rnd() < 0.5;
   const mixMask = lines.map(() => rnd() < 0.5);
   const pos = pick(Object.keys(POS));
-  CASES.push({ fam, lines, expected, trailing, mixMask, pos, legacyPipe: pipeArm >= 0 });
+  CASES.push({ fam, lines, expected, trailing, mixMask, pos, legacyPipe: pipeArm >= 0, pipeFirstBeforeTwo: pipeArm === 0 && fam === "lit" && arms.length >= 3 });
 }
 
 describe(`seeded arm-list differential (seed ${SEED}, ${LISTS} lists × 4 spellings)`, () => {
+  test("the generator produces a `|`-led first arm before two or more literal arms", () => {
+    expect(CASES.filter((c) => c.pipeFirstBeforeTwo).length).toBeGreaterThan(2);
+  });
   for (const [idx, c] of CASES.entries()) {
     test(`#${idx} [${c.fam} ${c.pos}] ${JSON.stringify(c.lines).slice(0, 120)}`, () => {
       const sp = {
@@ -131,6 +145,8 @@ describe(`seeded arm-list differential (seed ${SEED}, ${LISTS} lists × 4 spelli
       // no spelling-dependent refusal
       expect(new Set(Object.values(refused)).size).toBe(1);
       if (refused.newline) return; // refused in every spelling: fail closed
+      // no arm split lost text in any clean compile
+      for (const [sn, r] of Object.entries(res)) expect({ sn, lost: r.lost }).toEqual({ sn, lost: [] });
       for (const sn of ["comma", "oneline", "mixed"]) expect(res[sn].out).toBe(res.newline.out);
       const seqs = dispatchTests(res.newline.js);
       expect(seqs.length).toBeGreaterThan(0);
