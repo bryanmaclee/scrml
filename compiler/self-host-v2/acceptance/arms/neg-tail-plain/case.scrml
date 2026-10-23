@@ -1,0 +1,15 @@
+// §18.5: a plain-value `match` arm block that holds a statement and ends in a bare expression.
+<program>
+    type Guess:enum = { Yes, No }
+    let <g:Guess=.No/>
+    function say(x: Guess) -> string {
+        return match x {
+            .Yes :> "y"
+            .No :> {
+                const t: string = "n"
+                t
+            }
+        }
+    }
+    <main><p>${say(@g)}</p></main>
+</program>

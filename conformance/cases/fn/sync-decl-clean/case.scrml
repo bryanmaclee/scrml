@@ -1,6 +1,6 @@
 <program>
 ${
-    fn loadProfile(id) {
+    fn loadProfile(id: int) {
         return id
     }
 }

@@ -48,7 +48,8 @@ function hasFailableMatchStamp(node: unknown): boolean {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return (require("./emit-control-flow.ts") as { hasFailableMatchStamp: (n: unknown) => boolean }).hasFailableMatchStamp(node);
 }
-import { emitStringFromTree, sliceTemplateText } from "../expression-parser.ts";
+import { emitStringFromTree } from "../expression-parser.ts";
+import { sliceTemplateText } from "../interpolation-extent.ts";
 import { isRcdataElement } from "../html-elements.js";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { CGError } from "./errors.ts";

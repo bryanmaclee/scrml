@@ -1,0 +1,32 @@
+{
+  "id": "acceptance-strings-admitted-methods",
+  "description": "the admitted methods compute what they say, counted in code points: `indexOf`/`lastIndexOf` give code-point positions or `not` (never -1, never half a pair); `replace` puts `$&` in literally; a pad fills to a code-point width, the last repeat cut on a code-point boundary.",
+  "language-version": "1.0",
+  "spec": "Appendix D.1",
+  "rationale": "Ruled S469 \"more string methods admitted\": \"Each gets a typed signature counted in code points. `indexOf`/`lastIndexOf` return `int | not` (no -1). `replace`/`replaceAll` take plain strings only.\"",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#io",
+        "text": "2 3 not not"
+      },
+      {
+        "selector": "#rp",
+        "text": "a-b😀|a$&b$&|abc"
+      },
+      {
+        "selector": "#pd",
+        "text": "[😀x😀ab][ab  ][a😀b😀]"
+      },
+      {
+        "selector": "#rr",
+        "text": "😀😀😀[]"
+      },
+      {
+        "selector": "#tr",
+        "text": "[a  ][  a]"
+      }
+    ]
+  }
+}

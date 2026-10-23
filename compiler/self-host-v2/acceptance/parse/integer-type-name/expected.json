@@ -1,0 +1,20 @@
+{
+  "id": "acceptance-parse-integer-type-name",
+  "description": "`integer` / `boolean` cells and parameters compile and run as `int` / `bool`.",
+  "language-version": "1.0",
+  "spec": "§14.13.6",
+  "rationale": "Ruled S469 \"three spec-follow-up opens\" — old type names: \"`integer`/`boolean` keep working with a warning under §63, then are removed. The bootstrap accepts `integer` meanwhile.\" (gap g-bootstrap-integer-type-name-refused-s469)",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#n",
+        "text": "42"
+      },
+      {
+        "selector": "#b",
+        "text": "true"
+      }
+    ]
+  }
+}

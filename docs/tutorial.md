@@ -17,7 +17,7 @@ This tutorial walks you from an empty directory to a small but complete scrml ap
 scrml is a command-line compiler that runs on [Bun](https://bun.sh). It is not published to npm; you install it from the GitHub repository. With Bun installed (`curl -fsSL https://bun.sh/install | bash`):
 
 ```
-git clone https://github.com/bryanmaclee/scrml
+git clone https://github.com/scrml-lang/scrml
 cd scrml
 bun install
 bun link          # puts the `scrml` command on your PATH
@@ -273,6 +273,7 @@ Place each block immediately before the markup it styles; several small blocks n
 scrml also supports Tailwind utility classes out of the box. The compiler scans class attributes at build time and emits only the utilities the program actually uses. Fragment — the counter's markup restyled with utilities:
 
 ```scrml
+// gate: skip — fragment: the counter's markup; `@count` and `inc()` come from §2
 <div class="max-w-sm mx-auto mt-8 p-6 border rounded-lg text-center">
   <h1 class="text-3xl font-bold">${@count}</h1>
   <button class="mt-2 px-4 py-2 bg-blue-600 text-white rounded" onclick=inc()>+</button>
@@ -380,6 +381,7 @@ The `${ ... }` inside `<ul>` is a logic block because its body is a multi-statem
 **`<each>` — the canonical iteration element.** `for`/`lift` is the Tier-0 primitive; the structural `<each>` element is the canonical Tier-1 shape (§17.7), and the one the compiler nudges you toward (`W-EACH-PROMOTABLE`). Fragment — the same list written with `<each>`:
 
 ```scrml
+// gate: skip — fragment: `@items` and `TodoRow` come from the todo app above
 <ul>
   <each in=@items as t key=t.id>
     <TodoRow item=t/>
@@ -424,6 +426,7 @@ There is no `<script>` tag, no JSX braces, no Svelte directives. The shape is "H
 Show or hide an element by putting `if=expr` on it. Chains use sibling elements with `else-if=expr` and a bare `else`. Fragment:
 
 ```scrml
+// gate: skip — fragment: `@items` and `TodoRow` come from the todo app above
 <p if=(@items.length == 0)>No todos yet — add one above.</p>
 <ul else>
   <each in=@items as t key=t.id>
@@ -449,6 +452,7 @@ The language gives you a three-rung ladder for promoting "this UI has modes" int
 For a prototype, two or three booleans gating sibling elements is usually fine. Fragment:
 
 ```scrml
+// gate: skip — fragment: `@loading` and `@error` are illustrative cells
 <div if=@loading>Loading…</div>
 <div else-if=(@error != "")>Error: ${@error}</div>
 <div else>Welcome.</div>

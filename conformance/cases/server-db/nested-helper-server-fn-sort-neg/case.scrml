@@ -1,7 +1,7 @@
 <program>
-server function isOk(n) { return n > 100 }
+server function isOk(n: int) { return n > 100 }
 server function ranked() {
-  function inner(x) { return isOk(x) }
+  function inner(x: int) { return isOk(x) }
   return [3, 1, 2].sort((a, b) => inner(a) ? -1 : 1)
 }
 function go() {

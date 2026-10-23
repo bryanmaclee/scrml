@@ -28,7 +28,7 @@
                 <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded">
                     Core multi-page-app surface
                 </span>
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§40"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§40"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §40.8 (normative)
                 </a>
@@ -315,11 +315,11 @@ pages/
             <strong>&sect;40.9</strong> (Approach A artifact splitter)
             apply when auth wrapping is involved. The normative text
             lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>
-            in the scrmlTS repository.
+            in the scrml repository.
         </p>
 
     </article>

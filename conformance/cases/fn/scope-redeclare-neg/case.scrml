@@ -1,7 +1,7 @@
 ${
     <out> = ""
 
-    function p1(x) {
+    function p1(x: string) {
         let x = "inner"
         return x
     }

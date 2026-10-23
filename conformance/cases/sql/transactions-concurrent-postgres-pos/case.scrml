@@ -1,6 +1,6 @@
 <program db="postgres://app:secret@localhost:5432/ledger" transactions="concurrent">
     ${
-        function record(note) {
+        function record(note: string) {
             ?{`INSERT INTO entries (note) VALUES (${note})`}.run()
             return 1
         }

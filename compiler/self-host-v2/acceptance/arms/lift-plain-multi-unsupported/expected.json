@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-arms-lift-plain-multi-unsupported",
+  "description": "E-BOOTSTRAP-UNSUPPORTED: a plain-value `match` arm with statements is not in the bootstrap (no E-ARM-TAIL-VALUE: the arm lifts).",
+  "language-version": "1.0",
+  "spec": "§18.5",
+  "rationale": "The bootstrap limitation is labelled, never a silent approximation.",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

@@ -1,7 +1,7 @@
 <program>
 <_scrml_count> = 0
 ${
-  function _scrml_bump(_scrml_by) {
+  function _scrml_bump(_scrml_by: int) {
     @_scrml_count = @_scrml_count + _scrml_by
   }
 }

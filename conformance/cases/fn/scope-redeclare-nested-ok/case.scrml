@@ -1,7 +1,7 @@
 ${
     <out> = ""
 
-    function p4(w) {
+    function p4(w: int) {
         let v = "v"
         if (w > 0) {
             let w = "shadow-w;"

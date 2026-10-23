@@ -1,0 +1,5 @@
+// §14.13.4: a primitive type name is a namespace for `parse` only.
+<program>
+    let <s:string="4"/>
+    <main><p>${int.from(@s)}</p></main>
+</program>

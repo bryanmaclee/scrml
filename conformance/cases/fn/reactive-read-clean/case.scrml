@@ -1,7 +1,7 @@
 <program>
 ${ @value = 42 }
 ${
-    fn pureRead(a) {
+    fn pureRead(a: int) {
         return a + @value
     }
 }

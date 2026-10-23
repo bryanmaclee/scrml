@@ -1,11 +1,11 @@
 <program db="postgres://localhost/app">
 
-  function loadOwner(id) {
+  function loadOwner(id: int) {
     ?{`SELECT id FROM owners WHERE id = ${id}`}.all() !{ _ :> [] }
     loadPet(id)
   }
 
-  function loadPet(id) {
+  function loadPet(id: int) {
     ?{`SELECT id FROM pets WHERE owner_id = ${id}`}.all() !{ _ :> [] }
   }
 

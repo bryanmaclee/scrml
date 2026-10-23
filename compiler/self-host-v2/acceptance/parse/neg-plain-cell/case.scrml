@@ -1,0 +1,6 @@
+// §14.13.4: a parse is `T | not` — a plain `int` cell cannot hold it.
+<program>
+    let <s:string="4"/>
+    <n:int=(int.parse(@s))/>
+    <main><p>${@n}</p></main>
+</program>

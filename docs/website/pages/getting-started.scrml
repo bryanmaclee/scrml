@@ -57,8 +57,8 @@
             Until the npm package lands, install from source:
         </p>
 
-        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>git clone https://github.com/bryanmaclee/scrmlTS
-cd scrmlTS
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>git clone https://github.com/scrml-lang/scrml
+cd scrml
 bun install</code></pre>
 
         <p class="text-slate-700 leading-relaxed mt-3">

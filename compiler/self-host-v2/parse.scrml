@@ -490,7 +490,7 @@ ${
 
     type RArms:struct = { arms: AArm[], tp: TP }
     type RPat:struct = { pat: APat, tp: TP }
-    type RArmBody:struct = { body: AArmBody, tp: TP }
+    type RArmBody:struct = { body: AArmBody, lifted: boolean, tp: TP }
 
     // At `{`: the arms, through the matching `}`. ONE arm parser for `!{}`
     // and `match` (S452 ruling c: "`!{}` handler arms use the SAME grammar as
@@ -565,7 +565,7 @@ ${
                 }
                 const rb: RArmBody = parseArmBody(t)
                 t = rb.tp
-                const arm: AArm = { nid: t.nid, span: spanFrom(t, astart), pat: rp.pat, body: rb.body, legacy: legacy }
+                const arm: AArm = { nid: t.nid, span: spanFrom(t, astart), pat: rp.pat, body: rb.body, legacy: legacy, lifted: rb.lifted }
                 arms = arms.concat([arm])
                 t = bumpId(t)
                 lastComma = false
@@ -754,10 +754,10 @@ ${
             const sh: PTok = peekAt(tp, 1)
             if (sh.cls == TC.Ident && sh.v != "not" && peekAt(tp, 2).text == "}") {
                 const rs: RBlock = parseBlock(diagAt(tp, "E-MATCH-ARM-SHORTHAND-AMBIGUOUS", shorthandArmReason(sh.v), sh))
-                return { body: AArmBody.ArmBlock(rs.b), tp: rs.tp }
+                return { body: AArmBody.ArmBlock(rs.b), lifted: false, tp: rs.tp }
             }
-            const rb: RBlock = parseBlock(tp)
-            return { body: AArmBody.ArmBlock(rb.b), tp: rb.tp }
+            const rb: RArmBlock = parseArmBlock(tp)
+            return { body: AArmBody.ArmBlock(rb.b), lifted: rb.lifted, tp: rb.tp }
         }
         const end: int = armEnd(tp)
         const sub: TP = { toks: tp.toks.slice(0, end).concat([endTokAt(tp.toks[end])]), i: tp.i, nid: tp.nid, diags: tp.diags, file: tp.file }
@@ -774,14 +774,14 @@ ${
             let ft: TP = rf.tp
             if (!atEnd(ft)) ft = diagAt(ft, "E-PARSE-ARM", "unexpected `" + cur(ft).text + "` after the arm's `" + kw + "`", cur(ft))
             const fb: ABlock = { nid: ft.nid, span: spanFrom(ft, start), stmts: [rf.s] }
-            return { body: AArmBody.ArmBlock(fb), tp: { toks: tp.toks, i: end, nid: ft.nid + 1, diags: ft.diags, file: tp.file } }
+            return { body: AArmBody.ArmBlock(fb), lifted: false, tp: { toks: tp.toks, i: end, nid: ft.nid + 1, diags: ft.diags, file: tp.file } }
         }
         // `break` / `continue` are leave statements too (§18.2), but the bootstrap
         // has no loops for them to leave.
         if (isWord(sub, "break") || isWord(sub, "continue")) {
             const bt: TP = diagAt(sub, "E-BOOTSTRAP-UNSUPPORTED", "a `" + cur(sub).text + "` arm (§18.2 leave statement) needs a loop, and loops are not in the bootstrap", cur(sub))
             const rb: RExpr = mkE(bt, cur(sub).start, AExprK.Recovered)
-            return { body: AArmBody.ArmExpr(rb.e), tp: { toks: tp.toks, i: end, nid: rb.tp.nid, diags: rb.tp.diags, file: tp.file } }
+            return { body: AArmBody.ArmExpr(rb.e), lifted: false, tp: { toks: tp.toks, i: end, nid: rb.tp.nid, diags: rb.tp.diags, file: tp.file } }
         }
         const r: RExpr = parseAssign(sub)
         let st: TP = r.tp
@@ -789,7 +789,50 @@ ${
             const x: PTok = cur(st)
             st = diagAt(st, "E-PARSE-ARM", "unexpected `" + x.text + "` in an arm — an arm holds one expression or a `{ … }` block", x)
         }
-        return { body: AArmBody.ArmExpr(r.e), tp: { toks: tp.toks, i: end, nid: st.nid, diags: st.diags, file: tp.file } }
+        return { body: AArmBody.ArmExpr(r.e), lifted: false, tp: { toks: tp.toks, i: end, nid: st.nid, diags: st.diags, file: tp.file } }
+    }
+
+    // s469 — an arm's `{ … }` block (§18.5, RULED S469 "block arms yield with
+    // `lift`": `.B :> { log(); lift 2 }`). A `lift <expr>` written as the
+    // block's LAST statement is the arm's value: the block ends in `Eval(expr)`
+    // and the arm is `lifted` (AArm). Speculative: the `lift` is read, and kept
+    // only when the block's `}` follows it; any other `lift` goes to parseStmt,
+    // which refuses it by name.
+    type RArmBlock:struct = { b: ABlock, lifted: boolean, tp: TP }
+
+    fn parseArmBlock(tp: TP) -> RArmBlock {
+        const start: int = cur(tp).start
+        let t: TP = expectP(tp, "{")
+        let stmts: AStmt[] = []
+        let lifted = false
+        while (!isP(t, "}") && !atEnd(t)) {
+            const before: int = t.i
+            let done = false
+            if (isWord(t, "lift")) {
+                const kw: PTok = cur(t)
+                const v: RExpr = parseAssign(adv(t))
+                let t2: TP = v.tp
+                if (isP(t2, ";")) t2 = adv(t2)
+                if (isP(t2, "}")) {
+                    const ls: RStmt = mkS(v.tp, kw.start, AStmtK.Eval(v.e))
+                    stmts = stmts.concat([ls.s])
+                    t = ls.tp
+                    if (isP(t, ";")) t = adv(t)
+                    lifted = true
+                    done = true
+                }
+            }
+            if (!done) {
+                const r: RStmt = parseStmt(t)
+                stmts = stmts.concat([r.s])
+                t = r.tp
+                if (isP(t, ";")) t = adv(t)
+                if (t.i == before) t = adv(t)
+            }
+        }
+        t = expectP(t, "}")
+        const b: ABlock = { nid: t.nid, span: spanFrom(t, start), stmts: stmts }
+        return { b: b, lifted: lifted, tp: bumpId(t) }
     }
 
     fn shorthandArmReason(n: string) -> string {
@@ -1302,6 +1345,15 @@ ${
             const rf: RStmt = parseFor(df, "", start)
             return mkE(rf.tp, start, AExprK.Recovered)
         }
+        // s469 — an `if` where a value stands (if-as-expression §17.6, the value form
+        // §17.6.10, whose branch rule S469 rules: `{ e }`, or `lift` once the branch
+        // holds a statement) is not in the bootstrap. Read past as an `if` statement
+        // (so its own errors report), refused by name — never read as a name `if`.
+        if (t.v == "if") {
+            const di: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function", t)
+            const ri: RStmt = parseIf(di)
+            return mkE(ri.tp, start, AExprK.Recovered)
+        }
         return mkE(adv(tp), start, AExprK.Name(t.v))
     }
 
@@ -1416,6 +1468,14 @@ ${
             const rb: RBlock = parseBlock(adv(dt))
             const re: RExpr = mkE(rb.tp, start, AExprK.Recovered)
             return mkS(re.tp, start, AStmtK.Eval(re.e))
+        }
+        // s469 — `lift` (§10) is read only as the LAST statement of an arm block
+        // (parseArmBlock, §18.5); anywhere else it is refused by name, fail closed
+        if (isWord(tp, "lift")) {
+            const dl: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "`lift` is in the bootstrap only as the LAST statement of a `match` / `!{}` arm block (§18.5: `.B :> { log(); lift 2 }`) — a `lift` anywhere else (a nested block, a markup or `for` value) is not in the bootstrap yet", t)
+            const lv: RExpr = parseAssign(adv(dl))
+            const lr: RExpr = mkE(lv.tp, start, AExprK.Recovered)
+            return mkS(lr.tp, start, AStmtK.Eval(lr.e))
         }
         if (isWord(tp, "return")) {
             const nx: PTok = peekAt(tp, 1)

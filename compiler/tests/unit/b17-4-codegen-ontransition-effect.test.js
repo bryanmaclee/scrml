@@ -318,7 +318,8 @@ describe("B17.4 §B17.4.5 — <onTransition from=.X> inverted-direction arm", ()
     });
     const out = emitEngineHookFiringFunction(m).join("\n");
     expect(out).toContain('if (_scrml_from === "Small" && _scrml_to === "Big")');
-    expect(out).toContain('log("entered")');
+    // S469 — hook bodies lower as statements (emitLogicBody): `log` is the scrml builtin.
+    expect(out).toMatch(/_scrml_log\("client", "[^"]*", "entered"\)/);
     expect(out).toContain("// §51.0.H <onTransition from=.Small> in .Big");
   });
 });
@@ -403,7 +404,7 @@ describe("B17.4 §B17.4.7 — if=expr gating", () => {
     // @gameOver should be rewritten to _scrml_reactive_get("gameOver"). §45.4
     // (S468): `==` with a non-provably-primitive operand is structural.
     expect(out).toContain('if (_scrml_structural_eq(_scrml_reactive_get("gameOver"), false))');
-    expect(out).toContain('log("regression")');
+    expect(out).toMatch(/_scrml_log\("client", "[^"]*", "regression"\)/); // S469 — statement lowering
   });
 
   test("${...} wrapped if= unwraps and rewrites", () => {

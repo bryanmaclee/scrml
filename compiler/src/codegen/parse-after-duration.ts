@@ -36,6 +36,8 @@
 // shape is documented + accepted.
 
 /** Result discriminator for `parseAfterDuration`. */
+import { logicBlockClose } from "../interpolation-extent.ts";
+
 export type AfterDurationResult =
   | { kind: "literal"; ms: number }
   | { kind: "computed"; exprText: string; unitMultiplier: number }
@@ -80,8 +82,19 @@ export function parseAfterDuration(raw: string): AfterDurationResult {
   }
 
   // Computed form FIRST (so `${...}ms` doesn't accidentally fall through the
-  // literal regex). Single-level brace match per the helper's grammar note.
-  const computedMatch = trimmed.match(/^\$\{([^}]*)\}\s*(ms|s|m|h)$/i);
+  // literal regex). S469 (review of 5a88c3030, L2) — the `${…}` extent is read by THE one
+  // reader (interpolation-extent `logicBlockClose`: acorn, both goals), not a single-level
+  // `[^}]*` match, which made `${ f({a:1}) }ms` / `${ x !{ … } }ms` "invalid" and the timer
+  // was dropped.
+  let computedMatch: RegExpMatchArray | null = null;
+  if (trimmed.startsWith("${")) {
+    const close = logicBlockClose(trimmed, 0);
+    if (close < 0) {
+      return { kind: "invalid", reason: `computed duration '${trimmed}' has a \`\${…}\` that cannot be read` };
+    }
+    const unitM = trimmed.slice(close + 1).trim().match(/^(ms|s|m|h)$/i);
+    if (unitM) computedMatch = [trimmed, trimmed.slice(2, close), unitM[1]!] as unknown as RegExpMatchArray;
+  }
   if (computedMatch) {
     const exprText = computedMatch[1]!.trim();
     if (exprText.length === 0) {

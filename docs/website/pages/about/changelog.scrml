@@ -27,7 +27,7 @@
             <p class="leading-relaxed">
                 The canonical changelog is maintained as Markdown in the
                 repository at
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/changelog.md"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/docs/changelog.md"
                    class="text-blue-700 hover:text-blue-900 underline font-mono">
                     docs/changelog.md
                 </a>.

@@ -29,7 +29,7 @@
                 with distinct semantics.
             </p>
             <div class="flex gap-4 mt-4 text-xs">
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§51"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§51"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §51.0.M (normative)
                 </a>
@@ -393,11 +393,11 @@ function load() {
             <strong>§51.12</strong> (runtime backbone, shared with legacy
             machine temporal) + <strong>§51.12.3 / §51.12.3.1</strong>
             (DURATION grammar). The normative text lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>
-            in the scrmlTS repository.
+            in the scrml repository.
         </p>
 
     </article>

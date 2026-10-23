@@ -35,7 +35,7 @@
                 for "UI as a fully-handled state machine."
             </p>
             <div class="flex gap-4 mt-4 text-xs">
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§51"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§51"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §51.0 (normative)
                 </a>
@@ -101,7 +101,7 @@
             Live demo deferred to A1c Wave 4 engine runtime codegen.
             Until then, this block is the canonical scrml. Compile via
             <code class="font-mono">bun scrml compile</code> against the
-            current scrmlTS HEAD to verify.
+            current scrml HEAD to verify.
         </div>
 
         // ───────────────────────────────────────────────────────────
@@ -320,18 +320,18 @@
             This page summarizes <strong>SPEC §51.0</strong>
             (<span class="font-mono">~21293-24415</span>). The normative
             text lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>
-            in the scrmlTS repository. When this page disagrees with
+            in the scrml repository. When this page disagrees with
             SPEC.md, SPEC.md is authoritative — surface the contradiction
             and we'll fix the docs.
         </p>
 
         <p class="text-slate-700 leading-relaxed mt-4 text-sm">
             Quick-lookup anchors:
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC-INDEX.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC-INDEX.md"
                class="text-blue-700 hover:text-blue-900 underline">SPEC-INDEX.md</a>
             entries — <em>engine declaration</em>, <em>engines as singleton</em>,
             <em>auto-declared engine variable</em>, <em>engine mount position</em>,

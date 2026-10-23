@@ -26,7 +26,7 @@
                 the universal-core validator vocabulary.
             </p>
             <div class="flex gap-4 mt-4 text-xs">
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§55"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§55"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §55 (normative)
                 </a>
@@ -297,7 +297,7 @@
             This page summarizes <strong>SPEC §55</strong>
             (<span class="font-mono">~26381-26869</span>). The normative
             text lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>.

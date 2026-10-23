@@ -1,0 +1,16 @@
+// §14.13.4: `bool.parse(s)` accepts exactly "true" / "false".
+<program>
+    function show(x: bool | not) -> string {
+        return match x {
+            not :> "not"
+            else :> "bool"
+        }
+    }
+    let <t:bool | not=(bool.parse("true"))/>
+    let <f:bool | not=(bool.parse("false"))/>
+    <main>
+        <p id="t">${@t}</p>
+        <p id="f">${@f}</p>
+        <p id="x">${show(bool.parse("True"))} ${show(bool.parse("1"))} ${show(bool.parse(""))} ${show(bool.parse("true "))}</p>
+    </main>
+</program>

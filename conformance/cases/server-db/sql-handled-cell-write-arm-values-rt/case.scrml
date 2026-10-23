@@ -19,7 +19,7 @@
         @lit = ?{`SELECT body FROM gone`}.get() !{ _ :> "mail admin@x.io" }
         @after = "lit"
     }
-    function loadParam(fallback) {
+    function loadParam(fallback: string) {
         @param = ?{`SELECT body FROM gone`}.get() !{ _ :> fallback }
     }
     <button id="a" onclick={ loadLit() !{ .Transport(_) :> return } }>a</button>

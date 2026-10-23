@@ -469,6 +469,21 @@ ${
             .Join :> rtCall(ctx, "joinStr", a)
             .IndexRead :> rtCall(ctx, "indexRead", a)  // s469 (§49.13): the element, or the E-INDEX-OUT-OF-RANGE-RT trap
             .AtRead :> rtCall(ctx, "atRead", a)        // s469 (§49.13): the element, or `not`
+            // s469 — the admitted additions (S469 "more string methods admitted"): positions,
+            // widths and matches by code point, so runtime helpers; trimStart / trimEnd are the
+            // host's (no position). The parses (§14.13.4) are strict, whole-string, `T | not`.
+            .StrIndexOf :> rtCall(ctx, "strIndexOf", a)
+            .StrLastIndexOf :> rtCall(ctx, "strLastIndexOf", a)
+            .StrReplace :> rtCall(ctx, "strReplace", a)
+            .StrReplaceAll :> rtCall(ctx, "strReplaceAll", a)
+            .StrPadStart :> rtCall(ctx, "strPadStart", a)
+            .StrPadEnd :> rtCall(ctx, "strPadEnd", a)
+            .StrRepeat :> rtCall(ctx, "strRepeat", a)
+            .StrTrimStart :> jmcall(a[0], "trimStart", [])
+            .StrTrimEnd :> jmcall(a[0], "trimEnd", [])
+            .ParseInt :> rtCall(ctx, "parseIntText", a)
+            .ParseNum :> rtCall(ctx, "parseNumText", a)
+            .ParseBool :> rtCall(ctx, "parseBoolText", a)
         }
     }
 

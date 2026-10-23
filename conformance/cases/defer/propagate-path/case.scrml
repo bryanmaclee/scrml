@@ -7,7 +7,8 @@ ${
     <result> = "init"
 
     function load(key: string)! -> LoadError {
-        fail LoadError.Missing(key)
+        if (key == "k1") { fail LoadError.Missing(key) }
+        return key
     }
 
     function outer()! -> LoadError {

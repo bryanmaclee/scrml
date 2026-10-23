@@ -1,6 +1,6 @@
 ${
     <trace> = ""
-    function note(x) { @trace = @trace + x + ";" }
+    function note(x: int) { @trace = `${@trace}${x};` }
 
     function a() {
         let defer = [1, 2]
@@ -20,7 +20,9 @@ ${
     }
 
     function go() {
-        @trace = @trace + a() + b() + ";"
+        const first: number = a()
+        const second: number = b()
+        @trace = `${@trace}${first}${second};`
         c()
     }
 }

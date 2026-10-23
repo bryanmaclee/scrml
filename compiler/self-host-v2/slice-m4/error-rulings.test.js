@@ -225,15 +225,18 @@ describe("§19.4.3 ruling 1a — E-ERROR-012: in a value position every arm yiel
     expect(text().n).toBe("5");
   });
 
-  test("a block arm yields its LAST EXPRESSION (§18.5), its statements run first (runtime)", async () => {
-    await load(go(`    function go() {\n        const r = load("x") !{ _ :> {\n            @n = 1\n            "z"\n        } }\n        const s = load("ok") !{ _ :> {\n            @n = 2\n            "never"\n        } }\n        @log = r + s\n    }`));
+  // s469 (§18.5, RULED S469 "block arms yield with `lift`"): a statement-holding block arm whose value
+  // is used yields with `lift`; its bare last expression is E-ARM-TAIL-VALUE
+  test("a block arm yields its `lift` operand (§18.5, S469), its statements run first (runtime)", async () => {
+    expect(codes(go(`    function go() {\n        const r = load("x") !{ _ :> {\n            @n = 1\n            "z"\n        } }\n        @log = r\n    }`))).toEqual(["E-ARM-TAIL-VALUE"]);
+    await load(go(`    function go() {\n        const r = load("x") !{ _ :> {\n            @n = 1\n            lift "z"\n        } }\n        const s = load("ok") !{ _ :> {\n            @n = 2\n            lift "never"\n        } }\n        @log = r + s\n    }`));
     click(btn("go"));
     expect(text().log).toBe("zok");
     expect(text().n).toBe("1");
   });
 
   test("a block arm's value may read its own locals (runtime)", async () => {
-    await load(go(`    function go() {\n        @log = load("x") !{ _ :> {\n            const t = "v"\n            @n = 1\n            t + "!"\n        } }\n    }`));
+    await load(go(`    function go() {\n        @log = load("x") !{ _ :> {\n            const t = "v"\n            @n = 1\n            lift t + "!"\n        } }\n    }`));
     click(btn("go"));
     expect(text().log).toBe("v!");
     expect(text().n).toBe("1");
@@ -270,7 +273,7 @@ describe("§19.4.3 ruling 1a — E-ERROR-012: in a value position every arm yiel
   });
 
   test("a block arm whose last expression is a handling form: its own Attempt, then its value (runtime)", async () => {
-    await load(go(`    function go() {\n        @log = load("x") !{ _ :> {\n            @n = 3\n            load("y") !{ _ :> "inner" }\n        } }\n    }`));
+    await load(go(`    function go() {\n        @log = load("x") !{ _ :> {\n            @n = 3\n            lift load("y") !{ _ :> "inner" }\n        } }\n    }`));
     click(btn("go"));
     expect(text().log).toBe("inner");
     expect(text().n).toBe("3");

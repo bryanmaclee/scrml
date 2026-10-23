@@ -1,6 +1,6 @@
 ${
     <raw>: string = "123-45-6789"
-    function keep(v) {
+    function keep(v: string) {
         let s: string(ssn) = v
         return s
     }
