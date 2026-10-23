@@ -470,7 +470,7 @@ describe("S239 review fix round (114e6ef80)", () => {
   // HIGH-2: a function named without a call was lowered as `null`
   test("HIGH-2 — a function value (alias, return, argument) is refused, never lowered as `null`", () => {
     const ok = `    function ok() -> int {\n        return 3;\n    }`;
-    expect(codes(P(`${ok}\n    function go() {\n        const g = ok;\n        @n = g()\n    }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(P(`${ok}\n    function go() {\n        const g = ok;\n        @n = g();\n    }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
     expect(codes(P(`${ok}\n    function go() -> int {\n        return ok;\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(P(`${ok}\n    fn id(x: int) -> int { return x; }\n    function go() {\n        @n = id(ok);\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });

@@ -4,7 +4,7 @@
     fn one(x: int) -> int { return x; }
     function viaLocal() -> int {
         const k = one;
-        return k(1)
+        return k(1);
     }
     <main>
         <p>${viaLocal()}</p>

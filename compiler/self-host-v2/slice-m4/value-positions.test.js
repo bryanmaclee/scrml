@@ -122,7 +122,7 @@ describe("S449 item 3 — the write summary, as the effect rule uses it", () => 
   });
 
   test("an unresolvable call reached from a render position fails closed — " + UNPROVEN, () => {
-    const via = `    function viaLocal() -> int {\n        const k = h;\n        return k(1)\n    }`;
+    const via = `    function viaLocal() -> int {\n        const k = h;\n        return k(1);\n    }`;
     const ds = fnValueRefused(diagsOf(P(with_(via), `        <p>\${viaLocal()}</p>`)));
     expect(ds.map((d) => d.code)).toEqual([UNPROVEN]);
     expect(ds[0].message).toContain("through `viaLocal()`");

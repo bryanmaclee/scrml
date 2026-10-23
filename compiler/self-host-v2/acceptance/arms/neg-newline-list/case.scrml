@@ -1,4 +1,4 @@
-// dpa-073 F5 — until the `scrml fix` codemod migrates the corpus, a newline-separated arm list is still read.
+// dpa-073 F2 + F5 (4) — the bootstrap enforces the comma list: a newline-separated arm list is refused.
 <program>
     type LoadError:enum = { NotFound(id: string), Timeout }
     let <out:string=""/>
@@ -8,7 +8,7 @@
     }
     function go() {
         @out = load("x") !{
-            .NotFound(m) :> "nf:" + m,
+            .NotFound(m) :> "nf:" + m
             .Timeout :> "to"
         };
     }

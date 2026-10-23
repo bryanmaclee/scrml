@@ -1,4 +1,4 @@
-// dpa-073 F2 — one list, one spelling: `,` after the first arm and a newline after the second is refused.
+// dpa-073 F2 — a comma list: a `,` after the first arm and none after the second is refused (E-MATCH-ARM-SEPARATOR at the missing `,`).
 <program>
     type LoadError:enum = { NotFound(id: string), Timeout, Gone }
     let <out:string=""/>
@@ -9,7 +9,7 @@
     function f() {
         @out = load("x") !{
             .NotFound(m) :> "nf",
-            .Timeout :> "to",
+            .Timeout :> "to"
             .Gone :> "g"
         };
     }

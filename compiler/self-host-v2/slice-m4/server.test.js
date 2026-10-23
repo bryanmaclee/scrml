@@ -274,7 +274,7 @@ describe("§12.4 — E-ROUTE-002 / E-ROUTE-001 / E-ROUTE-005", () => {
   });
 
   test("E-ROUTE-001 (R3, an error): a server function calls through a parameter", () => {
-    const src = P(DB, `    function srv(k: int) -> int {\n        ${SQ}\`DELETE FROM t\`}.run();\n        return k(1)\n    }`);
+    const src = P(DB, `    function srv(k: int) -> int {\n        ${SQ}\`DELETE FROM t\`}.run();\n        return k(1);\n    }`);
     expect(codes(src)).toContain("E-ROUTE-001");
   });
 

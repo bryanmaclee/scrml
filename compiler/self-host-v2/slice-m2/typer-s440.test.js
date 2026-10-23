@@ -267,7 +267,7 @@ describe("#7 — conditions (E-COND-NOT-BOOLEAN) and presence tests", () => {
   });
   test("enforced inside an inline handler block too (JS-WAT 11: \"every rule … is enforced in those bodies too\")", () => {
     expect(inApp(CELLS, "<button onclick={ if (@n) { @b = true; } }>x</button>")).toEqual(["E-COND-NOT-BOOLEAN"]);
-    expect(inApp(CELLS, "<button onclick={ @n = @s - 1 }>x</button>")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
+    expect(inApp(CELLS, "<button onclick={ @n = @s - 1; }>x</button>")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
   });
   test("the message names the value's type and the explicit comparison", () => {
     const d = diagsIn(CELLS, "<p if=@n>x</p>");
@@ -436,9 +436,9 @@ describe("r4 (b) at runtime — a handle presence test is an absence check", () 
 // ---------------------------------------------------------------------------
 describe("#7 / #8 — `!` / `&&` / `||` take booleans only (Gotcha Q2)", () => {
   test("E-OPERATOR-OPERAND-TYPE — `!` of an int; an int under `&&`; both strings of the `||` default idiom", () => {
-    expect(inApp(CELLS + "    function f() { @b = !@n }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
-    expect(inApp(CELLS + "    function f() { @b = @b && @n }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
-    expect(inApp(CELLS + "    function f() { @s = @s || \"x\" }")).toEqual(["E-OPERATOR-OPERAND-TYPE", "E-OPERATOR-OPERAND-TYPE"]);
+    expect(inApp(CELLS + "    function f() { @b = !@n; }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
+    expect(inApp(CELLS + "    function f() { @b = @b && @n; }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
+    expect(inApp(CELLS + "    function f() { @s = @s || \"x\"; }")).toEqual(["E-OPERATOR-OPERAND-TYPE", "E-OPERATOR-OPERAND-TYPE"]);
   });
   test("E-OPERATOR-OPERAND-TYPE — a `string | not` under `!` is not a bool even when present (write `x is not`)", () => {
     expect(inApp(O + "    function f() { if (!@o.v) { @m = 1; } }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
@@ -468,25 +468,25 @@ describe("#7 / #8 — `!` / `&&` / `||` take booleans only (Gotcha Q2)", () => {
 // ---------------------------------------------------------------------------
 describe("#8 — arithmetic / relational / `+` operands (Gotcha Q1)", () => {
   test("E-OPERATOR-OPERAND-TYPE — a string under `-` / `*` / `%`, a bool under `+`, unary `-` of a string", () => {
-    expect(inApp(CELLS + "    function f() { @n = @s - 1 }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
-    expect(inApp(CELLS + "    function f() { @n = @s * 2 }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
-    expect(inApp(CELLS + "    function f() { @n = @s % 2 }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
-    expect(inApp(CELLS + "    function f() { @n = @b + 1 }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
-    expect(inApp(CELLS + "    function f() { @n = -@s }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
+    expect(inApp(CELLS + "    function f() { @n = @s - 1; }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
+    expect(inApp(CELLS + "    function f() { @n = @s * 2; }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
+    expect(inApp(CELLS + "    function f() { @n = @s % 2; }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
+    expect(inApp(CELLS + "    function f() { @n = @b + 1; }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
+    expect(inApp(CELLS + "    function f() { @n = -@s; }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
   });
   test("E-OPERATOR-OPERAND-TYPE — `string + int` (the #1 measured leak), once, at the `+`", () => {
-    const d = diagsIn(CELLS + "    function f() { @s = @s + @n }");
+    const d = diagsIn(CELLS + "    function f() { @s = @s + @n; }");
     expect(d.map((x) => x.code)).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
     expect(d[0].message).toContain("`string + int`");
   });
   test("E-OPERATOR-OPERAND-TYPE — string ordering `<` (both operands)", () => {
-    expect(inApp(CELLS + "    function f() { @b = @s < \"m\" }")).toEqual(["E-OPERATOR-OPERAND-TYPE", "E-OPERATOR-OPERAND-TYPE"]);
+    expect(inApp(CELLS + "    function f() { @b = @s < \"m\"; }")).toEqual(["E-OPERATOR-OPERAND-TYPE", "E-OPERATOR-OPERAND-TYPE"]);
   });
   test("E-OPERATOR-OPERAND-TYPE — `not` as an operand", () => {
-    expect(inApp(CELLS + "    function f() { @n = not + 1 }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
+    expect(inApp(CELLS + "    function f() { @n = not + 1; }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
   });
   test("a refused operation has no type (no second E-TYPE-031 for the same mistake)", () => {
-    expect(inApp(CELLS + "    function f() { @n = @s + 1 }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
+    expect(inApp(CELLS + "    function f() { @n = @s + 1; }")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
   });
   test("twins silent — int / number arithmetic, string + string, numeric relational, `%`", () => {
     expect(inApp(CELLS + "    function f() { @n = @n + 1;\n @r = @r * 2 + @n;\n @s = @s + \"x\";\n @b = @n < 3 && @r >= 0.5;\n @n = @n % 2;\n @n = -@n; }")).toEqual([]);
@@ -510,16 +510,16 @@ describe("#8 — arithmetic / relational / `+` operands (Gotcha Q1)", () => {
 
 describe("#8 — a `T | not` operand must be narrowed first (Gotcha Q3)", () => {
   test("E-OPERAND-NOT-NARROWED — `int | not` under `+` / `>`; `string | not` under `+`", () => {
-    expect(inApp(O + "    function f() { @m = @o.n + 1 }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    function f() { if (@o.n > 0) { @m = 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    let <t:string=\"\"/>\n    function f() { @t = @o.v + \"!\" }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { @m = @o.n + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { if (@o.n > 0) { @m = 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    let <t:string=\"\"/>\n    function f() { @t = @o.v + \"!\"; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("E-OPERAND-NOT-NARROWED — a `T | not` PARAMETER and an ANNOTATED local", () => {
-    expect(inApp("    function f(a: int | not) -> int { return a + 1 }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp("    let <m:int=0/>\n    function f() { let a: int | not = 5\n @m = a + 1 }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp("    function f(a: int | not) -> int { return a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp("    let <m:int=0/>\n    function f() { let a: int | not = 5;\n @m = a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("the message says how to narrow", () => {
-    expect(diagsIn(O + "    function f() { @m = @o.n + 1 }")[0].message).toContain("x is given");   // s460: §42.2.4's spelling
+    expect(diagsIn(O + "    function f() { @m = @o.n + 1; }")[0].message).toContain("x is given");   // s460: §42.2.4's spelling
   });
   test("narrowed — `if (x is given)`, `x is given && …`, a ternary arm, `if (x)` (a presence test)", () => {
     expect(inApp(O + "    function f() { if (@o.n is given) { @m = @o.n + 1; } }")).toEqual([]);
@@ -537,16 +537,16 @@ describe("#8 — a `T | not` operand must be narrowed first (Gotcha Q3)", () => 
     expect(inApp(O, "<p if=(@o.n is given)>${@o.n + 1}</p>")).toEqual([]);
   });
   test("NOT narrowed — the THEN branch of `x is not`; after a write of the place; outside the `if`", () => {
-    expect(inApp(O + "    function f() { if (@o.n is not) { @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    function f() { if (@o.n is given) { @o.n = not\n @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    function f() { if (@o.n is given) { @m = 1 }\n @m = @o.n + 1 }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { if (@o.n is not) { @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { if (@o.n is given) { @o.n = not;\n @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { if (@o.n is given) { @m = 1; }\n @m = @o.n + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
     expect(inApp(O, "<p if=(@o.n is given)>x</p><p>${@o.n + 1}</p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   const CLEAR = "    let <flag:bool=false/>\n    function clear() { @o = { v: not, n: not, f: not }; }\n";
   test("r2 F1a — a CALL whose callee writes the place drops the narrowing (statement, handler under `if=`, transitive)", () => {
-    expect(inApp(O + CLEAR + "    function f() { if (@o.n is given) { clear();\n @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + CLEAR, "<button if=(@o.n is given) onclick={ clear(); @m = @o.n + 1 }>x</button>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + CLEAR + "    function outer() { clear() }\n    function f() { if (@o.n is given) { outer()\n @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CLEAR + "    function f() { if (@o.n is given) { clear();\n @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CLEAR, "<button if=(@o.n is given) onclick={ clear(); @m = @o.n + 1; }>x</button>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CLEAR + "    function outer() { clear(); }\n    function f() { if (@o.n is given) { outer();\n @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("r3 N1 — the right operand of `&&` / `||` is not narrowed across a call in the LEFT operand that writes the place", () => {
     const CB = "    let <bb:bool=false/>\n    function clearB() -> bool { @o = { v: not, n: not, f: not };\n return true; }\n";
@@ -572,7 +572,7 @@ describe("#8 — a `T | not` operand must be narrowed first (Gotcha Q3)", () => 
   });
   test("r5 R1 — N3 at depth: writing the OUTER source of a nested `<each>` drops the inner row's narrowing", () => {
     const G = "    type G:struct = { let name: string, let kids: O[] }\n    <gs:G[replace]=([{ name: \"a\", kids: [{ v: \"\", n: 0, f: false }] }])/>\n    function clearGs() { @gs = [{ name: \"b\", kids: [{ v: not, n: not, f: not }] }]; }\n    function other() { @m = 2; }\n";
-    const nested = (body) => `<each in=@gs as g><each in=g.kids as y><p if=(y.n is given)><button onclick={ ${body};\n @m = y.n + 1 }>b</button></p></each></each>`;
+    const nested = (body) => `<each in=@gs as g><each in=g.kids as y><p if=(y.n is given)><button onclick={ ${body};\n @m = y.n + 1; }>b</button></p></each></each>`;
     expect(inApp(O + G, nested("clearGs()"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
     expect(inApp(O + G, nested("@gs = []"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
     // twins: a write elsewhere; the narrowed inner read with no write
@@ -583,9 +583,9 @@ describe("#8 — a `T | not` operand must be narrowed first (Gotcha Q3)", () => 
     expect(inApp(O + "    function h() { @m = 2;\n @o.v = \"x\"; }\n    function f() { if (@o.n is given) { h();\n @m = @o.n + 1; } }")).toEqual([]);
   });
   test("r2 F1b — a write in a NESTED block un-narrows after it (the if joins its paths); a local too", () => {
-    expect(inApp(O + CLEAR + "    function f() { if (@o.n is given) { if (@flag) { @o.n = not; }\n @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + CLEAR + "    function f() { let a: int | not = @o.n\n if (a is given) { if (@flag) { a = not }\n @m = a + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + CLEAR + "    function f() { let a: int | not = @o.n\n if (a is given) { a = not\n @m = a + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CLEAR + "    function f() { if (@o.n is given) { if (@flag) { @o.n = not; }\n @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CLEAR + "    function f() { let a: int | not = @o.n;\n if (a is given) { if (@flag) { a = not; }\n @m = a + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CLEAR + "    function f() { let a: int | not = @o.n;\n if (a is given) { a = not;\n @m = a + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("r2 F1b twin — a nested write that keeps the place present, or a nested block that writes nothing", () => {
     expect(inApp(O + CLEAR + "    function f() { if (@o.n is given) { if (@flag) { @o.n = 3; }\n @m = @o.n + 1; } }")).toEqual([]);
@@ -597,25 +597,25 @@ describe("#8 — a `T | not` operand must be narrowed first (Gotcha Q3)", () => 
     expect(inApp(O + "    function f() { @o.n = 5;\n @m = @o.n + 1; }")).toEqual([]);
   });
   test("r2 F3 twin — a write of `not` or of a `T | not` value does not narrow", () => {
-    expect(inApp(O + "    function f() { @o.n = not;\n @m = @o.n + 1 }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    function f(k: int | not) { @o.n = k\n @m = @o.n + 1 }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    function f() { if (@o.n is not) { @m = 0 }\n @m = @o.n + 1 }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { @o.n = not;\n @m = @o.n + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f(k: int | not) { @o.n = k;\n @m = @o.n + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { if (@o.n is not) { @m = 0; }\n @m = @o.n + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("a local joined from `not` and a value: silent where it is PROVABLY present (the write of `5` narrows it)", () => {
     expect(inApp("    let <m:int=0/>\n    function f() { let a = not;\n a = 5;\n @m = a + 1; }")).toEqual([]);
   });
   test("r2 follow-through — the joined-local carve-out is gone: a local that MAY still be `not` is reported", () => {
-    expect(inApp("    let <m:int=0/>\n    let <flag:bool=false/>\n    function f() { let a = not;\n if (@flag) { a = 5; }\n @m = a + 1 }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp("    let <m:int=0/>\n    let <flag:bool=false/>\n    function f() { let a = not;\n if (@flag) { a = 5; }\n @m = a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
     // twin: both paths leave it present
-    expect(inApp("    let <m:int=0/>\n    let <flag:bool=false/>\n    function f() { let a = not\n if (@flag) { a = 5 } else { a = 6 }\n @m = a + 1 }")).toEqual([]);
+    expect(inApp("    let <m:int=0/>\n    let <flag:bool=false/>\n    function f() { let a = not;\n if (@flag) { a = 5; } else { a = 6; }\n @m = a + 1; }")).toEqual([]);
   });
   test("r2 F2 — a local that COPIES a `T | not` (a place, a `const`, a call) carries a real `| not`: reported", () => {
-    expect(inApp(O + "    function f() { let a = @o.n;\n @m = a + 1 }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    let <t:string=\"\"/>\n    function f() { const z = @o.v\n @t = z + \"!\" }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    function g() -> int | not { return 1 }\n    function f() { let a = g()\n @m = a + 1 }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    function f() { let a = 5\n a = @o.n\n @m = a + 1 }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { let a = @o.n;\n @m = a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    let <t:string=\"\"/>\n    function f() { const z = @o.v;\n @t = z + \"!\"; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function g() -> int | not { return 1; }\n    function f() { let a = g();\n @m = a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { let a = 5;\n a = @o.n;\n @m = a + 1; }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
     // (r2 F3: `let a = @o.n; a = 5; @m = a + 1` is SILENT — the write of a present `5` narrows `a`)
-    expect(inApp(O + "    function f() { let a = @o.n\n a = 5\n @m = a + 1 }")).toEqual([]);
+    expect(inApp(O + "    function f() { let a = @o.n;\n a = 5;\n @m = a + 1; }")).toEqual([]);
   });
   test("r2 F2 twin — the copy, narrowed, is silent", () => {
     expect(inApp(O + "    function f() { let a = @o.n;\n if (a is given) { @m = a + 1; } }")).toEqual([]);
@@ -630,17 +630,17 @@ describe("#8 — a `T | not` operand must be narrowed first (Gotcha Q3)", () => 
 // ---------------------------------------------------------------------------
 describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
   test("E-INT-DIVISION — `7 / 2` into an int cell, once (no cascading E-TYPE-031)", () => {
-    const d = diagsIn(CELLS + "    function f() { @n = 7 / 2 }");
+    const d = diagsIn(CELLS + "    function f() { @n = 7 / 2; }");
     expect(d.map((x) => x.code)).toEqual(["E-INT-DIVISION"]);
     expect(d[0].message).toContain("div(a, b, .Mode)");
   });
   test("r1 F3 — one report per mistake: un-narrowed `int | not` operands of `/` are reported, and E-INT-DIVISION waits for them", () => {
-    expect(inApp(O + "    function f() { @m = @o.n / @o.n }")).toEqual(["E-OPERAND-NOT-NARROWED", "E-OPERAND-NOT-NARROWED"]);
-    expect(inApp(O + "    function f() { if (@o.n is given) { @m = @o.n / @o.n } }")).toEqual(["E-INT-DIVISION"]);
+    expect(inApp(O + "    function f() { @m = @o.n / @o.n; }")).toEqual(["E-OPERAND-NOT-NARROWED", "E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + "    function f() { if (@o.n is given) { @m = @o.n / @o.n; } }")).toEqual(["E-INT-DIVISION"]);
   });
   test("E-INT-DIVISION — `/` on two ints in ANY position (into a number cell, a `-> int` return)", () => {
-    expect(inApp(CELLS + "    function f() { @r = @n / 2 }")).toEqual(["E-INT-DIVISION"]);
-    expect(inApp("    function half(k: int) -> int { return k / 2 }")).toEqual(["E-INT-DIVISION"]);
+    expect(inApp(CELLS + "    function f() { @r = @n / 2; }")).toEqual(["E-INT-DIVISION"]);
+    expect(inApp("    function half(k: int) -> int { return k / 2; }")).toEqual(["E-INT-DIVISION"]);
   });
   test("E-TYPE-031 — a `number` into an `int` (a cell write, a non-integer literal write); the message says `int` is enforced", () => {
     const d = diagsIn(CELLS + "    function f() { @n = @r; }");
@@ -656,7 +656,7 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
   test("r2 F4 — a hex / binary / octal literal is an INTEGER literal (`0xE`'s `E` is a digit, not an exponent)", () => {
     // (the slice lexer scans hex only — `0b…` / `0o…` are E-PARSE-TRAILING there; the classifier covers them anyway)
     expect(inApp("    let <q:int=0xE/>\n    let <p:int=0XFE/>\n    function f() { @q = 0xFE; }")).toEqual([]);
-    expect(inApp(CELLS + "    function f() { @r = 0xFE / 2 }")).toEqual(["E-INT-DIVISION"]);
+    expect(inApp(CELLS + "    function f() { @r = 0xFE / 2; }")).toEqual(["E-INT-DIVISION"]);
     // twin: a real exponent stays a non-integer literal (`1e3` into `int` is bryan's open question — unchanged)
     expect(inApp("    let <q:int=1e3/>")).toEqual(["E-TYPE-031"]);
   });
@@ -707,12 +707,12 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp(O + S + "    function f() { @oo = @q.e; }")).toEqual(["E-TYPE-031"]);
     expect(inApp(O + S + "    function f(s: string | not) { @t = s; }")).toEqual(["E-TYPE-031"]);
     // every position that takes a `T` — the return / argument / non-literal-initializer positions too
-    expect(inApp(O + S + "    function h() -> string { return @o.v }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(O + S + "    function g(z: string) { }\n    function f() { g(@o.v) }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(O + S + "    function f() { let z: string = @o.v }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + S + "    function h() -> string { return @o.v; }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + S + "    function g(z: string) { }\n    function f() { g(@o.v); }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + S + "    function f() { let z: string = @o.v; }")).toEqual(["E-TYPE-031"]);
     // FLIPPED (r7 A) — prov=pa-ruled:§7.5.1 widening, positions 3-4, measured-zero corpus (s442 r7 A). Was: silent ("positions 3-5 stay unchecked for non-int types").
-    expect(inApp(O + S + "    function h() -> string { return 5 }\n    function g(z: string) { }\n    function f() { g(5) }")).toEqual(["E-TYPE-031", "E-TYPE-031"]);
-    const d = run([LIB(), app(O + S + "    function f() { @t = @o.v }", "<p>x</p>")]).diags;
+    expect(inApp(O + S + "    function h() -> string { return 5; }\n    function g(z: string) { }\n    function f() { g(5); }")).toEqual(["E-TYPE-031", "E-TYPE-031"]);
+    const d = run([LIB(), app(O + S + "    function f() { @t = @o.v; }", "<p>x</p>")]).diags;
     expect(d[0].message).toContain("narrow it first");
   });
   test("r6 — a sequence ELEMENT that may be `not` into a non-optional element type (`[@o.n]` into `int[]`)", () => {
@@ -751,8 +751,8 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp(O + P + "    function g(z: P) { }\n    function f() { g(5); }")).toEqual(["E-TYPE-031"]);
     expect(inApp(O + P + "    function g(z: Openness) { }\n    function f() { g(\"x\"); }")).toEqual(["E-TYPE-031"]);
     expect(inApp(O + P + "    function h() -> bool { return \"s\"; }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(O + P + "    function h() -> P { return @m }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(O + P + "    function h() -> string[] { return [1] }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + P + "    function h() -> P { return @m; }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + P + "    function h() -> string[] { return [1]; }")).toEqual(["E-TYPE-031"]);
   });
   test("r7 A twins — matching types; an int into a `number` parameter / return; an unknown value is never checked", () => {
     const P = "    type P:struct = { x: int }\n    let <pp:P=({ x: 1 })/>\n";
@@ -805,7 +805,7 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp("    function f() { let a: int[bogus] = [\"s\"]; }")).toEqual(["E-GRANT-UNKNOWN", "E-TYPE-031"]);
     expect(inApp("    type P:struct = { a: int[bogus] }\n    function f() { let v: P = { a: [\"s\"] }; }")).toEqual(["E-GRANT-UNKNOWN", "E-TYPE-031"]);
     // twin: an unknown ELEMENT name still makes the whole type unresolved (grant error kept, no cascade)
-    expect(inApp("    function g(k: Nope[bogus]) { }\n    function f() { g(1) }")).toEqual(["E-TYPE-UNKNOWN", "E-GRANT-UNKNOWN"]);
+    expect(inApp("    function g(k: Nope[bogus]) { }\n    function f() { g(1); }")).toEqual(["E-TYPE-UNKNOWN", "E-GRANT-UNKNOWN"]);
   });
   test("r7 A guard (ii) — a callee declared in two files (mis-linked, already refused) is untrusted: no argument / return check", () => {
     const a = { path: "lib/a.scrml", src: "${ function helper(k: int) -> int { return k; }\n export function useA() -> int { return helper(1); } }\n" };

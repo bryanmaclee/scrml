@@ -110,7 +110,7 @@ describe("rule 7 — outside the set is E-DECL-TYPE-NOT-INFERABLE", () => {
   // s469 #1471 delta review HIGH-B: a function that returns on some paths and falls off on another is
   // refused where it is declared (E-BOOTSTRAP-UNSUPPORTED) — that report owns it
   test("a call that does not return on every path — the callee is refused (its fall-off would be `undefined`)", () => {
-    expect(codes(S + "    function half(x: int) { if (x > 0) { return 1 } }\n    <r=(half(2))/>")).toContain("E-RETURN-INCOMPLETE");
+    expect(codes(S + "    function half(x: int) { if (x > 0) { return 1; } }\n    <r=(half(2))/>")).toContain("E-RETURN-INCOMPLETE");
   });
   test("`(!0)` is no longer an `int` literal (dd D3) — the typer refuses the `!`, and that report owns it (no cascade)", () => {
     expect(codes("    <r=(!0)/>")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
@@ -258,7 +258,7 @@ describe("rule 10 — an unproven annotation is an error", () => {
     expect(codes(REC + "    <r:bool=(rec(1) || false)/>")).toEqual(["E-DECL-TYPE-UNPROVEN"]);
     expect(codes("    let <a:bool=true/>\n    function g() { return @a && false; }\n    <r=(g())/>\n    <q=(@r ? 1 : 2)/>")).toEqual([]);
     // a provably non-bool operand: the typer's E-OPERATOR-OPERAND-TYPE owns it (no second report)
-    expect(codes("    let <n:int=1/>\n    function g() { return @n || 2 }\n    <r:int=(g())/>")).toEqual(["E-OPERATOR-OPERAND-TYPE", "E-OPERATOR-OPERAND-TYPE"]);
+    expect(codes("    let <n:int=1/>\n    function g() { return @n || 2; }\n    <r:int=(g())/>")).toEqual(["E-OPERATOR-OPERAND-TYPE", "E-OPERATOR-OPERAND-TYPE"]);
   });
   test("fix round 2, N2 — an `as=` handle resolves in its OWNER's scope (the program's), never another declaration's", () => {
     const pre = "<chip:struct>\n    let <label:int=7/>\n</> renders <p>${label}</p>\n<pane:struct>\n    let <label:string=\"c\"/>\n</> renders <div><chip as=w/></div>\n";

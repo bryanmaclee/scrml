@@ -127,7 +127,7 @@ describe("L — the slot's extent: one reader, refused where JavaScript could re
     expect(res.tally["e2e-same"]).toBeGreaterThan(200);
   });
   test("judge: a scrml form acorn's expression reader refuses is bounded by its tokens, as here", () => {
-    const j = judge(mods, "`${ match n { .A :> \"}\" .B :> \"b\" } }`");
+    const j = judge(mods, "`${ match n { .A :> \"}\", .B :> \"b\" } }`");
     expect(j.verdict).toBe("scrml-content");
     expect(j.lex.slots).toEqual(j.tok.slots);
   });
@@ -319,10 +319,10 @@ describe("BACKSTOP — a Recovered node never reaches the printer when the file 
   };
   const D = "    type P:struct = { let x: int }\n    let <n:int=0/>\n    let <p:P=({ x: 1 })/>\n";
   for (const [where, body] of [
-    ["a handler's write target", "    <main>\n        <button onclick={ ZZZ = 1 }>b</button>\n    </main>"],
-    ["a function's write target", "    function f() {\n        ZZZ = 1\n    }\n    <main>\n        <p>x</p>\n    </main>"],
-    ["a field write's object", "    function f() {\n        ZZZ.x = 1\n    }\n    <main>\n        <p>x</p>\n    </main>"],
-    ["reset's argument", "    function f() {\n        reset(ZZZ)\n    }\n    <main>\n        <p>x</p>\n    </main>"],
+    ["a handler's write target", "    <main>\n        <button onclick={ ZZZ = 1; }>b</button>\n    </main>"],
+    ["a function's write target", "    function f() {\n        ZZZ = 1;\n    }\n    <main>\n        <p>x</p>\n    </main>"],
+    ["a field write's object", "    function f() {\n        ZZZ.x = 1;\n    }\n    <main>\n        <p>x</p>\n    </main>"],
+    ["reset's argument", "    function f() {\n        reset(ZZZ);\n    }\n    <main>\n        <p>x</p>\n    </main>"],
   ]) {
     test(`F1 — a placeholder as ${where} is E-INTERNAL-RECOVERED-UNREPORTED; nothing lowers`, () => {
       const forged = forgeAt("<program>\n" + D + body + "\n</program>\n");
@@ -348,7 +348,7 @@ describe("BACKSTOP — a Recovered node never reaches the printer when the file 
 
 describe("found by the end-to-end fuzz — a call of a value is never silently `not`", () => {
   test("`total()` on a `number` parameter is refused (it printed `null === 1`)", () => {
-    const src = "<program>\n    fn f(total: number) -> bool {\n        return total() == 1\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
+    const src = "<program>\n    fn f(total: number) -> bool {\n        return total() == 1;\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
     const d = diag(src, "E-BOOTSTRAP-UNSUPPORTED");
     expect(d.message).toContain("only a declared scrml function is callable");
     expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);

@@ -264,8 +264,8 @@ describe("§19.4.3 ruling 1a — E-ERROR-012: in a value position every arm yiel
 
   // r2 MED-2 — a value on EVERY path; falling off the end of the body is no value
   test("r2 MED-2: a callee that returns a value on only SOME paths yields nothing there — E-ERROR-012", () => {
-    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q"; }\n        @n = 4\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() };\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469 (bryan: Always explicit): h's incomplete returns are refused too
-    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q" }\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() }\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469 (bryan: Always explicit): h's incomplete returns are refused too
+    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q"; }\n        @n = 4;\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() };\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469 (bryan: Always explicit): h's incomplete returns are refused too
+    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q"; }\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() };\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469 (bryan: Always explicit): h's incomplete returns are refused too
   });
 
   test("r2 MED-2 near-miss: every path returns a value (a final `return`, or an if / else both returning)", () => {
@@ -557,8 +557,8 @@ describe("S452 ruling c — `!{}` arms take the `match` arm grammar; the leading
     const one = run(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ | .Timeout => "t", | _ :> "?" };\n    }`, ["go"]));
     expect(one.diags.map((d) => d.code).sort()).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY", "W-MATCH-ARROW-LEGACY"]);
     expect(one.core == null).toBe(false);
-    const oneC = clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ .Timeout :> "t" _ :> "?" }\n    }`, ["go"]));
-    expect(strip(legacyOk(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ | .Timeout :> "t" | _ :> "?" }\n    }`, ["go"]), 2).core)).toBe(strip(oneC.core));
+    const oneC = clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ .Timeout :> "t", _ :> "?" };\n    }`, ["go"]));
+    expect(strip(legacyOk(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ | .Timeout :> "t", | _ :> "?" };\n    }`, ["go"]), 2).core)).toBe(strip(oneC.core));
   });
 
   test("a program whose every handler arm is `|`-led still produces a Core (Info never closes the gate) and runs", async () => {
@@ -684,8 +684,8 @@ describe("fix round r3 — fail-closed tx scan, every-path yield, no echoed conn
   });
 
   test("r3 MED-B: a bare `return` at ANY depth means the callee may yield no value — E-ERROR-012", () => {
-    expect(codes(go(`    function h() {\n        if (@n == 1) { return; }\n        return "a"\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() };\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469: a bare `return` beside a value return
-    expect(codes(go(`    function h() {\n        load("x") !{ _ :> { return } }\n        return "a"\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() }\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469: a bare `return` beside a value return
+    expect(codes(go(`    function h() {\n        if (@n == 1) { return; }\n        return "a";\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() };\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469: a bare `return` beside a value return
+    expect(codes(go(`    function h() {\n        load("x") !{ _ :> { return; } };\n        return "a";\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() };\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469: a bare `return` beside a value return
   });
 
   test("r3 LOW-C: the first unconditional `return <value>` decides (what follows is dead)", () => {

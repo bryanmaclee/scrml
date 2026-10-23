@@ -173,14 +173,14 @@ describe("S460 — `x is given` / `x is not`: the explicit pair (parsed, typed `
     expect(codes(O, "<p if=(@o.v is given)>${@o.v + \"!\"}</p>")).toEqual([]);
   });
   test("twins — no narrowing where the test does not prove presence", () => {
-    expect(codes(O + "    function f() { if (@o.n is not) { @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(codes(O + "    function f() { if (@o.n is given || @b) { @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(codes(O + "    function f() { if (@o.n is not) { @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(codes(O + "    function f() { if (@o.n is given || @b) { @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("a write drops the narrowing — directly, and inside a NESTED block (the join, r2 F1 / F3)", () => {
-    expect(codes(O + "    function f() { if (@o.n is given) { @o = { v: not, n: not, f: not };\n @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(codes(O + "    function f() { if (@o.n is given) { if (@b) { @o = { v: not, n: not, f: not } }\n @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(codes(O + "    function f() { if (@o.n is given) { @o = { v: not, n: not, f: not };\n @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(codes(O + "    function f() { if (@o.n is given) { if (@b) { @o = { v: not, n: not, f: not }; }\n @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
     // twin: a nested block that writes something else keeps it
-    expect(codes(O + "    function f() { if (@o.n is given) { if (@b) { @m = 2 }\n @m = @o.n + 1 } }")).toEqual([]);
+    expect(codes(O + "    function f() { if (@o.n is given) { if (@b) { @m = 2; }\n @m = @o.n + 1; } }")).toEqual([]);
   });
   test("a newline before `is` does not continue the line (§7.2.2)", () => {
     expect(codes(O + "    function f() { const q: bool = @o.n;\n        is; given }").some((c) => c.startsWith("E-PARSE-"))).toBe(true);

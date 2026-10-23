@@ -1,10 +1,17 @@
 // sources.test.js — the slice-M4 sources ARE the SPEC §66.19 code blocks,
 // verbatim (drift guard), each compared with the blocks of ITS OWN section.
+// s469 (dpa-073 F1 / F2): verbatim MODULO the terminators — each source is its SPEC
+// block with `;` and arm `,` written in (`terminated`, slice-m2/harness.js); the SPEC
+// blocks' own migration is owed (dpa-073 F5 step 3).
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeAll } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { readM4 } from "./harness.js";
+import { readM4, loadM2 } from "./harness.js";
+import { terminated } from "../slice-m2/harness.js";
+
+let mods;
+beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
 
 const lf = (t) => t.replace(/\r\n/g, "\n");
 const SPEC = lf(readFileSync(join(import.meta.dir, "..", "..", "SPEC.md"), "utf8"));
@@ -16,7 +23,7 @@ function sectionBlocks(num) {
   const rest = SPEC.slice(head + 1);
   const next = rest.slice(1).search(/\n#{1,4} /);
   const body = next < 0 ? rest : rest.slice(0, next + 1);
-  return [...body.matchAll(/```scrml\n([\s\S]*?)```/g)].map((m) => m[1]);
+  return [...body.matchAll(/```scrml\n([\s\S]*?)```/g)].map((m) => terminated(mods, m[1]));
 }
 
 describe("the §66.19 sources are the SPEC's code blocks, verbatim (drift guard)", () => {

@@ -95,7 +95,7 @@ describe("the four heads — statements, compiled and run", () => {
   test("a forever loop with no `break` ends its block: no fall-off is reported after it", () => {
     expect(fnCodes(`        let n = 0;\n        for {\n            n = n + 1;\n            if (n > 3) { return n; }\n        }`)).toEqual([]);
     // with a `break` it may complete: the missing return is reported
-    expect(fnCodes(`        let n = 0;\n        for {\n            n = n + 1;\n            if (n > 3) { break }\n        }`)).toEqual(["E-TYPE-043"]);
+    expect(fnCodes(`        let n = 0;\n        for {\n            n = n + 1;\n            if (n > 3) { break; }\n        }`)).toEqual(["E-TYPE-043"]);
   });
   test("a string iterates by code point (runtime)", async () => {
     const src = fnProg(`        let n = 0;\n        for (ch of "a😀b") { n = n + 1; }\n        return n;`);
@@ -274,7 +274,7 @@ describe("review fixes (s469-boot-loops-1 adversarial review)", () => {
     expect(codes(fnProg(`        for (true q) { }\n        return 1;`))).toEqual(["E-PARSE-EXPECTED"]);
   });
   test("HIGH 1: node ids are not reused after the head's error (no two expression nodes share an id)", () => {
-    const f = mods.parse.parseFile("t.scrml", fnProg(`        let c = 0\n        for (c < 3 c) { c = c + 1 }\n        return c`), 0);
+    const f = mods.parse.parseFile("t.scrml", fnProg(`        let c = 0;\n        for (c < 3 c) { c = c + 1; }\n        return c`), 0);
     const ids = [];
     const walk = (x) => {
       if (x && typeof x === "object") {

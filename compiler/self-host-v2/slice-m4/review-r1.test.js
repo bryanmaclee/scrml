@@ -42,14 +42,14 @@ describe("F1 — a sequence shape / edit call on a LOCAL is never deleted", () =
     expect(rows().length).toBe(2);                              // the cell is untouched: the local holds the new value
   });
   test("a spread on a parameter: refused", () => {
-    expect(codes(withFn(`function lp(s: Entry[free, append]) -> int {\n s = [...s, ${E}]\n return s.length\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(withFn(`function lp(s: Entry[free, append]) -> int {\n s = [...s, ${E}];\n return s.length;\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
   test("`s.push(e)` / `s.shift()` / `s[0].f = v` on a local: refused (a diagnostic each), not dropped", () => {
     // s469-boot-strings-1: JavaScript's `push` is refused by NAME before anything else (§66.12.6 rule 3)
     expect(codes(withFn(`function lp() {\n let s = @audit;\n s.push(${E});\n }`))).toEqual(["E-TAPE-JS-METHOD"]);
-    expect(codes(withFn(`function lp() {\n let s = @audit\n s.append(${E})\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
-    expect(codes(withFn(`function lp() {\n let s = @audit\n s.shift()\n }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(withFn(`function lp() {\n let s = @audit\n s[0].action = "x"\n }`)).length).toBeGreaterThan(0);
+    expect(codes(withFn(`function lp() {\n let s = @audit;\n s.append(${E});\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(withFn(`function lp() {\n let s = @audit;\n s.shift();\n }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(withFn(`function lp() {\n let s = @audit;\n s[0].action = "x";\n }`)).length).toBeGreaterThan(0);
   });
 });
 

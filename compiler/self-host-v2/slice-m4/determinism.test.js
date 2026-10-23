@@ -256,8 +256,8 @@ describe("link.scrml — the canonical order's parts", () => {
 
   test("an import cycle is broken at the first file in path order — the same for every listing", () => {
     const cyc = [
-      { path: "a.scrml", src: '${ import { B } from "./b.scrml"\n export type A:enum = { X } }\n' },
-      { path: "b.scrml", src: '${ import { A } from "./a.scrml"\n export type B:enum = { Y } }\n' },
+      { path: "a.scrml", src: '${ import { B } from "./b.scrml";\n export type A:enum = { X } }\n' },
+      { path: "b.scrml", src: '${ import { A } from "./a.scrml";\n export type B:enum = { Y } }\n' },
       { path: "main.scrml", src: "<program>\n</program>\n" },
     ];
     const orders = permutations(cyc).map((p) => mods.link.parseProgram(p, "main.scrml").files.map((f) => f.path));

@@ -861,6 +861,7 @@ ${
 
     fn parseArmBlock(tp: TP) -> RArmBlock {
         const start: int = cur(tp).start
+        const b0: int = errorCount(tp.diags)
         let t: TP = expectP(tp, "{")
         let stmts: AStmt[] = []
         let lifted = false
@@ -869,7 +870,6 @@ ${
             let done = false
             if (isWord(t, "lift")) {
                 const kw: PTok = cur(t)
-                const ld0: int = errorCount(t.diags)
                 const v: RExpr = parseAssign(adv(t))
                 let t2: TP = v.tp
                 if (isP(t2, ";")) t2 = adv(t2)
@@ -880,7 +880,7 @@ ${
                     // s469 — `lift <expr>` is a statement: it takes its `;` (dpa-073 F3 (i), F6)
                     if (isP(t, ";")) {
                         t = adv(t)
-                    } else if (errorCount(t.diags) == ld0) {
+                    } else if (errorCount(t.diags) == b0) {
                         t = missingSemi(t)
                     }
                     lifted = true
@@ -892,7 +892,7 @@ ${
                 done = true
             }
             if (!done) {
-                const r: RStmt = parseTermStmt(t)
+                const r: RStmt = parseTermStmt(t, b0)
                 stmts = stmts.concat([r.s])
                 t = r.tp
                 if (t.i == before) t = adv(t)
@@ -1648,6 +1648,7 @@ ${
     // `{ stmt* }`
     export fn parseBlock(tp: TP) -> RBlock {
         const start: int = cur(tp).start
+        const b0: int = errorCount(tp.diags)
         let t: TP = expectP(tp, "{")
         let stmts: AStmt[] = []
         while (!isP(t, "}") && !atEnd(t)) {
@@ -1656,7 +1657,7 @@ ${
                 // an empty statement (a `;` after a block-like statement, `;;`)
                 t = adv(t)
             } else {
-                const r: RStmt = parseTermStmt(t)
+                const r: RStmt = parseTermStmt(t, b0)
                 stmts = stmts.concat([r.s])
                 t = r.tp
             }
@@ -1675,16 +1676,17 @@ ${
     // `defer { … }`. A statement with no `;` after it is
     // E-STMT-MISSING-SEMICOLON ("Expected `;` to end the statement", the
     // dpa-073 F6 code), its span the empty span at the statement's end — where
-    // the `;` goes. A statement that already reported an error is not also
-    // reported for its terminator. (impl#1 keeps reading newline-terminated
-    // statements — a carried divergence, dpa-073 F5.)
-    fn parseTermStmt(tp: TP) -> RStmt {
-        const d0: int = errorCount(tp.diags)
+    // the `;` goes. Cascade guard: once a block has reported an error (`d0` is
+    // its error count when it opened), its later statements are not also
+    // reported for their terminators — a broken expression can swallow the
+    // block's `}` and run on into what follows. (impl#1 keeps reading
+    // newline-terminated statements — a carried divergence, dpa-073 F5.)
+    fn parseTermStmt(tp: TP, d0: int) -> RStmt {
         const r: RStmt = parseStmt(tp)
         return { s: r.s, tp: termAfter(r.tp, r.s, d0) }
     }
 
-    // After statement `s` (parsed from a TP whose error count was `d0`): its `;`.
+    // After statement `s` (the enclosing block's error count was `d0`): its `;`.
     fn termAfter(tp: TP, s: AStmt, d0: int) -> TP {
         if (isP(tp, ";")) return adv(tp)
         if (!needsSemi(s)) return tp
@@ -2517,7 +2519,7 @@ ${
     fn parseBlockOrStmt(tp: TP) -> RBlock {
         if (isP(tp, "{")) return parseBlock(tp)
         const start: int = cur(tp).start
-        const s: RStmt = parseTermStmt(tp)
+        const s: RStmt = parseTermStmt(tp, errorCount(tp.diags))
         const b: ABlock = { nid: s.tp.nid, span: spanFrom(s.tp, start), stmts: [bareDefer(s.s)] }
         return { b: b, tp: bumpId(s.tp) }
     }
@@ -2587,7 +2589,7 @@ ${
         }
         const arrayLead: boolean = isP(t, "[")
         const bodyStart: int = cur(t).start
-        const r: RStmt = parseTermStmt(t)
+        const r: RStmt = parseTermStmt(t, errorCount(t.diags))
         const b: ABlock = { nid: r.tp.nid, span: spanFrom(r.tp, bodyStart), stmts: [r.s] }
         return mkS(bumpId(r.tp), start, AStmtK.Defer(b, arrayLead, false))
     }

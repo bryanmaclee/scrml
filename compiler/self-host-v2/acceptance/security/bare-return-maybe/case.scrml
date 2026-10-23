@@ -4,7 +4,7 @@
     let <right:string=""/>
     function look(pw: string) -> string | not {
         if (pw != "hunter2") return;
-        return "user"
+        return "user";
     }
     function attempt(pw: string) -> string {
         if (look(pw) is not) return "denied";

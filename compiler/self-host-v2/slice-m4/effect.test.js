@@ -435,13 +435,13 @@ describe("§6.7.4 rule 4 — E-EFFECT-WRITE-UNPROVEN (fails closed)", () => {
   const D = `    let <query:string=""/>\n${PING}`;
 
   test("a call through a local holding a function value — the compiler cannot resolve it", () => {
-    const ds = fnValueRefused(diagsOf(P(`${D}\n    <effect deps=[@query]>\${\n        const g = ping;\n        g()\n    }</>`, "")));
+    const ds = fnValueRefused(diagsOf(P(`${D}\n    <effect deps=[@query]>\${\n        const g = ping;\n        g();\n    }</>`, "")));
     expect(ds.map((d) => d.code)).toEqual(["E-EFFECT-WRITE-UNPROVEN"]);
     expect(ds[0].message).toMatch(/`g\(…\)` calls through `g`.*fails closed/);
   });
 
   test("…reached through a called function: the message names the chain", () => {
-    const ds = fnValueRefused(diagsOf(P(`${D}\n    function viaLocal() {\n        const g = ping;\n        g();\n    }\n    <effect deps=[@query]>\${ viaLocal() }</>`, "")));
+    const ds = fnValueRefused(diagsOf(P(`${D}\n    function viaLocal() {\n        const g = ping;\n        g();\n    }\n    <effect deps=[@query]>\${ viaLocal(); }</>`, "")));
     expect(ds.map((d) => d.code)).toEqual(["E-EFFECT-WRITE-UNPROVEN"]);
     expect(ds[0].message).toContain("through `viaLocal()`");
   });

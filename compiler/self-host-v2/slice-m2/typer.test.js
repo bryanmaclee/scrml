@@ -12,7 +12,7 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadM2 } from "./harness.js";
+import { loadM2, terminated } from "./harness.js";
 import { frontEnd, readSlice, compileProgram, PROGRAMS } from "./lowered.js";
 
 let mods;
@@ -330,7 +330,8 @@ describe("the §66.19 programs and the M2 fixtures — no typer / scope code; ev
     const sec = spec.slice(spec.indexOf("### 66.19 Worked programs"), spec.indexOf("### 66.20 Diagnostics"));
     const blocks = [...sec.matchAll(/```scrml\n([\s\S]*?)```/g)].map((m) => m[1]);
     expect(blocks.length).toBe(BASE_66_19.length);
-    const got = blocks.map((b) => codes([{ path: "p.scrml", src: b }]).sort());
+    // s469: each block with its dpa-073 terminators written in (`terminated`) — the SPEC's own migration is owed
+    const got = blocks.map((b) => codes([{ path: "p.scrml", src: terminated(mods, b) }]).sort());
     expect(got).toEqual(BASE_66_19);
   });
 });
@@ -484,7 +485,7 @@ describe("G — `<each in=>` literals, row-scoped handles, exclusive arms", () =
 // day nested functions parse. The let / const twin still fires.
 describe("§7.3.3 ruling B1 — a nested function over a parameter", () => {
   test("no E-SCOPE-REDECLARE — `function f(x: int) { function x() { } }`", () => {
-    expect(inApp("    function f(x: int) { function; x(); { } }")).not.toContain("E-SCOPE-REDECLARE");
+    expect(inApp("    function f(x: int) { function; x(); { }; }")).not.toContain("E-SCOPE-REDECLARE");
   });
   test("twin fires — `let x` / `const x` over parameter `x`", () => {
     expect(inApp("    function f(x: int) { let x = 1; }")).toEqual(["E-SCOPE-REDECLARE"]);
@@ -610,7 +611,7 @@ describe("R2-7 / R2-8 — the fixpoint bound; compound assignment", () => {
   const chain = (n, cell) => {
     let s = "    let <x:" + cell + "/>\n    function f() {";
     for (let i = 1; i <= n; i++) s += " let a" + i + " = \"s\";\n";
-    for (let i = 1; i < n; i++) s += " a" + i + " = a" + (i + 1) + "\n";
+    for (let i = 1; i < n; i++) s += " a" + i + " = a" + (i + 1) + ";\n";
     return s + " a" + n + " = not;\n @x = a1; }";
   };
   test("E-TYPE-031 — a chain of 8 rebound locals settles (`string | not` reaches `a1`) into an int cell", () => {
@@ -621,11 +622,11 @@ describe("R2-7 / R2-8 — the fixpoint bound; compound assignment", () => {
     expect(inApp(chain(8, "string=\"\""))).toEqual(["E-TYPE-031"]);
   });
   test("silent — a chain of 8 whose far end is widened to Unknown (`a8 = 1`): `a1` must SETTLE to Unknown, not stop at `string`", () => {
-    const src = chain(8, "int=0").replace(" a8 = not\n", " a8 = 1;\n");
+    const src = chain(8, "int=0").replace(" a8 = not;\n", " a8 = 1;\n");
     expect(inApp(src)).toEqual([]);
   });
   test("`@s += 1` on a string cell — only the unsupported-syntax report (recovered, not typed as `@s = 1`)", () => {
-    expect(inApp("    let <s:string=\"\"/>\n    function f() { @s += 1 }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(inApp("    let <s:string=\"\"/>\n    function f() { @s += 1; }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("twin — `@s = @s + \"1\"` is silent", () => {
     expect(inApp("    let <s:string=\"\"/>\n    function f() { @s = @s + \"1\"; }")).toEqual([]);

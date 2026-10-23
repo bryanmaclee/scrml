@@ -22,7 +22,7 @@ return {
   forBody: { body: `        for (const x of [1, 2]) {\n            if (!check(pass, row.pw)) return "REJECTED";\n        }\n        return "WELCOME"` },
   elseIf: { body: `        if (name == "") {\n            return "REJECTED";\n        } else if (!check(pass, row.pw)) {\n            return "REJECTED";\n        }\n        return "WELCOME";` },
   template: { body: `        const s: string = "\${check(pass, row.pw)}";\n${R('s != "true"')}` },
-  concat: { body: `        const s: string = "v" + check(pass, row.pw)\n${R('s != "vtrue"')}` },
+  concat: { body: `        const s: string = "v" + check(pass, row.pw);\n${R('s != "vtrue"')}` },
   matchScrut: { body: `        return match check(pass, row.pw) {\n            true :> "WELCOME",\n            false :> "REJECTED"\n        }` },
   matchArm: { body: `        const v: string = match name {\n            "bob" :> check(pass, row.pw) ? "WELCOME" : "REJECTED",\n            _ :> "REJECTED"\n        };\n        return v;` },
   structField: { top: `    type B:struct = { ok: boolean }`, body: `        const b: B = { ok: check(pass, row.pw) };\n${R("!b.ok")}` },
@@ -44,7 +44,7 @@ return {
   bareQueryNoHandler: { top: `    function c2(p: string, h: string)! Denied {\n        const r: Ok = ${SQ}\`SELECT CASE WHEN \${p} = \${h} THEN 1 ELSE 0 END AS ok\`}.get();\n        return r.ok == 1;\n    }`, body: `        const ok: boolean = c2(pass, row.pw) !{ _ :> false };\n${R("!ok")}` },
   bareQueryNonFailable: { top: `    function c3(p: string, h: string) -> boolean {\n        const r: Ok = ${SQ}\`SELECT CASE WHEN \${p} = \${h} THEN 1 ELSE 0 END AS ok\`}.get();\n        return r.ok == 1;\n    }`, body: R("!c3(pass, row.pw)") },
   isGivenPos: { top: `    function look(p: string, h: string) -> Ok | not {\n        const r: Ok = ${SQ}\`SELECT 1 AS ok WHERE \${p} = \${h}\`}.get() !{ _ :> { return not; } };\n        return r;\n    }`, body: R("look(pass, row.pw) is not") },
-  nestedFnDecl: { body: `        function; inner(p: string, h: string) -> boolean; { return check(p, h); }\n${R("!inner(pass, row.pw)")}` },
+  nestedFnDecl: { body: `        function inner(p: string, h: string) -> boolean { return check(p, h) }\n${R("!inner(pass, row.pw)")}` },
   arithmetic: { top: `    function cnt(p: string, h: string) -> int {\n        const r: Ok = ${SQ}\`SELECT CASE WHEN \${p} = \${h} THEN 1 ELSE 0 END AS ok\`}.get() !{ _ :> { return 0; } };\n        return r.ok;\n    }`, body: R("cnt(pass, row.pw) * 2 - 1 < 0") },
   unusedResult: { body: `        check(pass, row.pw);\n${R("!check(pass, row.pw)")}` },
   returnCheckDirect: { top: ``, body: `        if (check(pass, row.pw)) return "WELCOME";\n        return "REJECTED"` },
@@ -130,15 +130,15 @@ return {
   retEnum: { top: EFIND(RN), body: ENUM },
   // #1471 delta review: HIGH-A a `!` function's success path falling off; HIGH-B an unannotated
   // function falling off, and `== not` (E-EQ-002); MED-C a bare `return` in a `-> T` function
-  failableFallOff: { top: `    function role(p: string, h: string)! Denied {\n        if (p == h) return "user"\n    }`, body: `        return match role(pass, row.pw) {\n            .Ok(v) :> "WELCOME",\n            _ :> "REJECTED"\n        }` },
+  failableFallOff: { top: `    function role(p: string, h: string)! Denied {\n        if (p == h) return "user";\n    }`, body: `        return match role(pass, row.pw) {\n            .Ok(v) :> "WELCOME",\n            _ :> "REJECTED"\n        }` },
   failableFails: { top: `    function role(p: string, h: string)! Denied {\n        if (p == h) return "user";\n        fail .Bad;\n    }`, body: `        return match role(pass, row.pw) {\n            .Ok(v) :> "WELCOME",\n            _ :> "REJECTED"\n        }` },
-  unannotatedFallOff: { top: `    function look(p: string, h: string) {\n        if (p == h) return "user"\n    }`, body: `        if (look(pass, row.pw) is not) return "REJECTED";\n        return "WELCOME"` },
+  unannotatedFallOff: { top: `    function look(p: string, h: string) {\n        if (p == h) return "user";\n    }`, body: `        if (look(pass, row.pw) is not) return "REJECTED";\n        return "WELCOME"` },
   eqNot: { top: `    function look(p: string, h: string) -> string | not {\n        if (p == h) return "user";\n        return not;\n    }`, body: `        if (look(pass, row.pw) == not) return "REJECTED";\n        return "WELCOME"` },
   // #1471 round 2 (bryan: "Always explicit"): HIGH-1 a bare `return` in a `!` function is a
   // success with no value; a bare `return` in `-> T | not` is not `not`; MED-2 a no-value
   // callee's result read as a value (`!{}` initializer, `.Ok(v)`, a plain initializer)
-  bareReturnFailable: { top: `    function role(p: string, h: string)! Denied {\n        if (p != h) return;\n        return "user"\n    }`, body: `        return match role(pass, row.pw) {\n            .Ok(v) :> "WELCOME",\n            _ :> "REJECTED"\n        }` },
-  bareReturnMaybe: { top: `    function look(p: string, h: string) -> string | not {\n        if (p != h) return;\n        return "user"\n    }`, body: `        if (look(pass, row.pw) is not) return "REJECTED";\n        return "WELCOME"` },
+  bareReturnFailable: { top: `    function role(p: string, h: string)! Denied {\n        if (p != h) return;\n        return "user";\n    }`, body: `        return match role(pass, row.pw) {\n            .Ok(v) :> "WELCOME",\n            _ :> "REJECTED"\n        }` },
+  bareReturnMaybe: { top: `    function look(p: string, h: string) -> string | not {\n        if (p != h) return;\n        return "user";\n    }`, body: `        if (look(pass, row.pw) is not) return "REJECTED";\n        return "WELCOME"` },
   noValueGuard: { top: `    function chk(p: string, h: string)! Denied {\n        if (p != h) fail .Bad;\n    }`, body: `        const r: string = chk(pass, row.pw) !{ _ :> "REJECTED" };\n        if (r == "REJECTED") return "REJECTED";\n        return "WELCOME"` },
   noValueOk: { top: `    function chk(p: string, h: string)! Denied {\n        if (p != h) fail .Bad;\n    }`, body: `        return match chk(pass, row.pw) {\n            .Ok(v) :> "WELCOME" + v,\n            _ :> "REJECTED"\n        }` },
   noValueOkUnbound: { top: `    function chk(p: string, h: string)! Denied {\n        if (p != h) fail .Bad;\n    }`, body: `        let v: string = "REJECTED";\n        match chk(pass, row.pw) {\n            .Ok(_) :> v = "WELCOME",\n            _ :> v = "REJECTED"\n        }\n        return v;` },
@@ -148,7 +148,7 @@ return {
   wrapTyped: { top: `    function audit(p: string) {\n        if (p == "") return;\n    }\n    function role(p: string, h: string) -> string {\n        if (p == h) return "user";\n        return audit(p);\n    }`, body: `        if (role(pass, row.pw) == "user") return "WELCOME";\n        return "REJECTED"` },
   wrapUnannotated: { top: `    function audit(p: string) {\n        if (p == "") return;\n    }\n    function role(p: string, h: string) {\n        if (p == h) return "user";\n        return audit(p);\n    }`, body: `        if (role(pass, row.pw) is not) return "REJECTED";\n        return "WELCOME"` },
   wrapVoid: { top: `    function nothing(p: string) {\n        if (p == "") return;\n    }\n    function w(p: string) {\n        return nothing(p);\n    }`, body: `        const s: string = w(pass);\n        if (s is not) return "REJECTED";\n        return "WELCOME"` },
-  bareReturn: { top: `    function role(p: string, h: string) -> string {\n        if (p == h) return "user";\n        return\n    }`, body: `        if (role(pass, row.pw) == "user") return "WELCOME";\n        return "REJECTED"` },
+  bareReturn: { top: `    function role(p: string, h: string) -> string {\n        if (p == h) return "user";\n        return;\n    }`, body: `        if (role(pass, row.pw) == "user") return "WELCOME";\n        return "REJECTED"` },
 };
 })();
 

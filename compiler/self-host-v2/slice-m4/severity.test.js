@@ -98,7 +98,7 @@ describe("every diagnostic carries its §34 severity", () => {
   });
 
   test("Error: a parse diagnostic (no §34 row → fail closed)", () => {
-    const r = run(P(``, `    let <n:int=0/>\n    function go() { @n = (1 + }`, `        <p>\$;{@n}</p>`));
+    const r = run(P(``, `    let <n:int=0/>\n    function go() { @n = (1 + }`, `        <p>\${@n}</p>`));
     expect(r.diags.length).toBeGreaterThan(0);
     expect(r.diags.every((d) => d.severity === "Error")).toBe(true);
   });

@@ -92,7 +92,7 @@ export const SHAPES = {
   andRight: { body: R(`name == "bob" && !check(pass, row.pw)`), expect: "REFUSED", codes: ["E-BOOTSTRAP-UNSUPPORTED"] },
   ternaryBranch: { body: `        return name == "bob" ? (check(pass, row.pw) ? "WELCOME" : "REJECTED") : "REJECTED"`, expect: "REFUSED", codes: ["E-BOOTSTRAP-UNSUPPORTED"] },
   lambdaFilter: { body: `        const ok: string[] = [row.pw].filter(h => check(pass, h));\n${R("ok.length == 0")}`, expect: "REFUSED", codes: ["E-BOOTSTRAP-UNSUPPORTED"] },
-  armBody: { top: `    function checkF(p: string, h: string)! Denied {\n        if (!check(p, h)) fail .Bad\n        return true\n    }`, body: `        const ok: boolean = checkF(pass, row.pw) !{ _ :> check(pass, row.pw) };\n${R("!ok")}`, expect: "REFUSED", codes: ["E-BOOTSTRAP-UNSUPPORTED"] },
+  armBody: { top: `    function checkF(p: string, h: string)! Denied {\n        if (!check(p, h)) fail .Bad;\n        return true;\n    }`, body: `        const ok: boolean = checkF(pass, row.pw) !{ _ :> check(pass, row.pw) };\n${R("!ok")}`, expect: "REFUSED", codes: ["E-BOOTSTRAP-UNSUPPORTED"] },
   fnValueAlias: { body: `        const c = check;\n${R("!c(pass, row.pw)")}`, expect: "REFUSED", codes: ["E-BOOTSTRAP-UNSUPPORTED"] },
   valuePosition: { body: R("!check(pass, row.pw)"), markup: `        <p>\${check("a", "b")}</p>`, expect: "REFUSED", codes: ["E-VALUE-SERVER-CALL"] },
 };

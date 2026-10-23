@@ -14,12 +14,12 @@ beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
 const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
 const v = (x) => (x && typeof x === "object" ? x.variant : x);
 const P = (decls, main = "") => `<program db="./app.db">\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
-const H = `wordCount("n1") !{ .Transport(t) :> 0 };`;
+const H = `wordCount("n1") !{ .Transport(t) :> 0 }`;
 const PROGRAM = P(NOTES + "\n" + SAVE + "\n" + RECOUNT
   + `\n    function both() {\n        save();\n        recount();\n    }`
   + `\n    function branchy() {\n        if (@flag) {\n            @words = ${H};\n        }\n        @status = "done";\n    }`
   + `\n    function operand() {\n        @words = @version + (${H});\n    }`,
-  `        <button onclick=save()>Save</button>\n        <button onclick={ @words = ${H} }>Count</button>`);
+  `        <button onclick=save()>Save</button>\n        <button onclick={ @words = ${H}; }>Count</button>`);
 
 const core = () => {
   const r = run(PROGRAM);

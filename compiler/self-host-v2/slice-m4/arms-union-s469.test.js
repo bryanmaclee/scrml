@@ -59,7 +59,7 @@ const JOIN = `    function join2(a: string, b: string) -> string { return a + ":
 const P = (decls, buttons = []) =>
   `<program>\n    let <out:string=""/>\n    let <n:int=0/>\n${TYPES}\n${LOAD}\n${JOIN}\n${decls}\n    <main>\n${buttons
     .map((b) => `        <button onclick=${b}()>${b}</button>`)
-    .join("\n")}\n        <p; id="out">\${@out}</p>\n        <p id="n">\${@n}</p>\n    </main>\n</program>\n`;
+    .join("\n")}\n        <p id="out">\${@out}</p>\n        <p id="n">\${@n}</p>\n    </main>\n</program>\n`;
 const fn = (name, body) => `    function ${name}() {\n${body}\n    }`;
 
 // ---------------------------------------------------------------------------
@@ -87,7 +87,7 @@ describe("dpa-073 F2 — comma-separated arm lists", () => {
       [
         fn("v", `        @out = load("x") !{ .NotFound(m) :> join2("nf", m), .Timeout :> "to", };`),
         fn("blk", `        load("y") !{\n            .NotFound(m) :> {\n                @out = m;\n            },\n            .Timeout :> {\n                @n = @n + 1;\n                @out = join2("t", "o");\n            },\n        };`),
-        fn("tail", `        @out = load("x") !{\n            .NotFound(m) :> [m, "b"].map(s => s + "!").length + 40,\n            .Timeout :> 0\n        } + ""`),
+        fn("tail", `        @out = load("x") !{\n            .NotFound(m) :> [m, "b"].map(s => s + "!").length + 40,\n            .Timeout :> 0\n        } + "";`),
       ].join("\n"),
       ["v", "blk"],
     );
@@ -108,7 +108,7 @@ describe("dpa-073 F2 — comma-separated arm lists", () => {
   });
 
   test("a `,` inside an arm body at depth > 0 is the body's; at depth 0 it ends the arm", () => {
-    const ast = parse(`<program>\n${TYPES}\n${LOAD}\n${JOIN}\n    function f() -> string {\n        return load("x") !{ .NotFound(m) :> join2(m, join2("a", "b")), .Timeout :> "t", }\n    }\n</program>\n`);
+    const ast = parse(`<program>\n${TYPES}\n${LOAD}\n${JOIN}\n    function f() -> string {\n        return load("x") !{ .NotFound(m) :> join2(m, join2("a", "b")), .Timeout :> "t", };\n    }\n</program>\n`);
     expect(ast.diags.map((d) => d.code)).toEqual([]);
     // two arms, and the first arm's body is ONE (outer) call
     const guard = find(ast, (x) => x.variant === "Guard");
@@ -126,42 +126,46 @@ describe("dpa-073 F2 — comma-separated arm lists", () => {
     expect(c.filter((x) => x.startsWith("E-"))).toEqual([]);
   });
 
-  test("newline-separated arms are still read (dpa-073 F5 — enforcement follows the codemod) (runtime)", async () => {
-    const src = P(fn("go", `        @out = load("x") !{\n            .NotFound(m) :> join2("nf", m),\n            .Timeout :> "to"\n        };`), ["go"]);
-    await load(src);
-    click(btn("go"));
-    expect($("#out").textContent).toBe("nf:x");
+  test("a newline-separated arm list is refused — E-MATCH-ARM-SEPARATOR at every missing `,` (dpa-073 F2, enforced by the bootstrap: F5 (4))", () => {
+    const src = P(fn("go", `        @out = load("x") !{\n            .NotFound(m) :> join2("nf", m)\n            .Timeout :> "to"\n            .Other :> "o"\n        };`), ["go"]);
+    const c = codes(src);
+    expect(c.filter((x) => x === "E-MATCH-ARM-SEPARATOR").length).toBe(2);
+    expect(run(src).core == null).toBe(true);
   });
 
-  test("a list that mixes `,` and newline separators is E-MATCH-ARM-SEPARATOR, once, at the first arm with no `,` before it", () => {
-    const body = `        @out = load("x") !{\n            .NotFound(m) :> "nf",\n            .Timeout :> "to",\n            .Other :> "o"\n        };`;
+  test("the report's span is the empty span at the end of the arm before — where the `,` goes", () => {
+    const body = `        @out = load("x") !{\n            .NotFound(m) :> "nf",\n            .Timeout :> "to"\n            .Other :> "o"\n        };`;
     const src = P(fn("f", body));
     const c = codes(src);
     expect(c.filter((x) => x === "E-MATCH-ARM-SEPARATOR").length).toBe(1);
     const d = diag(src, "E-MATCH-ARM-SEPARATOR");
-    expect(src.substring(d.span.start, d.span.start + 6)).toBe(".Other");
-    expect(d.message).toContain("one list takes one spelling");
+    expect(d.span.end).toBe(d.span.start);
+    expect(src.substring(d.span.start - 4, d.span.start)).toBe('"to"');
+    expect(src.substring(0, d.span.start) + "," + src.substring(d.span.start)).toContain('"to",\n            .Other');
+    expect(d.message).toContain("Expected `,` between two arms");
     expect(d.message).toContain("dpa-073 F2");
     expect(run(src).core == null).toBe(true);
   });
 
-  test("a trailing `,` on a newline list is mixed; a newline list with no `,` and a comma list with no trailing `,` are not", () => {
-    const mixed = `        @out = load("x") !{\n            .NotFound(m) :> "nf",\n            .Timeout :> "to",\n        };`;
-    expect(codes(P(fn("f", mixed)))).toEqual(["E-MATCH-ARM-SEPARATOR"]);
-    const commaNoTrail = `        @out = load("x") !{\n            .NotFound(m) :> "nf",\n            .Timeout :> "to"\n        }`;
+  test("a comma list across lines is one list — with or without the trailing `,`; one arm with a trailing `,`", () => {
+    const trail = `        @out = load("x") !{\n            .NotFound(m) :> "nf",\n            .Timeout :> "to",\n        };`;
+    expect(codes(P(fn("f", trail)))).toEqual([]);
+    const commaNoTrail = `        @out = load("x") !{\n            .NotFound(m) :> "nf",\n            .Timeout :> "to"\n        };`;
     expect(codes(P(fn("f", commaNoTrail)))).toEqual([]);
-    const oneArmTrail = `        @out = load("x") !{ _ :> "w", }`;
+    const oneArmTrail = `        @out = load("x") !{ _ :> "w", };`;
     expect(codes(P(fn("f", oneArmTrail)))).toEqual([]);
   });
 
-  test("the same mixing rule for `match` arms", () => {
-    const src = P(fn("f", `        @out = match load("x") {\n            .Ok(v) :> v,\n            .NotFound(m) :> m,\n            .Timeout :> "t"\n        };`));
-    expect(codes(src)).toEqual(["E-MATCH-ARM-SEPARATOR"]);
+  test("the same rule for `match` arms, a block arm included (no Rust block-arm exemption, dpa-073 F2 (i))", () => {
+    const src = P(fn("f", `        @out = match load("x") {\n            .Ok(v) :> v\n            .NotFound(m) :> m\n            .Timeout :> "t"\n        };`));
+    expect(codes(src)).toEqual(["E-MATCH-ARM-SEPARATOR", "E-MATCH-ARM-SEPARATOR"]);
+    const blk = P(fn("g", `        load("y") !{\n            .NotFound(m) :> {\n                @out = m;\n            }\n            .Timeout :> "t"\n        };`));
+    expect(codes(blk)).toEqual(["E-MATCH-ARM-SEPARATOR"]);
   });
 
   test("a `,` with no arm before it is one E-PARSE-ARM, and the list goes on (no cascade)", () => {
-    expect(codes(P(fn("f", `        @out = load("x") !{ .NotFound(m) :> "nf",, .Timeout :> "to" }`)))).toEqual(["E-PARSE-ARM"]);
-    expect(codes(P(fn("f", `        @out = load("x") !{ , .NotFound(m) :> "nf", .Timeout :> "to" }`)))).toEqual(["E-PARSE-ARM"]);
+    expect(codes(P(fn("f", `        @out = load("x") !{ .NotFound(m) :> "nf",, .Timeout :> "to" };`)))).toEqual(["E-PARSE-ARM"]);
+    expect(codes(P(fn("f", `        @out = load("x") !{ , .NotFound(m) :> "nf", .Timeout :> "to" };`)))).toEqual(["E-PARSE-ARM"]);
   });
 
   // review r1 (LOW, pinned, not built): armEnd's depth-0 `,` counts TOKEN brackets
