@@ -176,7 +176,7 @@ The binder decides which member / built-in a receiver has (the one reader: `.len
 
 <!-- @gap id=g-bootstrap-tape-methods-insert-remove-fill-owed-s469 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(methodOf admits append / prepend; removeCall pop / shift; methodOp sort / reverse / join) prov=spec:§66.12.6(rule 3 tables);dispatch:s469-boot-strings-1 -->
 
-Fail closed by name. A discarded `fill` / `copyWithin` statement on a tape is already E-TAPE-JS-METHOD (trigger (b)). Also not built: the non-`writable` classification of a written-back `fill` / `copyWithin`; tape `slice` / `includes` / `indexOf`.
+Fail closed by name. A discarded `fill` / `copyWithin` statement on a tape is already E-TAPE-JS-METHOD (trigger (b)). Also not built: the non-`write` classification of a written-back `fill` / `copyWithin`; tape `slice` / `includes` / `indexOf`.
 
 ### g-spec-string-position-code-unit-vs-code-point-s469 — string positions in two units: `slice` / `charAt` / `split("")` counted code points while `.length` counted UTF-16 units, so `@e.slice(0, @e.length - 1)` on `"a😀"` returned `"a😀"` (not `"a"`) and `@e.charAt(@e.length - 1)` returned `""` (not `"😀"`); and `includes` / `startsWith` / `endsWith` / `split(sep)` compared UTF-16 units, so a lone-surrogate argument matched (or split) half of an astral character — `NEW S469; LOW; RESOLVED S469 (bootstrap, as ruled; the SPEC text is `g-spec-string-methods-code-point-text-owed-s469`)`
 

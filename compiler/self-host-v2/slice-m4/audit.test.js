@@ -243,7 +243,7 @@ describe("§66.19.5 — negative lines (each → E-WRITE-NOT-GRANTED)", () => {
   });
 
   test("the same shapes are GRANTED — and lowered (s444) — on a type that grants them (the classifier, not a blanket refusal)", () => {
-    const granted = SRC().replace("<audit:Entry[free, append]=[]/>", "<audit:Entry[free, append, prepend, shift, remove, writable]=[]/>");
+    const granted = SRC().replace("<audit:Entry[free, append]=[]/>", "<audit:Entry[free, append, prepend, shift, remove, write]=[]/>");
     for (const i of [2, 3, 5]) {
       const r = run(replaceLine(granted, NEGATIVE[i].marker, `function neg() { ${NEGATIVE[i].body} }`));
       expect(r.diags).toEqual([]);

@@ -311,8 +311,8 @@ describe("4a — removal edits (RemoveEnd / RemoveFront / RemoveAnywhere)", () =
     expect(run(P(`    <n:string="x"/>\n    function p() { @n = "y" }`, `        <p>x</p>`)).diags[0].message).toContain("is locked");
   });
 
-  test("`@xs = @xs.map(λ)` on `[writable]`: a PositionWrite of the mapped value", async () => {
-    const { program } = await loadProgram(coreOf(seq("writable", `    function m() { @xs = @xs.map(x => x + "!") }`)), "rm-map", ["m"]);
+  test("`@xs = @xs.map(λ)` on `[write]`: a PositionWrite of the mapped value", async () => {
+    const { program } = await loadProgram(coreOf(seq("write", `    function m() { @xs = @xs.map(x => x + "!") }`)), "rm-map", ["m"]);
     program.m();
     expect(items()).toEqual(["a!", "b!", "c!"]);
   });
