@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-css-neg-interp",
+  "description": "`${…}` inside `#{}` is refused by name (E-BOOTSTRAP-UNSUPPORTED) — the cell channel is `@name`.",
+  "language-version": "1.0",
+  "spec": "§25.7 · §65.4.2",
+  "rationale": "§65.4.2: dynamic raw CSS is only the quoted `style=\"…\"` form; §25.7: a cell reaches CSS through `@name`.",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

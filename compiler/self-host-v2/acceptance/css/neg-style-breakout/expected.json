@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-css-neg-style-breakout",
+  "description": "E-CSS-SYNTAX: any `<` in a `#{}` block is refused — no `</style` breakout.",
+  "language-version": "1.0",
+  "spec": "§9.1 · §34",
+  "rationale": "Security lens: the sheet is printed in a raw-text `<style>`; `<` is the only character that can end it.",
+  "expect": {
+    "codes": [
+      "E-CSS-SYNTAX"
+    ],
+    "codeCounts": {
+      "E-CSS-SYNTAX": 1
+    }
+  }
+}

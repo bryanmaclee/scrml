@@ -1,0 +1,14 @@
+// A component's `#{}` is its `@scope` donut; its root carries data-scrml (§9.1 DQ-7).
+<program>
+    <card title:string/>
+    renders <div class="card">
+        #{
+            .card { padding: 16px; }
+            .card > h2 { color: green; }
+        }
+        <h2>${title}</h2>
+    </div>
+    <main>
+        <card title="hello"/>
+    </main>
+</program>

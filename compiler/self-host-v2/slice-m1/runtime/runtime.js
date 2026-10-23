@@ -1813,6 +1813,68 @@ function animatedUrlTarget(el) {
  * `display` (from a static `style=`, else none set — the stylesheet decides).
  * `fn()` is a `bool` (a presence test already lowered to one).
  */
+// ---------------------------------------------------------------------------
+// s469 (s469-boot-css) — the §25.7 CSS-variable bridge. A `#{}` value's
+// `@cell` compiles to `var(--scrml-cell)`; this writes the cell's value to that
+// custom property on `:root` (`document.documentElement`), now and on every
+// change. A cell's value is DATA, and this is the one place data reaches CSS,
+// so it is the injection boundary: a value is written only if `cssValueOf`
+// admits it — a finite number, or a string over a small CSS-value alphabet
+// (letters, digits, space, `# % . , + - * / _ ( )`) whose every function is a
+// colour / math function (`rgb()`, `hsl()`, `calc()`, `clamp()` …). That rules
+// out, by construction: a breakout of the declaration or the rule (`;` `{` `}`
+// are not in the alphabet), of the `<style>` element (`<`), `url(…)` (any
+// network fetch — `url(javascript:…)` included), `image-set()` / `src()` /
+// `attr()` / `expression()` / `var()`, escapes (`\`), strings, comments, and
+// `!important`. Anything else is not written: the property is REMOVED, so the
+// `var()` falls back to the property's unset value (fail closed), and the
+// refusal is reported once per write — never the value.
+// ---------------------------------------------------------------------------
+const CSS_VALUE_ALPHABET = /^[A-Za-z0-9 #%.,+\-*/_()]*$/;
+const CSS_VALUE_FUNCTIONS = new Set([
+  "rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch", "color",
+  "calc", "min", "max", "clamp",
+]);
+const CSS_VALUE_MAX = 256;
+
+/** The CSS text a cell's value is written as, or null when it is refused (fail closed). */
+export function cssValueOf(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? String(v) : null;
+  if (typeof v !== "string") return null;
+  if (v.length > CSS_VALUE_MAX || !CSS_VALUE_ALPHABET.test(v)) return null;
+  if (v.includes("/*") || v.includes("*/")) return null;
+  let depth = 0;
+  for (let i = 0; i < v.length; i++) {
+    const c = v[i];
+    if (c === "(") {
+      let j = i;
+      while (j > 0 && /[A-Za-z0-9_-]/.test(v[j - 1])) j--;
+      const name = v.slice(j, i).toLowerCase();
+      // a bare `(` is a grouping only inside a function (`calc((1px + 2px) * 2)`)
+      if (name === "" ? depth === 0 : !CSS_VALUE_FUNCTIONS.has(name)) return null;
+      depth++;
+    } else if (c === ")") {
+      depth--;
+      if (depth < 0) return null;
+    }
+  }
+  return depth === 0 ? v : null;
+}
+
+/** `name` (`--scrml-<cell>`) on `:root` follows `read()` — guarded by `cssValueOf`. */
+export function cssVar(scope, name, read) {
+  const style = document.documentElement.style;
+  effect(scope, () => {
+    const v = cssValueOf(read());
+    if (v === null) {
+      style.removeProperty(name);
+      console.warn(`[scrml css-guard] refused a value for ${name}: only a finite number, or a plain CSS value (no url(), quotes, escapes, ; { } < or !), reaches CSS (SPEC §25.7). The property was removed.`);
+      return;
+    }
+    style.setProperty(name, v);
+  });
+}
+
 export function visibility(scope, el, fn) {
   const own = el.style.display;
   effect(scope, () => {

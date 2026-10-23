@@ -1,0 +1,18 @@
+{
+  "id": "acceptance-css-flat-inline",
+  "description": "a flat-declaration `#{}` on a component root → `style=\"color: navy; font-weight: 700;\"`.",
+  "language-version": "1.0",
+  "spec": "§9.1 DQ-7 · §65.4.1",
+  "rationale": "§9.1 DQ-7: flat-declaration blocks inside a constructor scope compile to inline `style=` on the containing element.",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#chip",
+        "attr": {
+          "style": "color: navy; font-weight: 700;"
+        }
+      }
+    ]
+  }
+}

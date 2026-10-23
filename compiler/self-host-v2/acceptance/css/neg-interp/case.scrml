@@ -1,0 +1,6 @@
+// Security: `${…}` would splice a runtime string into CSS text — unruled; `@name` is the channel.
+<program>
+    let <c:string="red"/>
+    #{ p { color: ${@c}; } }
+    <main><p>x</p></main>
+</program>

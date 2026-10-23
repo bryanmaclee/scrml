@@ -188,6 +188,18 @@ const STATUS = {
   "templates/neg-empty-slot": ["PASS", ["E-PARSE-TEMPLATE"]],
   // a tagged template is not a text template, and not in the bootstrap — refused by name
   "templates/neg-tagged": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // s469-boot-css — `#{}` CSS (§9.1, §25.7, §65): placement, the root stamps, the bridge, and the refusals
+  "css/global-rule": ["PASS", []],
+  "css/component-scope": ["PASS", []],
+  "css/flat-inline": ["PASS", []],
+  "css/cell-bridge": ["PASS", []],
+  "css/neg-missing-semicolon": ["PASS", ["E-CSS-SYNTAX"]],
+  "css/neg-bad-selector": ["PASS", ["E-CSS-SYNTAX"]],
+  "css/neg-style-breakout": ["PASS", ["E-CSS-SYNTAX"]],
+  "css/neg-interp": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "css/neg-unknown-ref": ["PASS", ["E-THEME-TOKEN-UNKNOWN"]],
+  // `@media` is ruled CSS (§65.2.2); the bootstrap's reader does not carry block at-rules yet
+  "css/media-unsupported": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED"]],
 };
 
 let verdicts;
@@ -229,6 +241,11 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
     for (const rel of ["strings/guess-ci-yes", "strings/guess-ci-upper", "strings/guess-ci-mixed-no", "strings/guess-ci-maybe",
                        "strings/guess-ci-empty", "strings/methods", "tapes/sort-reverse-join", "tapes/append-prepend",
                        "interp/logic-literal-warns", "interp/attr-expression-warns", "interp/markup-does-not-warn"]) {
+      expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
+    }
+  });
+  test("s469-boot-css: every positive CSS case RAN on the bootstrap (the stamped root / inline style / bridged cell checked)", () => {
+    for (const rel of ["css/global-rule", "css/component-scope", "css/flat-inline", "css/cell-bridge"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });
