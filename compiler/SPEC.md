@@ -27337,6 +27337,29 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 > newly named error unless security or bootstrap-serving (S435 policy)"* · policy source: user-voice S435
 > *"Resulting TS policy (S435)"*.
 
+**impl#1 known divergences from the ruled language (S469) — impl#1 behaviour, NOT language.** impl#1 (frozen,
+S435) still compiles each of the following to JavaScript's behaviour. Each is a carried impl#1 divergence: the
+SPEC section named is the language rule, the bootstrap is the implementation that follows it, and a program that
+relies on the impl#1 behaviour is relying on a divergence, not on scrml. impl#1 is not changed for them.
+
+| Language rule (S469) | impl#1 behaviour today |
+|---|---|
+| A string's `.length`, positions and iteration count code points (Appendix D.1) | `.length` counts UTF-16 units |
+| No negative positions (Appendix D.1, §66.12.8): a negative literal `slice` position is `E-POSITION-NEGATIVE`, a computed one traps; `at(-1)` is `not`; a negative `repeat` count / pad width is out of range | a negative position counts from the end (`slice(-1)`, `at(-1)`); `repeat` / `padStart` / `padEnd` follow JavaScript |
+| `indexOf` / `lastIndexOf` return `int \| not` (Appendix D.1) | `-1` when absent |
+| `replace` / `replaceAll` take plain strings; `with` is literal text (Appendix D.1) | the host's `$&` / `$1` replacement patterns apply |
+| `sort` / `reverse` / `fill` / `copyWithin` return a new tape (§66.12.6) | mutate in place, including through an alias |
+| `xs[i]` out of range traps, `E-INDEX-OUT-OF-RANGE-RT` (§66.12.8) | reads JavaScript `undefined` (absent) |
+| `scrml:math` parses are whole-string and return `\| not`; `round` needs a tie mode (§41.18, §14.13.4) | a failed parse gives `NaN`; `round(x)` without a mode is accepted |
+| tape methods are checked against the receiver's grants (§66.12) | a receiver impl#1 cannot prove is a tape passes its JavaScript array methods through unchecked |
+
+Separate from this list: ruled FORMS impl#1 does not implement at all (`int.parse`, `Enum.parse`, `.append`, …)
+are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that change), rather than emitted
+(`g-impl1-ruled-forms-emitted-verbatim-fail-open-s469`).
+
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — O61 reach and the page/theme half; impl#1 divergences; code names" — impl#1 divergences: *"Leave and document (Rec)"* (*"UTF-16 `.length`, negative positions, `indexOf` -1, `$&`, in-place `sort` (including through an alias), out-of-range `xs[i]`, NaN parses, and tape methods on unproven receivers. impl#1 stays frozen; record these as known divergences."*)
+> **Direction of change:** inert — documentation of existing impl#1 behaviour; no program's meaning in scrml changes.
+
 | Code | Section | Trigger | Severity |
 |---|---|---|---|
 | E-CTX-001 | §3.2 | Wrong closer for context type | Error |
