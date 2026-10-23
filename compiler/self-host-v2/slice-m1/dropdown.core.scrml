@@ -83,7 +83,7 @@ ${
     export fn dropdownCore() -> CoreProgram { return buildDropdown(false, false) }
 
     // A TEST FIXTURE, not an oracle: the same program with `lines` given a
-    // `replace` grant (`<lines:Line[replace]=…>`, ⚑ O10 spelling) and three
+    // `replace` grant (`<lines:Line[replace]=…>`, O10 spelling, ruled S469) and three
     // functions that rewrite it, so the runtime's row reconciliation (reorder /
     // remove / insert of rows owning dropdown instances, §66.7.3) can be driven
     // through the program's own writes. §66.19.3 itself never changes `lines`.

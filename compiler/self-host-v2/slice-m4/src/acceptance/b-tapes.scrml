@@ -7,7 +7,7 @@
     type Entry:struct = { at: int, actor: string, action: string }   // fields carry no contract → fixed (§66.11.4)
     type Frame:struct = { name: string }
 
-    <audit:Entry[free, append]=[]/>                // grows at the end only; no replace (§66.12.2 S442, §66.19.5; ⚑ O10 bracket form)
+    <audit:Entry[free, append]=[]/>                // grows at the end only; no replace (§66.12.2 S442, §66.19.5; bracket form ruled O10 S469)
     <stack:Frame[free, append, pop]=[]/>           // a stack (§66.12.2)
     let <actor:string="ops"/>
     let <tick:int=0/>

@@ -959,7 +959,7 @@ ${
         }
     }
 
-    // `T[g, …]` (⚑ O10 bracket form): the grant words are permission AXES
+    // `T[g, …]` (O10 bracket form, ruled S469): the grant words are permission AXES
     // (§66.12.2). Core's SeqGrants.at holds the GROW places, SeqGrants.shrink
     // the SHRINK places (s444: Core's RemoveEnd / RemoveFront / RemoveAnywhere
     // edits; FieldInfo.shrink stays the analyze-side copy the classifier reads).
