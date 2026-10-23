@@ -1,9 +1,9 @@
 {
   "id": "match-leave-expr-arm-continuation-joins",
-  "description": "A single-expression arm body whose line ends in `+` continues onto the next line (§7.2.2 rule 2): `.Boom(m) :> \"a:\" +⏎ m` is one arm.",
+  "description": "A single-expression arm body whose line ends in `+` continues onto the next line (§7.2.2 rule 2): `.Boom(m) :> \"a:\" +⏎ m` is one arm. (impl#1-legacy dialect — see rationale.)",
   "language-version": "1.0",
   "spec": "§7.2.2",
-  "rationale": "§7.2.2 \"Arm heads\": \"A single-expression arm body (`.A :> expr`) ends at its line break unless the line ends in a continuation token (rule 2)\"; `+` is on rule 2's closed list. (The bootstrap split this arm — dpa-068 D12.)",
+  "rationale": "IMPL#1-LEGACY behaviour (S469, dpa-073 F5): this case pins impl#1's newline-terminated reading (an arm body continues past a line break only after a continuation token such as `+`), which impl#1 keeps as a carried divergence. Under SPEC §7.2.2 as rewritten S469 (dpa-073 F1 (a)) a line break is whitespace everywhere, so the arm continues regardless, and arms are a comma list; this source (no arm commas) is not ruled-dialect input. Pre-S469 rationale, kept for the record: §7.2.2 (S446) \"Arm heads\" — a single-expression arm body ended at its line break unless the line ended in a rule-2 continuation token (the bootstrap once split this arm — dpa-068 D12).",
   "expect": {
     "codes": [],
     "notCodes": [
