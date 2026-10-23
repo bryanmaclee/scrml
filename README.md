@@ -20,11 +20,11 @@ This README teaches **today's ruled scrml**: the language [`compiler/SPEC.md`](c
 
 Here is a small app: a task list that saves to SQLite, stays in sync across every open browser tab, and drives its status line with a state machine. It is one file, [`docs/readme-snippets/tasks.scrml`](./docs/readme-snippets/tasks.scrml). Below it comes in four pieces. After each piece: **what the compiler does that you never wrote.**
 
-> **The bootstrap cannot build this whole app yet.** It is written in the ruled language, and CI compiles it with the bootstrap on every push. Today the bootstrap stops at the parts it does not have: `<schema>`, `<channel>`, the `<match>` element, `#{}` style blocks, `class:` bindings, `<each>`'s `<empty>`, `<onTimeout>` and duration literals (`1.5s`), and building a payload variant (`Phase.Rejected("…")`) as a value. The gate expects exactly that set of error codes, and says so the day the file starts compiling. The piece-by-piece notes say what the finished compiler writes; the first compiler (impl#1) writes all of it today for the same app in its older dialect.
+> **The bootstrap cannot build this whole app yet.** It is written in the ruled language, and CI compiles it with the bootstrap on every push. Today the bootstrap stops at the parts it does not have: `<schema>`, `<channel>`, the `<match>` element, `#{}` style blocks, `class:` bindings, `<each>`'s `<empty>`, `<onTimeout>` and duration literals (`1.5s`), an engine opener `effect=`, replacing a whole tape (`@tasks = …`), and building a payload variant (`Phase.Rejected("…")`) as a value. The gate expects exactly that set of error codes, and says so the day the file starts compiling. The piece-by-piece notes say what the finished compiler writes; the first compiler (impl#1) writes all of it today for the same app in its older dialect.
 
 ### 1 — the data and the server
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG, E-PARSE-TRAILING, E-SCOPE-001] — the bootstrap has no <schema>, <channel>, <match> block element, #{} style blocks, class: binding, <empty>, <onTimeout> or duration literal, and cannot construct a payload variant (Phase.Rejected(…)) yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG, E-PARSE-TRAILING, E-SCOPE-001] — the bootstrap has no <schema>, <channel>, <match> block element, #{} style blocks, class: binding, <empty>, <onTimeout> or duration literal, no engine opener effect=, cannot replace a whole tape, and cannot construct a payload variant (Phase.Rejected(…)) yet -->
 <!-- snippet: docs/readme-snippets/tasks.scrml#L7-L53 -->
 ```scrml
 <program db="tasks.db">
@@ -130,7 +130,7 @@ The tape's type lists every write the app makes, and nothing else compiles. `add
 type Phase:enum = { Loading, Editing, Saving, Saved, Rejected(msg: string) }
 
 function load() {
-    @tasks = loadTasks() !{ _ :> { return; }, };
+    @tasks = loadTasks() !{ _ :> { @phase = Phase.Rejected("Could not load the list."); return; }, };
     @phase = .Editing;
 }
 
@@ -157,8 +157,8 @@ function toggle(id: int) {
 
 <!-- snippet: docs/readme-snippets/tasks.scrml#L106-L142 -->
 ```scrml
-<phase:Phase=.Loading single effect={ load(); }>
-    <Loading  rule=.Editing/>
+<phase:Phase=.Loading single effect=${ load(); }>
+    <Loading  rule=(.Editing | .Rejected)/>
     <Editing  rule=.Saving/>
     <Saving   rule=(.Saved | .Rejected)/>
     <Saved    rule=(.Editing | .Saving)>
@@ -196,7 +196,7 @@ function toggle(id: int) {
 </match>
 ```
 
-`<phase:Phase=.Loading single>` is an engine: a declaration marked `single`, whose value carries a transition graph. Each state-child's `rule=` lists the states it may move to, and a write that doesn't follow an edge is refused. `effect=` runs once when the program starts, and loads the list. `<onTimeout>` moves "Saved." back to the task count after 1.5 seconds, with no `setTimeout` in the source. The `<match>` renders one block of UI per variant and is checked for exhaustiveness, so you can't ship a state that has no UI. `<each>` renders the tape and reconciles it by `key=` as `@visible` changes, and `<empty>` covers the empty case. The `#{ }` style block sits just before the markup it styles.
+`<phase:Phase=.Loading single>` is an engine: a declaration marked `single`, whose value carries a transition graph. Each state-child's `rule=` lists the states it may move to, and a write that doesn't follow an edge is refused. `effect=` runs once when the program starts, and loads the list; if the load fails, the status line says so. `<onTimeout>` moves "Saved." back to the task count after 1.5 seconds, with no `setTimeout` in the source. The `<match>` renders one block of UI per variant and is checked for exhaustiveness, so you can't ship a state that has no UI. `<each>` renders the tape and reconciles it by `key=` as `@visible` changes, and `<empty>` covers the empty case. The `#{ }` style block sits just before the markup it styles.
 
 ### run it
 
@@ -454,7 +454,7 @@ const <total> = @count + "1"
 <p if=@count>${@shown} ${@total}</p>
 ```
 
-Ruled: *"arithmetic and relational operators take NUMBERS only; `+` takes two numbers or two strings"*, *"`!`, `&&`, `||` (and `and`/`or`) take booleans only"*, and *"a `T | not` operand must be narrowed before `+`, arithmetic, comparison, or use in a template."* Both `+` lines are `E-OPERATOR-OPERAND-TYPE`, and `if=@count` on a number is `E-COND-NOT-BOOLEAN`: a condition takes a boolean or a presence test. Text is built with a template, never with `+` across types: `${@label}${@count}` in markup, or a backtick template in logic. `==` compares two values of the same type only (`E-EQ-001` otherwise; `int` and `number` count as one kind), so an enum is compared with a variant, `@color == .Red`, never a string. (The bootstrap does not enforce this one yet: it still accepts `@n == "0"`.) Text becomes a number only through a parse that can fail, `int.parse(s)`, which is `int | not`.
+Ruled: *"arithmetic and relational operators take NUMBERS only; `+` takes two numbers or two strings"*, *"`!`, `&&`, `||` (and `and`/`or`) take booleans only"*, and *"a `T | not` operand must be narrowed before `+`, arithmetic, comparison, or use in a template."* Both `+` lines are `E-OPERATOR-OPERAND-TYPE`, and `if=@count` on a number is `E-COND-NOT-BOOLEAN`: a condition takes a boolean or a presence test. Text is built with a template, never with `+` across types: `${@label}${@count}` in markup, or a backtick template in logic. `==` compares two values of the same type only (`E-EQ-001` otherwise; `int` and `number` count as one kind), so an enum is compared with a variant, `@color == .Red`, never a string. (The bootstrap on main does not enforce this yet: it still accepts `@n == "0"`. E-EQ-001 lands with s469-boot-templates; remove this when it merges.) Text becomes a number only through a parse that can fail, `int.parse(s)`, which is `int | not`.
 
 Ruled ([file](./docs/readme-snippets/operators.scrml)):
 
@@ -479,7 +479,7 @@ let <count:int=0/>
 
 ### Using the bootstrap compiler
 
-The bootstrap compiler speaks the ruled language. It compiles §66 declarations (`let` / locked / derived), tapes with explicit grants, `single` engines, components with `renders`, the operator and condition rules, `match` on a value with comma-separated arms, and the one `for` loop. It refuses an ungranted tape write with `E-WRITE-NOT-GRANTED`. A form it does not build yet is refused with `E-BOOTSTRAP-UNSUPPORTED`; it is never silently accepted. Not in yet: `<schema>`, `<channel>`, the `<match>` element, `#{}` style blocks, `class:` bindings, `<empty>`, `<onTimeout>`, building a payload variant as a value, backtick templates in logic, a `${…}` inside a quoted attribute, editing a local tape, rendering a named shared instance (`<*accent/>`), and auth. Run it from a clone:
+The bootstrap compiler speaks the ruled language. It compiles §66 declarations (`let` / locked / derived), tapes with explicit grants, `single` engines, components with `renders`, the operator and condition rules, `match` on a value with comma-separated arms, and the one `for` loop. It refuses an ungranted tape write with `E-WRITE-NOT-GRANTED`. A form it does not build yet is refused with `E-BOOTSTRAP-UNSUPPORTED`; it is never silently accepted. Not in yet: `<schema>`, `<channel>`, the `<match>` element, `#{}` style blocks, `class:` bindings, `<empty>`, `<onTimeout>`, an engine opener `effect=`, replacing a whole tape, building a payload variant as a value, backtick templates in logic, a `${…}` inside a quoted attribute, editing a local tape, rendering a named shared instance (`<*accent/>`), and auth. Run it from a clone:
 
 ```bash
 bun run boot:compile app.scrml              # → dist/app/ : index.html, program.client.js, scrml-runtime.js

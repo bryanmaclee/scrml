@@ -83,7 +83,7 @@ renders <form onsubmit=submit()>
 type Phase:enum = { Loading, Editing, Saving, Saved, Rejected(msg: string) }
 
 function load() {
-    @tasks = loadTasks() !{ _ :> { return; }, };
+    @tasks = loadTasks() !{ _ :> { @phase = Phase.Rejected("Could not load the list."); return; }, };
     @phase = .Editing;
 }
 
@@ -103,8 +103,8 @@ function toggle(id: int) {
     replaceRow(row);
 }
 
-<phase:Phase=.Loading single effect={ load(); }>
-    <Loading  rule=.Editing/>
+<phase:Phase=.Loading single effect=${ load(); }>
+    <Loading  rule=(.Editing | .Rejected)/>
     <Editing  rule=.Saving/>
     <Saving   rule=(.Saved | .Rejected)/>
     <Saved    rule=(.Editing | .Saving)>
