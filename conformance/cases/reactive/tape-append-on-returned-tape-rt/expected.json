@@ -1,0 +1,37 @@
+{
+  "id": "reactive-tape-append-on-returned-tape-rt",
+  "description": "§66.12.6 rule 1 (a return value carries its return type's grants) + rule 3 (tape methods are named after their grants): `seed() -> int[append]` returns a tape granting `append`, so `const ys = seed(); ys.append(3)` grows it to 3 and one #go click sets @n to 3. XFAIL on impl#1: it cannot prove `ys` is a tape (it types no call result), so it neither implements nor refuses `.append` there; the call reaches the emitted JavaScript and throws `ys.append is not a function` (@n stays 0). The residual of the impl#1 refusal E-IMPL1-RULED-FORM-UNSUPPORTED, carried.",
+  "language-version": "1.0",
+  "spec": "§66.12.6",
+  "provenance": "ruling:user-voice-scrml.md S469 \"⭐ RULED — tape methods are named after their grants; JS array method names are refused\" (\"Names match the grants (Recommended)\"); ruling:user-voice-scrml.md S469 \"⭐ RULED — impl#1 refuses ruled forms it doesn't implement\" (\"Refuse them in impl#1 (Recommended)\")",
+  "rationale": "§66.12.6 rule 1: \"a return value: what the caller holds carries the return type's grants\"; rule 3: `xs.append(x)` is a grow at the end, \"Granted by `append`\". The tape returned by `seed()` grants `append`, so the call is legal and adds one value.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-IMPL1-RULED-FORM-UNSUPPORTED",
+      "E-WRITE-NOT-GRANTED"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "n": 3
+    },
+    "domAnchored": [
+      {
+        "selector": "#n",
+        "text": "3"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-tape-method-unproven-receiver-throws-s469",
+      "fails": {
+        "runtime": "sha256:f5d4744687180837"
+      }
+    }
+  }
+}

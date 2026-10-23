@@ -1,0 +1,13 @@
+<program>
+<n> = 0
+function seed() -> int[append] {
+    return [1, 2]
+}
+function grow() {
+    const ys = seed()
+    ys.append(3)
+    @n = ys.length
+}
+<button id="go" onclick=grow()>go</button>
+<p id="n">${@n}</p>
+</program>
