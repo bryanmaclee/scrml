@@ -58,6 +58,17 @@ chunk namespacing (#180) the store key is `<token>$name`, so `get("name")` was `
 `set("name", …)` wrote a cell nothing subscribed to. Now keys via `chunkCellKey(clientJs)` (the
 helper the other browser files use). 6/6 pass; assertions unchanged. Baseline 43 → 41.
 
+## Step 5 — transitions (FIXED, class b — test pinned a superseded lowering)
+
+`browser-transitions.test.js` (14 failing) asserted the DISPLAY-TOGGLE lowering of `if=`
+(`[data-scrml-bind-if]`, `style.display`). S239 `if-mount-unmount-phase2` moved transition-bearing
+`if=` onto the mount path (§17.1: false removes, exit deferred to `animationend`; true mounts a fresh
+clone). `[data-scrml-bind-if]` matched nothing → 14 TypeErrors, and the 2 "initially visible" cases
+passed VACUOUSLY over an empty list. Ported 1:1 (display:none → not connected; re-shown → re-queried
+fresh node); every enter/exit class assertion kept; added non-emptiness guards so the "initially"
+cases can no longer pass on zero elements. 16/16 pass. Product transitions verified working in
+happy-dom. Baseline 41 → 27.
+
 ## Classified, NOT fixed — class c, ALREADY FILED
 
 - `g-each-peritem-markup-value-ternary` (3) and `g-emit-lift-markup-text-interp` (4): `ON ${@.label}` /
