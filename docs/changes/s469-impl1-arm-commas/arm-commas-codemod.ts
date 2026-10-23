@@ -264,7 +264,9 @@ function walk(dir: string, acc: string[]): void {
     const p = join(dir, name);
     const st = statSync(p);
     if (st.isDirectory()) walk(p, acc);
-    else if (name.endsWith(".scrml")) acc.push(p);
+    // A `*-newline-list` case keeps its NEWLINE-separated arm list on purpose (impl#1's carried
+    // newline reading, S469 r4) — never migrated.
+    else if (name.endsWith(".scrml") && !/-newline-list$/.test(dir)) acc.push(p);
   }
 }
 
