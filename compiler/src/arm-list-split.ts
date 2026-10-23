@@ -115,6 +115,56 @@ export function rawArmHasStrayComma(arm: string): boolean {
   return topLevelCommaIdx(ts).length > 0;
 }
 
+/** A token that can be part of an arm PATTERN (a literal, a variant, `_` / `else` / `not`, a binder). */
+function isPatternTok(t: ArmTok): boolean {
+  if (t.kind === "STRING" || t.kind === "NUMBER" || t.kind === "IDENT") return true;
+  if (t.kind === "KEYWORD") return ["else", "not", "true", "false"].includes(t.text);
+  if (t.kind === "OPERATOR") return t.text === "::";
+  if (t.kind === "PUNCT") return [".", "-", "|", "(", ")", ","].includes(t.text);
+  return false;
+}
+
+/**
+ * S469 r5 (g-impl1-legacy-pipe-literal-match-arms-s469) — does a raw `match` arm text hold an arm
+ * LED by `|` — `| 1 :> …`, `| "a" :> …`, `| .V :> …` — at its start or right after another arm's
+ * body? §18.2's `match` grammar has no leading `|` (it is the `!{}` handler's legacy spelling,
+ * §19.4.5); a match lowering refuses such an arm instead of reading past it. Not refused: the
+ * alternation `|` inside a head (`.A | .B :>`, no arrow before it in the arm), a bitwise `|` in a
+ * body (no arm arrow after its operand), and `| _` / `| else` / `| ( … )` — the whole-product
+ * wildcard / product arm impl#1 accepts (§18.19; a filed divergence).
+ */
+export function rawArmHasLeadingPipeArm(arm: string): boolean {
+  if (typeof arm !== "string" || !arm.includes("|")) return false;
+  const ts = armTokens(arm);
+  if (!ts) return false;
+  let depth = 0;
+  let sawArrow = false;
+  for (let k = 0; k < ts.length; k++) {
+    const t = ts[k];
+    if (depth === 0 && isArrowTok(t)) sawArrow = true;
+    const isBar = t.kind === "PUNCT" && t.text === "|" &&
+      !(ts[k + 1] && ts[k + 1].kind === "PUNCT" && ts[k + 1].text === "|") &&
+      !(ts[k - 1] && ts[k - 1].kind === "PUNCT" && ts[k - 1].text === "|");
+    if (depth === 0 && isBar && (k === 0 || sawArrow)) {
+      const n = ts[k + 1];
+      const wildOrProduct = !!n && ((n.kind === "IDENT" && n.text === "_") || (n.kind === "KEYWORD" && n.text === "else") || (n.kind === "PUNCT" && n.text === "("));
+      if (!wildOrProduct) {
+        // a pattern chain, then an arm arrow?
+        let d = 0;
+        for (let j = k + 1; j < ts.length; j++) {
+          const u = ts[j];
+          if (d === 0 && isArrowTok(u)) return true;
+          if (!isPatternTok(u)) break;
+          d += depthDelta(u);
+          if (d < 0) break;
+        }
+      }
+    }
+    depth += depthDelta(t);
+  }
+  return false;
+}
+
 /**
  * Does the arm text hold a `/` the lexer reads as DIVISION? Used only to word a refusal:
  * impl#1's lexer reads a `/` right after a binary `+` / `-` / `*` / `%` as division, so a

@@ -7403,6 +7403,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         tok.kind === "PUNCT" && tok.text === "," &&
         _matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth
       ) break;
+      // S469 r5 — at the same arm level, a `|` that LEADS an arm (`| 1 :> …`, a pattern
+      // chain and an arm arrow after it) ends the arm body before it, on this line or the
+      // next: it is never a bitwise `|` (an arrow follows the operand). The body loop refuses
+      // the leading `|` (E-PARSE-001, §18.2). Not while this collection is still an arm HEAD
+      // (`.A | .B :>`) — there the `|` is the head's own alternation.
+      if (
+        !_inArmHead && parts.length > 0 &&
+        depth === 0 && angleDepth === 0 &&
+        tok.kind === "PUNCT" && tok.text === "|" &&
+        !(peek(1) && peek(1).kind === "PUNCT" && peek(1).text === "|") &&
+        _matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth &&
+        armPatternChainArrowOffset(peek, 1) >= 0
+      ) break;
       // BLOCK_REF at depth 0 is a statement boundary — the child block
       // (sql, error-effect, meta) should be its own AST node, not part of a bare-expr.
       // Exception: when the BLOCK_REF is inside a tag body (tagNesting > 0), the
@@ -9993,6 +10006,22 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           (n1.kind === "PUNCT" && n1.text === "(" && scanProductPatternArm(peek, 1, _multiScrutineeArity >= 2 ? 1 : 2) != null)
         );
         if (startsArm) { consume(); continue; }
+        // S469 r5 (g-impl1-legacy-pipe-literal-match-arms-s469) — any other `|` that leads
+        // an arm (`| 1 :> …`, `| "a" :> …`, `| .V :> …`) is the `!{}` handler's legacy
+        // spelling; §18.2's `match` grammar never admitted it (§19.4.5). It used to be read
+        // past — a statement match silently ran its LAST arm for every subject. Refuse it,
+        // consume the `|`, and let the arm parse so the rest of the list still reads.
+        if (_atArmLevel && armPatternChainArrowOffset(peek, 1) >= 0) {
+          errors.push(new TABError(
+            "E-PARSE-001",
+            "E-PARSE-001: a `match` arm takes no leading `|` (§18.2) — write the arm as `<pattern> :> body`. " +
+            "The `|`-led arm is the legacy spelling of a `!{}` handler arm only (§19.4.5); in a `match` it " +
+            "separates nothing (arms are separated by `,`, or by a line break).",
+            tokenSpan(tok, filePath),
+          ));
+          consume();
+          continue;
+        }
       }
 
       if (rejectDanglingElse(stmts[stmts.length - 1])) { _armSepOpen = false; continue; }
