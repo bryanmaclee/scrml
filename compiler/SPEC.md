@@ -4554,6 +4554,9 @@ ${ function computeHash(pw: string) {       // escalates server-side per §12.2 
 
 ### 6.7 Lifecycle and Timing Model
 
+> **Amendment S469 — §6.7's examples end their statements with `;`.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐⭐⭐ RULED — dpa-073 F1 = (a)" — *"(a) `;` terminates (Recommended)"* · ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2(i) / F3(i) / F4(ii)" — F3 *"Every statement (Recommended)"* (*"`;` after every non-block statement including the last before `}` (`onclick={ @n = @n + 1; }`); block-like statements and closer-delimited items take none."*) · PA reading of the F6 dispositions (S469, veto window) — *"`lift <…>` takes `;`"*.
+>
+> What changed: in every non-struck `scrml` block of §6.7 (§6.7.1a – §6.7.11), each statement now ends with `;` — a statement in a `${ … }` logic body (including the one assignment of a `<request>` / `<poll>` / `<timer>` / `<timeout>` body and an `<onMount>` / `<effect>` body), in a function or arrow body, at a `<program>` body top (a `<name> = value` declaration), and a `lift <…>`. What takes none, per F3 (i): a block-like statement (`if` / `else`, `for`, a function declaration), an item delimited by its own closer (`let <x/>`, a markup child), a value position (a markup `${ … }` interpolation in render position, a bare handler value `onclick=${ … }`). Struck blocks, grammar blocks and compiler-output blocks are unchanged (`request-body`'s `assignment-expression` takes the `;` in the examples but its production is not rewritten here). No example changes meaning. §66.19 is not touched by this amendment (its blocks are verbatim copies of the bootstrap's slice sources and move with them).
 
 ### 6.7.1 Overview
 
@@ -4645,8 +4648,8 @@ onmount-body  ::= '$' '{' logic-content '}'
 ```
 
 ```scrml
-<onMount>${ @noteBox.focus() }</>
-<onMount>${ track("view", { page: "load-detail", loadId: @loadId }) }</>
+<onMount>${ @noteBox.focus(); }</>
+<onMount>${ track("view", { page: "load-detail", loadId: @loadId }); }</>
 ```
 
 - An `<onMount>` SHALL appear where an `<effect>` may: as a child element of an element scope (§6.7.4 "Syntax").
@@ -4738,7 +4741,7 @@ chain down to the write, and SHALL name the home for the job, picked by shape wh
 
 ```scrml
 let <mode:DiffMode=.WorkingCopy/>
-<onMount>${ @mode = modeFromParam(changeParam()) }</>      // E-MOUNT-WRITES-STATE
+<onMount>${ @mode = modeFromParam(changeParam()); }</>      // E-MOUNT-WRITES-STATE
 // E-MOUNT-WRITES-STATE: this mount body writes `@mode`. <onMount> prepares the outside world and may not write
 // reactive state during the mount. A value computed from the URL belongs in the cell's initializer:
 //     let <mode:DiffMode=modeFromParam(changeParam())/>
@@ -4794,11 +4797,11 @@ let <mapEl:HTMLElement|not=not/>
 let <noteBox:HTMLElement|not=not/>
 
 <onMount>${
-    const map = createRouteMap(@mapEl, @center, 9)                // third-party widget, needs the element
-    map.on("moveend", () => { @center = map.getCenter() })        // legal: the widget writes LATER (3m)
-    @noteBox.focus()                                              // the box exists: after render and ref= (1c)
-    track("view", { page: "load-detail", loadId: @loadId })       // analytics page view
-    cleanup(() => map.remove())                                   // teardown beside the setup (3a)
+    const map = createRouteMap(@mapEl, @center, 9);               // third-party widget, needs the element
+    map.on("moveend", () => { @center = map.getCenter(); });       // legal: the widget writes LATER (3m)
+    @noteBox.focus();                                             // the box exists: after render and ref= (1c)
+    track("view", { page: "load-detail", loadId: @loadId });      // analytics page view
+    cleanup(() => map.remove());                                  // teardown beside the setup (3a)
 }</>
 <div ref=@mapEl class="h-64"></div>
 <textarea ref=@noteBox bind:value=@note></textarea>
@@ -4965,11 +4968,11 @@ that produces a non-function.
 
 ```scrml
 // Valid forms
-cleanup(() => { closeConnection() })
-cleanup(teardownFn)
+cleanup(() => { closeConnection(); });
+cleanup(teardownFn);
 
 // Invalid — cleanup() argument is not a function
-cleanup(closeConnection())   // E-LIFECYCLE-002
+cleanup(closeConnection());  // E-LIFECYCLE-002
 ```
 
 #### Semantics
@@ -4997,14 +5000,14 @@ defines it. Scope resolution is determined at the call site, not the definition 
 ```scrml
 // In utils.scrml
 export fn setupSocket {
-    const ws = new WebSocket(url)
-    cleanup(() => ws.close())   // registers on CALLER's scope
-    return ws
+    const ws = new WebSocket(url);
+    cleanup(() => ws.close());  // registers on CALLER's scope
+    return ws;
 }
 
 // In app.scrml
 <div class="chat" if=@showChat>
-    <onMount>${ setupSocket() }</>   // cleanup fires when <div if=@showChat> destroys
+    <onMount>${ setupSocket(); }</>  // cleanup fires when <div if=@showChat> destroys
 </>
 ```
 
@@ -5125,9 +5128,9 @@ effect-body   ::= '$' '{' logic-content '}'
 ```
 
 ```scrml
-<effect deps=[@category]>${ track("filter", { category: @category, query: @query }) }</>
-<effect deps=[@messages]>${ scrollToBottom(@logEl) }</>
-<effect deps=[@mapCenter, @zoom]>${ leafletMap.setView([@mapCenter.lat, @mapCenter.lng], @zoom) }</>
+<effect deps=[@category]>${ track("filter", { category: @category, query: @query }); }</>
+<effect deps=[@messages]>${ scrollToBottom(@logEl); }</>
+<effect deps=[@mapCenter, @zoom]>${ leafletMap.setView([@mapCenter.lat, @mapCenter.lng], @zoom); }</>
 ```
 
 - `deps=` is REQUIRED and SHALL list at least one cell. An `<effect>` with no `deps=`, or with `deps=[]`, never
@@ -5306,7 +5309,7 @@ homes for the job, picked by shape where the compiler can tell:
 let <query:string=""/>
 let <page:int=1/>
 
-<effect deps=[@query]>${ @page = 1 }</>          // E-EFFECT-WRITES-STATE
+<effect deps=[@query]>${ @page = 1; }</>         // E-EFFECT-WRITES-STATE
 // E-EFFECT-WRITES-STATE: this effect writes `@page`. An <effect> drives the outside world and may not write
 // reactive state. To reset `@page` when `@query` changes, declare it on the cell:
 //     let <page:int=1 reset-on=[@query]/>
@@ -5402,9 +5405,9 @@ the **transition-write graph** and reject a cycle in it:
 type SyncState:enum = { Idle, Pushing, Failed }
 <engine for=SyncState initial=.Idle>
     <Idle rule=.Pushing/>
-    <Pushing rule=(.Idle | .Failed) effect=${ push() !{ _ e :> { @syncState = .Failed } } }/>
+    <Pushing rule=(.Idle | .Failed) effect=${ push() !{ _ e :> { @syncState = .Failed; } }; }/>
     <Failed rule=.Pushing>
-        <onTransition from=.Pushing>${ @syncState = .Pushing }</>   // E-TRANSITION-WRITE-CYCLE: Pushing → Failed → Pushing
+        <onTransition from=.Pushing>${ @syncState = .Pushing; }</>  // E-TRANSITION-WRITE-CYCLE: Pushing → Failed → Pushing
     </>                                                            // fix: <onTimeout after=5s to=.Pushing/> in Failed
 </>
 ```
@@ -5492,17 +5495,17 @@ to become un-paused without a reactive variable. The compiler SHALL emit W-LIFEC
 ```scrml
 // Minimal timer — fires every 1000ms, always running
 <timer interval=1000>
-    ${ @tick = @tick + 1 }
+    ${ @tick = @tick + 1; }
 </>
 
 // Named, conditionally running timer
 <timer id="refresh" interval=5000 running=@autoRefreshEnabled>
-    ${ @data = fetchData() }
+    ${ @data = fetchData(); }
 </>
 
 // Produces W-LIFECYCLE-007: running=false literal is useless
 <timer interval=1000 running=false>
-    ${ @tick = @tick + 1 }
+    ${ @tick = @tick + 1; }
 </>
 ```
 
@@ -5546,7 +5549,7 @@ properties are available on a timer reference:
 
 ```scrml
 <timer id="poller" interval=3000 running=@pollEnabled>
-    ${ @messages = fetchMessages() }
+    ${ @messages = fetchMessages(); }
 </>
 
 <p>Poll active: ${<#poller>.running}</>
@@ -5656,7 +5659,7 @@ its first execution SHALL remain one interval after arming (§6.7.5).
 
 ```scrml
 <poll id="serverTime" interval=10000>
-    ${ @serverTime = fetchServerTime() }
+    ${ @serverTime = fetchServerTime(); }
 </>
 ```
 
@@ -5690,7 +5693,7 @@ poll body has no observable data-loading effect).
 
 ```scrml
 <poll id="price" interval=5000>
-    ${ @currentPrice = fetchPrice(@tickerId) }
+    ${ @currentPrice = fetchPrice(@tickerId); }
 </>
 
 <p>Price: ${<#price>.value}</>
@@ -5779,17 +5782,17 @@ The `cache` attribute is optional and bare (S444, dpa-060 — **Nominal / spec-a
 ```scrml
 // Minimal — fetches on mount, re-fetches when @userId changes (inferred)
 <request id="profile">
-    ${ @user = fetchUser(@userId) }
+    ${ @user = fetchUser(@userId); }
 </>
 
 // Explicit deps — re-fetches when @page or @filter changes
 <request id="results" deps=[@page, @filter]>
-    ${ @items = fetchItems(@page, @filter) }
+    ${ @items = fetchItems(@page, @filter); }
 </>
 
 // Fetch on mount only — no reactive deps
 <request id="config" deps=[]>
-    ${ @appConfig = fetchConfig() }
+    ${ @appConfig = fetchConfig(); }
 </>
 ```
 
@@ -5900,22 +5903,22 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 
 ```scrml
 <program>
-    <userId> = 42
+    <userId> = 42;
 
     <request id="profile">
-        ${ @user = fetchUser(@userId) }
+        ${ @user = fetchUser(@userId); }
     </>
 
     <div>
         ${
             if (<#profile>.loading && !<#profile>.stale) {
-                lift <p>Loading...</>
+                lift <p>Loading...</>;
             } else if (<#profile>.error) {
-                lift <p>Error: ${<#profile>.error.message}</>
-                lift <button onclick=${<#profile>.refetch()}>Retry</>
+                lift <p>Error: ${<#profile>.error.message}</>;
+                lift <button onclick=${<#profile>.refetch()}>Retry</>;
             } else {
-                lift <h1>${@user.name}</>
-                lift <p>${@user.email}</>
+                lift <h1>${@user.name}</>;
+                lift <p>${@user.email}</>;
             }
         }
     </>
@@ -5927,18 +5930,18 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 ```scrml
 <program>
     <request id="config" deps=[]>
-        ${ @appConfig = fetchConfig() }
+        ${ @appConfig = fetchConfig(); }
     </>
 
     <div>
         ${
             if (@appConfig is not) {
-                lift <p>Loading config...</>
+                lift <p>Loading config...</>;
             } else {
                 lift <div class="app">
                     <h1>${@appConfig.title}</h1>
                     <p>${@appConfig.tagline}</p>
-                </>
+                </>;
             }
         }
     </>
@@ -6183,8 +6186,8 @@ let <issueId:int=42/>
 let <body:string="" debounced=800ms/>
 let <savedAt:string=""/>
 
-<request id="load" deps=[@issueId]>${ @body = loadIssueBody(@issueId) }</>      // READ: runs on mount
-<request id="save" deps=[@body]>${ @savedAt = saveIssueBody(@issueId, @body) }</>  // provably writes (UPDATE)
+<request id="load" deps=[@issueId]>${ @body = loadIssueBody(@issueId); }</>     // READ: runs on mount
+<request id="save" deps=[@body]>${ @savedAt = saveIssueBody(@issueId, @body); }</> // provably writes (UPDATE)
 
 <textarea bind:value=@body/>
 <p>${ <#save>.error ? "Not saved" : <#save>.loading ? "Saving…" : "Saved " + @savedAt }</p>
@@ -6248,12 +6251,12 @@ Use `<#id>.cancel()` to prevent firing.
 ```scrml
 // Minimal timeout — fires once after 5000ms
 <timeout delay=5000>
-    ${ @sessionExpired = true }
+    ${ @sessionExpired = true; }
 </>
 
 // Named timeout — supports .cancel() and .fired
 <timeout id="paymentGuard" delay=10000>
-    ${ @paymentTimedOut = true }
+    ${ @paymentTimedOut = true; }
 </>
 
 // Cancellable on user action
@@ -6300,11 +6303,11 @@ properties and methods are available:
 
 ```scrml
 <timeout id="paymentGuard" delay=10000>
-    ${ @paymentTimedOut = true }
+    ${ @paymentTimedOut = true; }
 </>
 
 when <#paymentGuard>.fired changes {
-    ${ logPaymentTimeout() }
+    ${ logPaymentTimeout(); }
 }
 
 <p>${<#paymentGuard>.fired ? "Expired" : "Active"}</>
@@ -6369,10 +6372,10 @@ compiler SHALL emit E-LIN-004 if a `lin` variable is referenced inside a `<timeo
 
 ```scrml
 <program>
-    <sessionExpired> = false
+    <sessionExpired> = false;
 
     <timeout id="sessionGuard" delay=1800000>
-        ${ @sessionExpired = true }
+        ${ @sessionExpired = true; }
     </>
 
     <div if=@sessionExpired class="expired-banner">
@@ -6395,7 +6398,7 @@ write inside the body triggers reactive re-render of the conditional `<div>`.
 
 ```scrml
 <timeout id="guard">
-    ${ @timedOut = true }
+    ${ @timedOut = true; }
 </>
 ```
 
@@ -6409,10 +6412,10 @@ Error E-TIMEOUT-001 at line 1: `<timeout>` requires a `delay` attribute.
 
 ```scrml
 <program>
-    <paymentTimedOut> = false
+    <paymentTimedOut> = false;
 
     <timeout id="paymentGuard" delay=10000>
-        ${ @paymentTimedOut = true }
+        ${ @paymentTimedOut = true; }
     </>
 
     <div>
@@ -6427,7 +6430,7 @@ Error E-TIMEOUT-001 at line 1: `<timeout>` requires a `delay` attribute.
 
 ```scrml
 <timeout delay=0>
-    ${ doSomething() }
+    ${ doSomething(); }
 </>
 ```
 
@@ -6488,14 +6491,14 @@ E-LIFECYCLE-017 if `animationFrame()` is called outside any element scope (as de
 <canvas ref=@canvasEl width="800" height="600">
     ${
         function draw() {
-            const ctx = @canvasEl.getContext('2d')
-            ctx.clearRect(0, 0, 800, 600)
+            const ctx = @canvasEl.getContext('2d');
+            ctx.clearRect(0, 0, 800, 600);
             for (shape of @shapes) {
-                lift ctx.strokeRect(shape.x, shape.y, shape.w, shape.h)
+                lift ctx.strokeRect(shape.x, shape.y, shape.w, shape.h);
             }
-            animationFrame(draw)
+            animationFrame(draw);
         }
-        animationFrame(draw)
+        animationFrame(draw);
     }
 </>
 ```
@@ -6621,18 +6624,18 @@ E-RESET-ON-ENGINE-REFUSED · E-RESET-ON-SHARED-CELL (S449) (§34).
 
 ```scrml
 <program>
-    ${ loadDashboard() }
+    ${ loadDashboard(); }
 
-    <autoRefresh>  = false
-    <intervalSecs> = 30      // reactive @ cell — this is NOT the timer interval attribute
-    <countdown>    = 30
+    <autoRefresh>  = false;
+    <intervalSecs> = 30;     // reactive @ cell — this is NOT the timer interval attribute
+    <countdown>    = 30;
 
     <timer id="refresh" interval=1000 running=@autoRefresh>
         ${
-            @countdown = @countdown - 1
+            @countdown = @countdown - 1;
             if (@countdown <= 0) {
-                loadDashboard()
-                @countdown = @intervalSecs   // reads current value of @intervalSecs
+                loadDashboard();
+                @countdown = @intervalSecs;  // reads current value of @intervalSecs
             }
         }
     </>
@@ -6664,19 +6667,19 @@ callbacks (none were registered).
 
 ```scrml
 <program>
-    <showChat> = false
+    <showChat> = false;
 
     <button onclick=${@showChat = !@showChat}>Toggle Chat</>
 
     <div class="chat-panel" if=@showChat>
         <timer id="poll" interval=3000>
-            ${ @messages = fetchMessages() }
+            ${ @messages = fetchMessages(); }
         </>
 
-        cleanup(() => { disconnectFromRoom() })
+        cleanup(() => { disconnectFromRoom(); });
 
         <div class="messages">
-            ${ for (m of @messages) { lift <p>${m.text}/ } }
+            ${ for (m of @messages) { lift <p>${m.text}/; } }
         </>
     </>
 </>
@@ -6708,16 +6711,16 @@ When `@showChat` transitions false → true a second time:
     let <results:Item[replace]=[]/>
 
     <request id="search" deps=[@query, @minPrice, @maxPrice, @page]>
-        ${ @results = searchItems(@query, @minPrice, @maxPrice, @page) }
+        ${ @results = searchItems(@query, @minPrice, @maxPrice, @page); }
     </>
-    <effect deps=[@query]>${ track("search", { q: @query }) }</>
+    <effect deps=[@query]>${ track("search", { q: @query }); }</>
 
     <input bind:value=@query placeholder="Search..."/>
     <input bind:value=@minPrice type="number" placeholder="Min price"/>
     <input bind:value=@maxPrice type="number" placeholder="Max price"/>
 
     <p>Page: ${@page}</>
-    ${ for (r of @results) { lift <p>${r.name}/ } }
+    ${ for (r of @results) { lift <p>${r.name}/; } }
 </>
 ```
 
@@ -6738,10 +6741,10 @@ does not run on mount and writes nothing — it only reports the search to analy
     let <page:int=1/>
     let <lastSeen:string=""/>
 
-    ${ function remember(p: int) { @lastSeen = `page ${p}` } }
+    ${ function remember(p: int) { @lastSeen = `page ${p}`; } }
 
-    <effect deps=[@page]>${ @page = 1 }</>             // E-EFFECT-WRITES-STATE (direct; also a self-trigger)
-    <effect deps=[@page]>${ remember(@page) }</>       // E-EFFECT-WRITES-STATE (through remember())
+    <effect deps=[@page]>${ @page = 1; }</>            // E-EFFECT-WRITES-STATE (direct; also a self-trigger)
+    <effect deps=[@page]>${ remember(@page); }</>      // E-EFFECT-WRITES-STATE (through remember())
 </>
 ```
 
@@ -6763,7 +6766,7 @@ Move the write into the code that changes `@page`, or derive the value (§6.6).
 
 ```scrml
 <program>
-    cleanup(closeConnection())   // E-LIFECYCLE-002
+    cleanup(closeConnection());  // E-LIFECYCLE-002
 </>
 ```
 
@@ -6784,7 +6787,7 @@ E-LIFECYCLE-002: `cleanup()` argument must be a function expression, not a call 
     let <qty:number=2/>
     let <total:number=0/>
 
-    <effect deps=[@price]>${ @total = @price * @qty }</>   // E-EFFECT-WRITES-STATE
+    <effect deps=[@price]>${ @total = @price * @qty; }</>  // E-EFFECT-WRITES-STATE
 </>
 ```
 
@@ -6800,11 +6803,11 @@ third fix text says so.
 
 ```scrml
 <program>
-    <tickerId>     = "AAPL"
-    <currentPrice> = not
+    <tickerId>     = "AAPL";
+    <currentPrice> = not;
 
     <poll id="price" interval=5000>
-        ${ @currentPrice = fetchPrice(@tickerId) }
+        ${ @currentPrice = fetchPrice(@tickerId); }
     </>
 
     <p>Price: ${@currentPrice ?? "Loading..."}</>
@@ -6817,19 +6820,19 @@ third fix text says so.
 
 ```scrml
 <program>
-    <shapes> = []
+    <shapes> = [];
 
     <canvas ref=@canvasEl width="800" height="600">
         ${
             function draw() {
-                const ctx = @canvasEl.getContext('2d')
-                ctx.clearRect(0, 0, 800, 600)
+                const ctx = @canvasEl.getContext('2d');
+                ctx.clearRect(0, 0, 800, 600);
                 for (shape of @shapes) {
-                    lift ctx.strokeRect(shape.x, shape.y, shape.w, shape.h)
+                    lift ctx.strokeRect(shape.x, shape.y, shape.w, shape.h);
                 }
-                animationFrame(draw)
+                animationFrame(draw);
             }
-            animationFrame(draw)
+            animationFrame(draw);
         }
     </>
 </>
@@ -6851,14 +6854,14 @@ The `<canvas>` element is not conditionally rendered here, so its scope is perma
 ```scrml
 // In network.scrml
 export fn openConnection(url: string) {
-    const ws = new WebSocket(url)
-    cleanup(() => ws.close())   // cleanup() inside this function => RI classifies as client-side
-    return ws
+    const ws = new WebSocket(url);
+    cleanup(() => ws.close());  // cleanup() inside this function => RI classifies as client-side
+    return ws;
 }
 
 // In app.scrml
 <div if=@connected>
-    ${ const conn = openConnection(@serverUrl) }
+    ${ const conn = openConnection(@serverUrl); }
 </>
 ```
 
@@ -6869,12 +6872,12 @@ is not server-escalated. When the `<div if=@connected>` scope destroys, `ws.clos
 
 ```scrml
 <program>
-    <count>   = 0
-    <enabled> = true
+    <count>   = 0;
+    <enabled> = true;
 
     ${
         if (@enabled) {
-            cleanup(() => { console.log("cleanup", @count) })
+            cleanup(() => { console.log("cleanup", @count); });
         }
     }
 </>
