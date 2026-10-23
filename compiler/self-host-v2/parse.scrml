@@ -1848,8 +1848,42 @@ ${
             const re: REffect = parseEffectTokens(tp)
             return mkS(re.tp, start, AStmtK.EffectStmt(re.w))
         }
+        // s469 r3 — dpa-073 F3 (i): a `match` that STARTS a statement is
+        // block-like, and its arms' `}` ends the statement (a value `match` —
+        // `const v = match …`, `@x = match …`, one inside an expression — is
+        // parsed by parseAssign and still needs its `;`). So `match k { … }⏎-1;`
+        // is two statements, never `match … - 1`. On the SAME line, a token that
+        // would continue an expression after the `}` (`match k { … } + 2`) is
+        // refused (E-PARSE-TRAILING) rather than silently split: the writer
+        // plainly meant one expression, and its value form is `(match …) + 2`.
+        if (isWord(tp, "match")) {
+            const rm: RExpr = parseMatch(tp, start)
+            let mt: TP = rm.tp
+            if (mt.i > 0 && continuesAfterBlock(mt)) {
+                const x: PTok = cur(mt)
+                mt = diagAt(mt, "E-PARSE-TRAILING", "unexpected `" + x.text + "` after a statement `match`: a `match` that starts a statement ends at its `}` (dpa-073 F3) — to use its value in an expression, write the expression around it: `(match … { … }) " + x.text + " …`, or start the statement with something else (`const v = match … { … };`)", x)
+                const rr: RExpr = parseAssign(mt)
+                mt = rr.tp
+            }
+            return mkS(mt, start, AStmtK.Eval(rm.e))
+        }
         const e: RExpr = parseAssign(tp)
         return mkS(e.tp, start, AStmtK.Eval(e.e))
+    }
+
+    // s469 r3 — after a block-like statement's `}` (token tp.i - 1): does the
+    // next token, on the SAME line, read as continuing an expression (a binary
+    // or assignment operator, `.` / `?.`, a call `(`, an index `[`, `?`, `!`,
+    // a template)?
+    fn continuesAfterBlock(tp: TP) -> boolean {
+        const x: PTok = cur(tp)
+        if (x.cls == TC.End) return false
+        if (x.line != tp.toks[tp.i - 1].line) return false
+        if (x.cls == TC.TChunk) return true
+        if (binPrec(tp) > 0) return true
+        if (isP(tp, "=") || isCompoundAssign(tp)) return true
+        if (x.cls != TC.Punct) return false
+        return tk(x, ".") || tk(x, "?.") || tk(x, "(") || tk(x, "[") || tk(x, "?") || tk(x, "!")
     }
 
     // =========================================================================

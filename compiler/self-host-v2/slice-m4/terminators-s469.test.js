@@ -211,3 +211,38 @@ describe("r2 — `lift` followed by a line break is refused, like `return` (fail
     expect(codes(src("lift m;"))).toEqual([]);
   });
 });
+
+describe("r3 — a `match` that starts a statement ends at its `}` (F3 (i): block-like)", () => {
+  // the statements of f's body, as kinds (Eval:<expr kind>)
+  const kinds = (body) => {
+    const r = run(P(fn(body)));
+    const f = r.asts[0].items.flatMap((i) => i.k?.data?.p?.items ?? [i]).find((i) => i.k?.variant === "FnItem" && i.k.data.f.name === "f");
+    return { codes: r.diags.map((d) => d.code), kinds: f.k.data.f.body.stmts.map((s) => s.k.variant + (s.k.variant === "Eval" ? ":" + s.k.data.e.k.variant : "")) };
+  };
+  const M = `        match k { .A :> @n = 1, .B :> @n = 2 }`;
+  for (const [what, next] of [["-1", "-1;"], [".A", ".A;"], ["(x)", "(@n);"], ["[1]", "[1];"], ["a template", "`t`;"]]) {
+    test(`\`match k { … }⏎${what}\` is two statements — the match, then \`${next}\` — never one glued expression`, () => {
+      const r = kinds(`${M}\n        ${next}\n        return 0;`);
+      expect(r.kinds[0]).toBe("Eval:Handled");
+      // (the match is its own statement; what follows is read on its own — `.A` may itself split further)
+      expect(r.kinds.length).toBeGreaterThanOrEqual(3);
+      expect(r.kinds[r.kinds.length - 1]).toBe("Return");
+    });
+  }
+  test("on the SAME line, a continuing token after the `}` is refused (E-PARSE-TRAILING), not glued and not split", () => {
+    const r = kinds(`${M} + 2;\n        return 0;`);
+    expect(r.codes).toContain("E-PARSE-TRAILING");
+    expect(r.kinds[0]).toBe("Eval:Handled");
+    const d = run(P(fn(`${M} + 2;\n        return 0;`))).diags.find((x) => x.code === "E-PARSE-TRAILING");
+    expect(d.message).toContain("(match … { … }) +");
+  });
+  test("a statement match needs no `;`, and a following statement on the same line needs none either (the `}` ends it)", () => {
+    expect(kinds(`${M}\n        return 0;`).codes).toEqual([]);
+    expect(kinds(`${M} @n = 3;\n        return 0;`).codes).toEqual([]);
+  });
+  test("a VALUE match keeps needing its `;` — and keeps reading the next line as its continuation (`const v = match …`)", () => {
+    expect(kinds(`        const v = match k { .A :> 1, .B :> 2 }\n        return v;`).codes).toEqual(["E-STMT-MISSING-SEMICOLON"]);
+    expect(kinds(`        const v = match k { .A :> 1, .B :> 2 }\n            + 1;\n        return v;`).codes).toEqual([]);
+    expect(kinds(`        @n = match k { .A :> 1, .B :> 2 } + 1;\n        return 0;`).codes).toEqual([]);
+  });
+});
