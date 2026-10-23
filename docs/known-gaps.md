@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 265 | 4 |
-| MED | 678 | 7 |
+| MED | 677 | 7 |
 | LOW | 467 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -42,12 +42,6 @@
 
 Found by the S469 templates lane. Reproduced S469 (s469-spec-lin-request) both inside a top-level `${ }` block and bare in the `<program>` body: impl#1 compiles at exit 0 (only the redundant-logic lint), emits both as `_scrml_pick_2` / `_scrml_pick_3`, and every call goes to the later one. The SPEC already rules this: two top-level `function` declarations of one name are **E-SCOPE-010** (§7.6, S440 #6), and the §34 row marks that case Nominal on impl#1. The bootstrap refuses it (`E-SCOPE-010: function \`pick\` is already declared at file scope`). Cost: an adopter who pastes a second helper with the same name gets the wrong function with no warning. Not fixed: impl#1 is fixed only for bootstrap or security work (S435), and the owner ruled that non-security bugs stay gaps. (Inside a function body, two same-named `function` declarations are outside §7.3.3's rule, which is a separate SPEC question and not this gap.)
 
-### g-spec-route-query-missing-key-unspecified-s469 — SPEC §20.4 does not say what `route.query.<key>` yields when the URL has no such key: it says every `route.query` value "SHALL have type `string`", which cannot hold for an absent key — `NEW S469; MED; open (ruling owed — owner)`
-
-<!-- @gap id=g-spec-route-query-missing-key-unspecified-s469 sev=MED status=open locus=compiler/SPEC.md(§20.4 normative statements "`route.query` SHALL expose all query string key-value pairs present in the request URL" and "All values on `route.params` and `route.query` SHALL have type `string`") prov=dispatch:s469-spec-lin-request(owed to the owner, PA brief item 3b);spec:§20.4 -->
-
-§20.4 types every `route.query` value `string` and exposes only the keys present in the URL, so a read of a missing key (`route.query.tab` on `/settings`) has no specified value. On impl#1 such a read is a host-JS property miss. A path parameter has no such hole: an unknown one is E-SCOPE-011 at compile time, but the query string is not known until the request arrives. Also unspecified: a key with no `=` (`?tab`), and a key given twice (`?tag=a&tag=b`). **Owed to the owner.** **PA recommendation:** `route.query.<key>` has type `string | not` and is `not` when the key is absent, which matches the S469 rule that a failed parse is `T | not`. A bare `?tab` is `""`. A repeated key yields its first value, with the full list behind a separate accessor if one is ever wanted. The alternative, an absent key reading as `""`, would make "absent" and "present but empty" the same value, which is the same mistake as `g-sse-arg-not-vs-omitted-indistinguishable-s466`.
-
 ### g-bootstrap-lin-not-implemented-s469 — the BOOTSTRAP has no `lin`: a `lin` declaration is `E-SCOPE-001: \`lin\` is not declared`, and a `lin` parameter is misreported as "an unannotated parameter `lin`" (E-BOOTSTRAP-UNSUPPORTED) — `NEW S469; MED; open (owed bootstrap change; fails closed)`
 
 <!-- @gap id=g-bootstrap-lin-not-implemented-s469 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(the parameter check that emits "an unannotated parameter `…`" — it is handed `lin` as the parameter's name; the declaration path, where `lin` reads as an identifier, is not traced) prov=dispatch:s469-spec-lin-request(PA brief item 3c);spec:§35,§6.7.7 -->
@@ -56,9 +50,9 @@ Reproduced S469 (s469-spec-lin-request) on the bootstrap (`bun scripts/scrml-boo
 
 ### g-spec-route-query-missing-key-s469 — SPEC §20.4 types every `route.query` value `string` but does not say what reading a query key that is ABSENT from the URL yields (`""`, `not`, or an error) — `NEW S469; LOW; open (SPEC editorial)`
 
-<!-- @gap id=g-spec-route-query-missing-key-s469 sev=LOW status=open locus=compiler/SPEC.md(§20.4 Route Parameters: "All values on `route.params` and `route.query` SHALL have type `string`.") prov=review:s469-docs-migrate-2(content review of llm-kickstarter-v2 §11.7, round 1);spec:§20.4 -->
+<!-- @gap id=g-spec-route-query-missing-key-s469 sev=LOW status=open locus=compiler/SPEC.md(§20.4 Route Parameters: "All values on `route.params` and `route.query` SHALL have type `string`.") prov=review:s469-docs-migrate-2(content review of llm-kickstarter-v2 §11.7, round 1);dispatch:s469-spec-lin-request(PA brief item 3b — merged duplicate g-spec-route-query-missing-key-unspecified-s469);spec:§20.4 -->
 
-Owed: a ruling on the missing-key value. If it is `not`, `route.query.k` is `string | not` and must be narrowed before use, which contradicts "always `string`". If it is `""`, the SPEC should say so (an absent key and `?k=` become indistinguishable). `docs/articles/llm-kickstarter-v2-2026-05-04.md` §11.7 assumes `""` and carries a ⚑ note pointing here.
+Owed: a ruling on the missing-key value. If it is `not`, `route.query.k` is `string | not` and must be narrowed before use, which contradicts "always `string`". If it is `""`, the SPEC should say so (an absent key and `?k=` become indistinguishable). `docs/articles/llm-kickstarter-v2-2026-05-04.md` §11.7 assumes `""` and carries a ⚑ note pointing here. Also unspecified: a key with no `=` (`?tab`) and a key given twice (`?tag=a&tag=b`). On impl#1 a missing-key read is a host-JS property miss, typed `string`. **PA recommendation (S469, s469-spec-lin-request; owed to the owner):** `route.query.<key>` has type `string | not` and is `not` when the key is absent, which matches the S469 rule that a failed parse is `T | not`; a bare `?tab` is `""`; a repeated key yields its first value. Reading an absent key as `""` would make "absent" and "present but empty" one value, the same mistake as `g-sse-arg-not-vs-omitted-indistinguishable-s466`. (Merged S469: this entry absorbs the duplicate `g-spec-route-query-missing-key-unspecified-s469`.)
 
 ### g-bootstrap-integer-type-name-refused-s469 — the BOOTSTRAP refuses the type name `integer`, which SPEC §14.13.6 keeps as a soft-deprecated synonym of `int` through a §63 window — `NEW S469; LOW; RESOLVED S469 (s469-boot-ruled-backlog)`
 
