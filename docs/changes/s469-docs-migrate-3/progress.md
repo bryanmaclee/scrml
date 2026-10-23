@@ -40,3 +40,15 @@ Branch `s469-docs-migrate-3`, cut from origin/main 29b6320ad. Follows #1499 (mig
 - [x] Windows: claim-gate + snippet-gate normalise discovered paths to `/`; A7 + round-3 tests updated.
 - [x] claim-gate on this tree (origin/main had nothing newer): 18 passed, 73 skipped, 36 snippet, 24 spec-ahead, 0 failed (151); exit 0, also with --strict.
 - [x] Promoted: claim-gate is a step in `checks` (blocking via `gate`); the tracking step is removed. The narrow ruled-docs step is not needed.
+
+## Round 3 (final-review FIX)
+- [x] BLOCKER: round 2 reported snippet-gate counts but not its exit code; it exited 1 on DRIFT NERDME.md:491 (the
+      `gate: skip` `<program mcp=…>` fragment). Now inline prose. snippet-drift.test.js pins the shape and runs
+      checkDrift over the real repo, so pre-commit catches the next one.
+- [x] NERDME: §66.3 rules 5–10 inference; quoted-text model enforced by the bootstrap (E-UNQUOTED-DISPLAY-TEXT);
+      `~` impl#1-only; codes-are-the-SPEC's sentence; shadowing + number bind marked not-in-bootstrap.
+      E-PARAM-TYPE-REQUIRED is already in the SPEC on main (11 hits; #1501 merged); the bootstrap says E-BOOTSTRAP-UNSUPPORTED.
+- [x] Gap filed: g-bootstrap-local-shadows-state-accepted-s469 (LOW, open); `state.ts --write`, then `--check` PASS.
+- [x] Banner reworded (10 files, banner line only). claim-gate chdirs to the repo root; A7 run-from-tmpdir case.
+- [x] Merged origin/main (90e590cdf). Exit codes: snippet-gate 0 (--strict 0), claim-gate 0 (--strict 0).
+      snippet-gate 112 pass / 0 fail / 17 spec-ahead (129); claim-gate 18 pass / 72 skip / 36 snippet / 24 spec-ahead / 0 fail (150).
