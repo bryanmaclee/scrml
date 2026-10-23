@@ -169,9 +169,10 @@ const PIPE_PAGE = (deny, pos, armsText) => `type AuthErr:enum = { Denied }
         const good = check(p) !{ .Denied :> false }
         return good == true ? 200 : ${deny}
     }
+    function pass(x) { return x }
     function login(p) {
         @st = code(p)
-${pos === "statement" ? `        match @st {\n${armsText(true)}\n        }` : `        @msg = match @st {\n${armsText(false)}\n        }`}
+${pos === "statement" ? `        match @st {\n${armsText(true)}\n        }` : pos === "call argument" ? `        @msg = pass(match @st {\n${armsText(false)}\n        })` : `        @msg = match @st {\n${armsText(false)}\n        }`}
     }
 }
 <button id="wrong" onclick=login("wrong")>go</button>
@@ -189,6 +190,26 @@ const PIPE_LISTS = {
 for (const [ln, [deny, arms]] of Object.entries(PIPE_LISTS)) {
   for (const pos of ["statement", "cell"]) {
     for (const [sn, sep] of SPELLINGS) {
+      const armsText = (stmt) => arms
+        .map(([h, b], i) => `            ${h} :> ${stmt ? `{ @msg = ${b} }` : b}${sep[i]}`).join("\n");
+      shapes.push([`legacy-pipe match arms ${ln}, ${pos} (${sn} arms)`, PIPE_PAGE(deny, pos, armsText)]);
+    }
+  }
+}
+
+// S469 r6 (final review of fc046f011) — a `|`-led FIRST arm before two or more literal arms, at the
+// `@cell` and call-argument positions: the raw splitter dropped the text before the first arm head
+// it found, so the `| "denied"` arm vanished and the denied status fell to the default-ALLOW arm.
+// Measured on fc046f011: the 4 newline-spelled shapes FAIL (the wrong password logs in); all 12 must
+// be PASS-REFUSED (E-PARSE-001).
+const PIPE_FIRST_LISTS = {
+  "first arm piped before three string arms": [`"denied"`, [[`| "denied"`, `"rejected"`], [`"x"`, `"rejected"`], [`"y"`, `"rejected"`], ["else", `"LOGGED IN"`]]],
+  "first arm piped before three number arms": ["401", [["| 401", `"rejected"`], ["402", `"rejected"`], ["403", `"rejected"`], ["_", `"LOGGED IN"`]]],
+};
+const SPELLINGS4 = [["newline", ["", "", "", ""]], ["comma", [",", ",", ",", ","]], ["mixed", [",", "", ",", ""]]];
+for (const [ln, [deny, arms]] of Object.entries(PIPE_FIRST_LISTS)) {
+  for (const pos of ["cell", "call argument"]) {
+    for (const [sn, sep] of SPELLINGS4) {
       const armsText = (stmt) => arms
         .map(([h, b], i) => `            ${h} :> ${stmt ? `{ @msg = ${b} }` : b}${sep[i]}`).join("\n");
       shapes.push([`legacy-pipe match arms ${ln}, ${pos} (${sn} arms)`, PIPE_PAGE(deny, pos, armsText)]);
