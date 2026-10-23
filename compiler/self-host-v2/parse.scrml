@@ -861,7 +861,7 @@ ${
 
     fn parseArmBlock(tp: TP) -> RArmBlock {
         const start: int = cur(tp).start
-        const b0: int = errorCount(tp.diags)
+        const b0: int = hardErrors(tp.diags)
         let t: TP = expectP(tp, "{")
         let stmts: AStmt[] = []
         let lifted = false
@@ -880,7 +880,7 @@ ${
                     // s469 — `lift <expr>` is a statement: it takes its `;` (dpa-073 F3 (i), F6)
                     if (isP(t, ";")) {
                         t = adv(t)
-                    } else if (errorCount(t.diags) == b0) {
+                    } else if (hardErrors(t.diags) == b0) {
                         t = missingSemi(t)
                     }
                     lifted = true
@@ -1430,6 +1430,19 @@ ${
         return n
     }
 
+    // s469 — the errors that can derail what follows: every Error but a
+    // missing terminator (E-STMT-MISSING-SEMICOLON / E-MATCH-ARM-SEPARATOR),
+    // which is reported at an exact place and parsed past without loss. The
+    // terminator cascade guard (termAfter) counts these, so one missing `;` or
+    // `,` does not hide the next.
+    fn hardErrors(ds: Diag[]) -> int {
+        let n: int = 0
+        for (const d of ds) {
+            if (d.severity == Severity.Error && d.code != "E-STMT-MISSING-SEMICOLON" && d.code != "E-MATCH-ARM-SEPARATOR") n = n + 1
+        }
+        return n
+    }
+
     // A template chunk's text: a malformed escape (lex.scrml escapeWhy) is refused.
     fn tmplText(tp: TP, chunk: PTok) -> TP {
         if (chunk.bad == "") return tp
@@ -1648,7 +1661,7 @@ ${
     // `{ stmt* }`
     export fn parseBlock(tp: TP) -> RBlock {
         const start: int = cur(tp).start
-        const b0: int = errorCount(tp.diags)
+        const b0: int = hardErrors(tp.diags)
         let t: TP = expectP(tp, "{")
         let stmts: AStmt[] = []
         while (!isP(t, "}") && !atEnd(t)) {
@@ -1690,7 +1703,7 @@ ${
     fn termAfter(tp: TP, s: AStmt, d0: int) -> TP {
         if (isP(tp, ";")) return adv(tp)
         if (!needsSemi(s)) return tp
-        if (errorCount(tp.diags) > d0) return tp
+        if (hardErrors(tp.diags) > d0) return tp
         return missingSemi(tp)
     }
 
@@ -2519,7 +2532,7 @@ ${
     fn parseBlockOrStmt(tp: TP) -> RBlock {
         if (isP(tp, "{")) return parseBlock(tp)
         const start: int = cur(tp).start
-        const s: RStmt = parseTermStmt(tp, errorCount(tp.diags))
+        const s: RStmt = parseTermStmt(tp, hardErrors(tp.diags))
         const b: ABlock = { nid: s.tp.nid, span: spanFrom(s.tp, start), stmts: [bareDefer(s.s)] }
         return { b: b, tp: bumpId(s.tp) }
     }
@@ -2589,7 +2602,7 @@ ${
         }
         const arrayLead: boolean = isP(t, "[")
         const bodyStart: int = cur(t).start
-        const r: RStmt = parseTermStmt(t, errorCount(t.diags))
+        const r: RStmt = parseTermStmt(t, hardErrors(t.diags))
         const b: ABlock = { nid: r.tp.nid, span: spanFrom(r.tp, bodyStart), stmts: [r.s] }
         return mkS(bumpId(r.tp), start, AStmtK.Defer(b, arrayLead, false))
     }
@@ -2932,7 +2945,7 @@ ${
     }
 
     fn parseImport(tp: TP, start: int) -> RItems {
-        const d0: int = errorCount(tp.diags)
+        const d0: int = hardErrors(tp.diags)
         let t: TP = expectP(adv(tp), "{")
         let names: AImportName[] = []
         while (!isP(t, "}") && !atEnd(t)) {
@@ -2956,7 +2969,7 @@ ${
         // \"x\"` … statements (`;`) or items? F3 (i) says statements")
         if (isP(t, ";")) {
             t = adv(t)
-        } else if (errorCount(t.diags) == d0) {
+        } else if (hardErrors(t.diags) == d0) {
             t = missingSemi(t)
         }
         const imp: AImport = { nid: t.nid, span: spanFrom(t, start), names: names, from: src.v }
