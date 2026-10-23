@@ -53,7 +53,7 @@ import { sliceTemplateText } from "../interpolation-extent.ts";
 import { isRcdataElement } from "../html-elements.js";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { CGError } from "./errors.ts";
-import { recordRefusedLowering, refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite } from "./refused-lowering-errors.ts";
+import { recordRefusedLowering, refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite, refuseUnloweredElseChain } from "./refused-lowering-errors.ts";
 import {
   classifyInterpolatedAttrSink,
   interpolatedAttrSinkMessage,
@@ -1596,6 +1596,17 @@ function renderTemplateChildToJs(
     if (refuseElementLowering(tagName, child as { span?: unknown }) || refuseRawContentLowering(child as any)) {
       lines.push(`${indent}${fragmentVar}.appendChild(_scrml_g.document.createComment(""));`);
       return;
+    }
+    // §17.1.1 (S469 review F4) — no if=/else chain is built in a row template, so an
+    // `else` / `else-if=` here would render unconditionally. Refused: the recorded error
+    // fails the compile (no artifact ships). The element is still walked, so the other
+    // refusals its attributes / children carry are reported too.
+    {
+      const _attrsForElse = (child as any).attributes ?? (child as any).attrs;
+      const _elseAttr = Array.isArray(_attrsForElse)
+        ? _attrsForElse.find((a: any) => a && (a.name === "else" || a.name === "else-if"))
+        : null;
+      if (_elseAttr) refuseUnloweredElseChain(_elseAttr.name, "inside an `<each>` row", (_elseAttr.span ? _elseAttr : child) as { span?: unknown });
     }
     lines.push(`${indent}const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(tagName)});`);
 
@@ -4271,6 +4282,16 @@ export function emitNestedEachFromMarkup(
   fragmentVar: string,
   indent: string = "",
   engineCtx: EachEngineCtx | null = null,
+  /**
+   * S469 review F1 — the enclosing lift's live re-resolve prelude (emit-lift
+   * `computeItemDerivedReplay`), given the code the effect reads. Inside a reconciled
+   * `${ for … lift }` row the for-loop var is a CREATE-TIME closure: a same-key
+   * reconcile reuses the row without re-running its factory, so a gate or source
+   * reading `r.ok` / `r.cells` off it never saw the new item. The prelude rebinds it
+   * from the row wrapper by key (and subscribes the effect to that slot). Null outside
+   * a reconciled lift → byte-identical.
+   */
+  scopePrelude: ((code: string) => string[]) | null = null,
 ): string[] | null {
   const eachBlock = eachBlockFromMarkupNode(markupNode);
   if (!eachBlock) return null;
@@ -4330,6 +4351,9 @@ export function emitNestedEachFromMarkup(
   // branch gates it (`lowerRowScopedEachIfGate`), in the for-loop's scope.
   const _gate = lowerRowScopedEachIfGate(eachBlock, enclosingScopeVar);
   lines.push(`${indent}_scrml_mount_track(_scrml_effect(() => {`);
+  if (scopePrelude) {
+    for (const l of scopePrelude([_gate ?? "", innerItemsExpr].join("\n"))) lines.push(`${indent}  ${l}`);
+  }
   if (_gate !== null) {
     for (const l of emitRowScopedEachIfGateLines(_gate, innerMountVar, `${indent}  `)) lines.push(l);
   }

@@ -12,7 +12,7 @@ import { iterableHasReactiveRefs, forBodyLiftsMarkup } from "./reactive-deps.ts"
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { liftScopeDeclaredNames, markDeclaredMutable } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
-import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite } from "./refused-lowering-errors.ts";
+import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite, refuseUnloweredElseChain } from "./refused-lowering-errors.ts";
 import { isRawContentElement, rawContentDomLines, sealRawContentBody, unsealRawContentBody } from "../raw-content-encode.ts";
 import { isExecutableEventHandlerAttrName } from "../attr-injection-sink.ts";
 import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
@@ -969,7 +969,13 @@ function tryEmitNestedLiftEach(eachMarkupNode, scopeVar, fragmentVar, engineCtx)
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const each = require("./emit-each.ts");
   if (!each || typeof each.emitNestedEachFromMarkup !== "function") return null;
-  return each.emitNestedEachFromMarkup(eachMarkupNode, scopeVar, fragmentVar, "", engineCtx);
+  // S469 review F1 — inside a reconciled row, re-resolve the live item (and replay any
+  // item-derived local) the inner list's gate / source reads, exactly as
+  // maybeWrapLiftPerItemEffect does for a per-item binding.
+  const scopePrelude = currentLiftReconcileCtx()
+    ? (code) => computeItemDerivedReplay(code, null, "return;")
+    : null;
+  return each.emitNestedEachFromMarkup(eachMarkupNode, scopeVar, fragmentVar, "", engineCtx, scopePrelude);
 }
 
 // ---------------------------------------------------------------------------
@@ -1409,6 +1415,8 @@ function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
     // written nor wired (E-ATTR-QUOTED-HANDLER, and a static executable value E-ATTR-STATIC-EXECUTABLE; `refuseStaticAttrWrite`). Without this the
     // event branch below wired the quoted text as a listener body.
     if (attr && attr.quoted === true && refuseStaticAttrWrite(attr.name, attr.value, null, tag, attrs)) continue;
+    // §17.1.1 (S469 review F4) — see refuseUnloweredElseChain; the refusal fails the compile.
+    if (attr && refuseUnloweredElseChain(attr.name, "in lifted markup", null)) continue;
     if (attr.value === null) {
       // Boolean attribute
       lines.push(`${elVar}.setAttribute(${JSON.stringify(attr.name)}, "");`);
@@ -1691,6 +1699,13 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
   if (refuseElementLowering(tag, node) || refuseRawContentLowering(node)) {
     lines.push(`const ${elVar} = _scrml_g.document.createComment("");`);
     return elVar;
+  }
+  // §17.1.1 (S469 review F4) — lifted markup builds no if=/else chain, so an `else` /
+  // `else-if=` here would render unconditionally. Refused: the recorded error fails the
+  // compile (no artifact ships); the element is still walked so its other refusals report.
+  {
+    const _elseAttr = Array.isArray(attrs) ? attrs.find((a) => a && (a.name === "else" || a.name === "else-if")) : null;
+    if (_elseAttr) refuseUnloweredElseChain(_elseAttr.name, "in lifted markup", _elseAttr.span ? _elseAttr : node);
   }
   lines.push(`const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(tag)});`);
   // S464 round 5 — each markup child learns its parent's tag (`refuseStaticAttrWrite`).
