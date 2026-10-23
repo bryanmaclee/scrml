@@ -3,7 +3,7 @@
     type P:struct = { name: string, age: int }
     let <p:P=({ name: "Ada", age: 36 })/>
     fn greet(s: string) -> string {
-        return `hi, ${s}!`
+        return `hi, ${s}!`;
     }
     <main>
         <p id="field">${greet(`${@p.name} (${@p.age})`)}</p>

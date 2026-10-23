@@ -5,19 +5,19 @@ ${
     function f(m: M) {
         match m {
             .A :> {
-                defer @trace = @trace + "MA;"
-                @trace = @trace + "ma;"
-            },
+                defer @trace = @trace + "MA;";
+                @trace = @trace + "ma;";
+            }
             .B :> {
-                @trace = @trace + "mb;"
+                @trace = @trace + "mb;";
             }
         }
-        @trace = @trace + "end;"
+        @trace = @trace + "end;";
     }
 
     function go() {
-        f(M.A)
-        f(M.B)
+        f(M.A);
+        f(M.B);
     }
 }
 <program>

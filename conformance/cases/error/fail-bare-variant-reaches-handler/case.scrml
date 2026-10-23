@@ -12,9 +12,9 @@ ${
 
     // Bare `fail .Variant` — the variant resolves against the declared `! LoadError`.
     function load(id: string)! LoadError {
-        if (id == "missing") fail .NotFound(id)
-        if (id == "slow") fail .Timeout
-        return id
+        if (id == "missing") fail .NotFound(id);
+        if (id == "slow") fail .Timeout;
+        return id;
     }
 }
 
@@ -25,7 +25,7 @@ ${
         let r = load("missing") !{
             .NotFound(mid) :> @phase = Phase.Missing(mid),
             .Timeout :> @phase = Phase.TimedOut
-        }
+        };
     }
 }
 

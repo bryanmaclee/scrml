@@ -7,15 +7,15 @@ ${
     <trace> = ""
 
     function closeAll()! -> CloseError {
-        fail CloseError.Busy
+        fail CloseError.Busy;
     }
 
     function work() {
         defer closeAll() !{
             ::Busy :> @trace = @trace + "close-busy;",
             _ :> @trace = @trace + "close-other;"
-        }
-        @trace = @trace + "work;"
+        };
+        @trace = @trace + "work;";
     }
 }
 <program>

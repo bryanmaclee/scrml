@@ -5,10 +5,10 @@
     let <n:int=1/>
     let <out:string="start"/>
     function keep() {
-        @out = @s.slice(@n)
+        @out = @s.slice(@n);
     }
     function cut() {
-        @out = @s.slice(0 - @n)
+        @out = @s.slice(0 - @n);
     }
     <main>
         <button id="ok" onclick=keep()>ok</button>

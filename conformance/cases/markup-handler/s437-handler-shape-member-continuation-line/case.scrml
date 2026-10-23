@@ -11,14 +11,14 @@ ${ function t(x) { @log = @log + x + "," } }
 <p id="out">${@log}</p>
 
 <button id="top" onclick={ @s = "T"
-            .concat("x")
-            t(@s) }>top</button>
+            .concat("x");
+            t(@s); }>top</button>
 
 <engine for=Phase initial=.Idle>
     <Idle>
         <button id="eng" onclick={ @s = "E"
-            .concat("x")
-            t(@s) }>engine</button>
+            .concat("x");
+            t(@s); }>engine</button>
     </>
     <Loading : "Loading…">
 </>
@@ -26,8 +26,8 @@ ${ function t(x) { @log = @log + x + "," } }
 <match on=@ph>
     <Idle>
         <button id="mat" onclick={ @s = "M"
-            .concat("x")
-            t(@s) }>match</button>
+            .concat("x");
+            t(@s); }>match</button>
     </>
     <Loading><p>Loading…</p></>
 </>
@@ -35,7 +35,7 @@ ${ function t(x) { @log = @log + x + "," } }
 <ul>
     <each in=@items key=@.id>
         <li><button class="row" onclick={ @s = "R"
-            .concat("x")
-            t(@s) }>${@.name}</button></li>
+            .concat("x");
+            t(@s); }>${@.name}</button></li>
     </each>
 </ul>

@@ -5,7 +5,7 @@ type User:struct = { name: string }
 <out> = ""
 <div if=@user>
     <section if=@other>
-        <button id="go" onclick={ @out = @user.name + @other.name }>both</button>
+        <button id="go" onclick={ @out = @user.name + @other.name; }>both</button>
     </section>
 </div>
 <p id="o">${@out}</p>

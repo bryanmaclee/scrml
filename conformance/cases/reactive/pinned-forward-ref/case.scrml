@@ -1,6 +1,6 @@
 ${
     function readEarly() {
-        return @count
+        return @count;
     }
     @count = readEarly()
     <count pinned> = 0

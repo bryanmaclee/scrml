@@ -2,14 +2,14 @@ ${
     <trace> = ""
 
     function add(s: string) {
-        @trace = @trace + s + ";"
+        @trace = @trace + s + ";";
     }
 
     // H2 — a destructured binding after the defer: `show` must see the INNER `a`.
     function destructObj() {
-        let a = "OUTER"
+        let a = "OUTER";
         if (true) {
-            defer add("D1")
+            defer add("D1");
             const { a } = { a: "INNER" }
             function show() {
                 return a

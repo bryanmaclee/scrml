@@ -11,7 +11,7 @@ ${
         @after = "ran"
     }
     function go() {
-        pick(K.A, K.A)
+        pick(K.A, K.A);
     }
 }
 <button id="go" onclick=go()>go</>

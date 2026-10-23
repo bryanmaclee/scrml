@@ -227,7 +227,7 @@ export function bootParseCodes(mods, tpl) {
  * accepted IS a Template node — a parse placeholder (Recovered) with no error would print as `null`.
  */
 export function bootParse(mods, tpl) {
-  const src = "<program>\n    fn f() -> string {\n        return " + tpl + "\n    }\n</program>\n";
+  const src = "<program>\n    fn f() -> string {\n        return " + tpl + ";\n    }\n</program>\n";
   const r = mods.parse.parseFile("fuzz.scrml", src, 0);
   const json = JSON.stringify(r.ast);
   const codes = [...new Set(r.diags.map((d) => d.code).filter((c) => c.startsWith("E-")))].sort();
@@ -248,7 +248,7 @@ export function e2e(mods, frontEnd, rt, tpl) {
   if (/\bnot\b/.test(tpl)) return { status: "skip" };
   if (tpl.includes(".length") && /\\u\{[0-9A-Fa-f]{5,}\}|[\uD800-\uDFFF]/.test(tpl)) return { status: "skip" };
   const params = E2E_PARAMS.map(([nm, ty]) => nm + ": " + ty).join(", ");
-  const src = "<program>\n    fn f(" + params + ") -> string {\n        return " + tpl + "\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
+  const src = "<program>\n    fn f(" + params + ") -> string {\n        return " + tpl + ";\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
   let r;
   try { r = frontEnd(mods, [{ path: "e.scrml", src }]); } catch (e) { return { status: "CRASH", why: String(e).slice(0, 200) }; }
   if (r.diags.some((d) => !d.code.startsWith("W-") && !d.code.startsWith("I-")) || !r.core) return { status: "skip" };
@@ -316,7 +316,7 @@ const pick = (r, xs) => xs[Math.floor(r() * xs.length)];
 const IDENTS = ["a", "b", "n", "total", "@count", "@s", "x1", "of", "await", "yield", "let", "async", "match", "not", "is", "from", "as", "case", "typeof", "void", "this", "true", "null", "undefined", "new", "in", "static", "enum"];
 // scrml forms a JavaScript EXPRESSION reader refuses but its TOKENIZER bounds (`.V`, `is given`, a
 // `match` with arms — braces and `:>` inside the slot)
-const SCRML = [".Red", "n is given", "@s is not", "match n { .A :> \"}\" .B :> 2 }", "match n { 1 :> `x${a}` _ :> \"y\" }",
+const SCRML = [".Red", "n is given", "@s is not", "match n { .A :> \"}\", .B :> 2 }", "match n { 1 :> `x${a}`, _ :> \"y\" }",
   "@s.length", "f(.B)", "{ a: 1, b: \"}\" }"];
 const STRINGS = [
   "\"}\"", "'}'", "\"`\"", "'${'", "\"${x}\"", "\"\\\"}\"", "'\\''", "\"\\\\\"", "\"a\\nb\"", "\"\\u{7D}\"", "\"\\x7D\"",

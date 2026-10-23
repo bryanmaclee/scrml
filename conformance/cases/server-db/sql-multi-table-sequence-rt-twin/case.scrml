@@ -5,14 +5,14 @@
     <users:User[replace]=([])/>
     <posts:Post[replace]=([])/>
     function loadUsers() -> User[] {
-        return ?{`SELECT id, name FROM users`}.all() !{ _ :> [] }
+        return ?{`SELECT id, name FROM users`}.all() !{ _ :> [] };
     }
     function loadPosts() -> Post[] {
-        return ?{`SELECT id, title FROM posts`}.all() !{ _ :> [] }
+        return ?{`SELECT id, title FROM posts`}.all() !{ _ :> [] };
     }
     <main>
-        <button id="lu" onclick={ @users = loadUsers() !{ .Transport(t) :> return } }>LoadUsers</button>
-        <button id="lp" onclick={ @posts = loadPosts() !{ .Transport(t) :> return } }>LoadPosts</button>
+        <button id="lu" onclick={ @users = loadUsers() !{ .Transport(t) :> return }; }>LoadUsers</button>
+        <button id="lp" onclick={ @posts = loadPosts() !{ .Transport(t) :> return }; }>LoadPosts</button>
         <p id="uc">${@users.length}</p>
         <p id="pc">${@posts.length}</p>
     </main>

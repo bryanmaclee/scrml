@@ -4,16 +4,16 @@
     let <out:string=""/>
     let <n:int=0/>
     function load(id: string)! LoadError {
-        if (id == "x") fail LoadError.NotFound(id)
-        if (id == "y") fail LoadError.Timeout
-        return id
+        if (id == "x") fail LoadError.NotFound(id);
+        if (id == "y") fail LoadError.Timeout;
+        return id;
     }
-    function v() { @out = load("x") !{ .NotFound(m) :> { "nf:" + m }, .Timeout :> { "to" }, } }
+    function v() { @out = load("x") !{ .NotFound(m) :> { "nf:" + m; }, .Timeout :> { "to"; }, }; }
     type Guess:enum = { Yes, No }
     let <g:Guess=.No/>
     <main>
         <button id="v" onclick=v()>v</button>
         <p id="out">${@out}</p>
-        <p id="g">${match @g { .Yes :> { "y" }, .No :> { lift "n" }, }}</p>
+        <p id="g">${match @g { .Yes :> { "y"; }, .No :> { lift "n"; }, }}</p>
     </main>
 </program>

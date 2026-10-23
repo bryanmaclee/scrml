@@ -3,10 +3,10 @@
     type Score:struct = { player: string, points: int }
     <top:Score[replace]=([])/>
     function topTwo() -> Score[] {
-        return ?{`SELECT player, points FROM scores ORDER BY points DESC LIMIT 2`}.all() !{ _ :> [] }
+        return ?{`SELECT player, points FROM scores ORDER BY points DESC LIMIT 2`}.all() !{ _ :> [] };
     }
     function onLoad() {
-        @top = topTwo() !{ .Transport(t) :> return }
+        @top = topTwo() !{ .Transport(t) :> return };
     }
     <main>
         <button id="load" onclick=onLoad()>Top two</button>

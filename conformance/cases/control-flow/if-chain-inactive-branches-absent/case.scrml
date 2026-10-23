@@ -2,7 +2,7 @@ ${
     <step> = 1
     <label> = "alpha"
     function advance() {
-        @step = @step + 1
+        @step = @step + 1;
     }
 }
 <button id="go" onclick=advance()>Advance</>

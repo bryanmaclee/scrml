@@ -38,7 +38,7 @@ const clean = (src) => {
 const js = (src) => mods.print.printProgram(clean(src).core, "t.client.js", "scrml-runtime.js").js;
 // a function returning `body` (a template), in a program that renders it
 const fnProg = (decls, params, body) =>
-  `<program>\n${decls}\n    fn f(${params}) -> string {\n        return ${body}\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
+  `<program>\n${decls}\n    fn f(${params}) -> string {\n        return ${body};\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
 const lexWhy = (tpl) => bootLex(mods, tpl);
 
 // ---------------------------------------------------------------------------
@@ -127,7 +127,7 @@ describe("L — the slot's extent: one reader, refused where JavaScript could re
     expect(res.tally["e2e-same"]).toBeGreaterThan(200);
   });
   test("judge: a scrml form acorn's expression reader refuses is bounded by its tokens, as here", () => {
-    const j = judge(mods, "`${ match n { .A :> \"}\" .B :> \"b\" } }`");
+    const j = judge(mods, "`${ match n { .A :> \"}\", .B :> \"b\" } }`");
     expect(j.verdict).toBe("scrml-content");
     expect(j.lex.slots).toEqual(j.tok.slots);
   });
@@ -152,24 +152,24 @@ describe("P — parse", () => {
     expect(d.message).toContain("cannot be read one way");
   });
   test("a tagged template is refused by name (E-BOOTSTRAP-UNSUPPORTED), not read as a call or a name", () => {
-    const r = run(fnProg("    fn tag(s: string) -> string { return s }", "n: int", "tag`a${n}`"));
+    const r = run(fnProg("    fn tag(s: string) -> string { return s; }", "n: int", "tag`a${n}`"));
     const d = r.diags.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED");
     expect(d.message).toContain("tagged template");
   });
   test("a template is ONE operand of a match arm, across lines and holding `,` / `|`", () => {
     const src = fnProg("    type C:enum = { A, B }", "c: C, n: int",
-      "match c {\n            .A :> `a, ${n}\n| x`\n            .B :> `b`\n        }");
+      "match c {\n            .A :> `a, ${n}\n| x`,\n            .B :> `b`\n        };");
     expect(codes(src)).toEqual([]);
   });
   test("a closer with no opener in a slot is named — it does not pop the brackets around the template", () => {
-    const src = fnProg("    fn g(t: string) -> string { return t }", "a: int", "g(`${ a ) }`)");
+    const src = fnProg("    fn g(t: string) -> string { return t; }", "a: int", "g(`${ a ) }`)");
     const d = diag(src, "E-PARSE-TEMPLATE");
     expect(d.message).toContain("with no opener inside the slot");
     expect(codes(src)).toEqual(["E-PARSE-TEMPLATE"]);
   });
   test("a `?{}` bound parameter is read by the same reader: one it cannot bound one way is refused (§8.1.2)", () => {
     const SQ = "?" + "{";
-    const prog = (slot) => `<program db="./app.db">\n    function f(id: int) {\n        ${SQ}\`UPDATE t SET a = 1 WHERE id = \${${slot}}\`}.run()\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
+    const prog = (slot) => `<program db="./app.db">\n    function f(id: int) {\n        ${SQ}\`UPDATE t SET a = 1 WHERE id = \${${slot}}\`}.run();\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
     const bad = run(prog(" { a: id } / 2 "));
     const d = bad.diags.find((x) => x.code === "E-PARSE-TEMPLATE");
     expect(d.message).toContain("bound parameter cannot be read one way");
@@ -203,7 +203,7 @@ describe("T — a slot is a text sink (§14.13.2)", () => {
     });
   }
   test("E-TEXT-NON-PRIMITIVE — a value of unresolved type (fail closed); its message names the fixes", () => {
-    const src = fnProg("    fn g(a) { return a }", "n: int", "`v=${g(n)}`");
+    const src = fnProg("    fn g(a) { return a; }", "n: int", "`v=${g(n)}`");
     const d = diag(src, "E-TEXT-NON-PRIMITIVE");
     expect(d).toBeDefined();
     expect(d.message).toContain("cannot resolve");
@@ -213,7 +213,7 @@ describe("T — a slot is a text sink (§14.13.2)", () => {
   });
   test("E-OPERAND-NOT-NARROWED — a `T | not` slot; narrowed, it is text", () => {
     expect(codes(fnProg(D, "m: int | not", "`v=${m}`"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    const narrowed = `<program>\n    fn f(m: int | not) -> string {\n        if (m is given) {\n            return \`v=\${m}\`\n        }\n        return "none"\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
+    const narrowed = `<program>\n    fn f(m: int | not) -> string {\n        if (m is given) {\n            return \`v=\${m}\`;\n        }\n        return "none";\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
     expect(codes(narrowed)).toEqual([]);
   });
   test("an undeclared name in a slot is reported once (E-SCOPE-001), not again as text", () => {
@@ -224,7 +224,7 @@ describe("T — a slot is a text sink (§14.13.2)", () => {
     expect(codes(fnProg(D, "n: int", "`typed ${n}`"))).toEqual([]);
   });
   test("a slot's reads are tracked: a template in markup re-renders when the cell changes", () => {
-    const src = `<program>\n    let <n:int=1/>\n    fn label(k: int) -> string {\n        return \`n=\${k}\`\n    }\n    <main>\n        <p>\${\`[\${@n}]\`}</p>\n    </main>\n</program>\n`;
+    const src = `<program>\n    let <n:int=1/>\n    fn label(k: int) -> string {\n        return \`n=\${k}\`;\n    }\n    <main>\n        <p>\${\`[\${@n}]\`}</p>\n    </main>\n</program>\n`;
     expect(codes(src)).toEqual([]);
   });
 });
@@ -319,10 +319,10 @@ describe("BACKSTOP — a Recovered node never reaches the printer when the file 
   };
   const D = "    type P:struct = { let x: int }\n    let <n:int=0/>\n    let <p:P=({ x: 1 })/>\n";
   for (const [where, body] of [
-    ["a handler's write target", "    <main>\n        <button onclick={ ZZZ = 1 }>b</button>\n    </main>"],
-    ["a function's write target", "    function f() {\n        ZZZ = 1\n    }\n    <main>\n        <p>x</p>\n    </main>"],
-    ["a field write's object", "    function f() {\n        ZZZ.x = 1\n    }\n    <main>\n        <p>x</p>\n    </main>"],
-    ["reset's argument", "    function f() {\n        reset(ZZZ)\n    }\n    <main>\n        <p>x</p>\n    </main>"],
+    ["a handler's write target", "    <main>\n        <button onclick={ ZZZ = 1; }>b</button>\n    </main>"],
+    ["a function's write target", "    function f() {\n        ZZZ = 1;\n    }\n    <main>\n        <p>x</p>\n    </main>"],
+    ["a field write's object", "    function f() {\n        ZZZ.x = 1;\n    }\n    <main>\n        <p>x</p>\n    </main>"],
+    ["reset's argument", "    function f() {\n        reset(ZZZ);\n    }\n    <main>\n        <p>x</p>\n    </main>"],
   ]) {
     test(`F1 — a placeholder as ${where} is E-INTERNAL-RECOVERED-UNREPORTED; nothing lowers`, () => {
       const forged = forgeAt("<program>\n" + D + body + "\n</program>\n");
@@ -348,13 +348,13 @@ describe("BACKSTOP — a Recovered node never reaches the printer when the file 
 
 describe("found by the end-to-end fuzz — a call of a value is never silently `not`", () => {
   test("`total()` on a `number` parameter is refused (it printed `null === 1`)", () => {
-    const src = "<program>\n    fn f(total: number) -> bool {\n        return total() == 1\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
+    const src = "<program>\n    fn f(total: number) -> bool {\n        return total() == 1;\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
     const d = diag(src, "E-BOOTSTRAP-UNSUPPORTED");
     expect(d.message).toContain("only a declared scrml function is callable");
     expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("r3 F2: not piled onto a parse error in the file (the parse error is the report)", () => {
-    const src = "<program>\n    fn f(total: number) -> bool {\n        return total() == 1\n    }\n    fn g() -> string {\n        return `a${}`\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
+    const src = "<program>\n    fn f(total: number) -> bool {\n        return total() == 1;\n    }\n    fn g() -> string {\n        return `a${}`\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
     expect(codes(src)).toEqual(["E-PARSE-TEMPLATE"]);
   });
   test("r3 F2: E-EQ-001 is not piled onto a parse error inside the comparison", () => {
@@ -405,14 +405,14 @@ describe("M1 — a backslash before U+2028 / U+2029 is a line continuation", () 
 
 describe("L1 — a template on the line after an expression reads two ways", () => {
   test("refused by name (E-PARSE-TEMPLATE), never dropped as a second statement", () => {
-    const src = "<program>\n    fn f(s: string, n: int) -> string {\n        const t: string = s\n        `x${n}`\n        return t\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
+    const src = "<program>\n    fn f(s: string, n: int) -> string {\n        const t: string = s\n        `x${n}`\n        return t;\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
     expect(diag(src, "E-PARSE-TEMPLATE").message).toContain("line after an expression");
     expect(codes(src)).toEqual(["E-PARSE-TEMPLATE"]);
   });
 });
 
 describe("P1 — the printer never merges a prefix `-` with its operand's sign", () => {
-  const P1 = (body, params) => "<program>\n    fn f(" + params + ") -> number {\n        return " + body + "\n    }\n    <main>\n        <p>${f(3)}</p>\n    </main>\n</program>\n";
+  const P1 = (body, params) => "<program>\n    fn f(" + params + ") -> number {\n        return " + body + ";\n    }\n    <main>\n        <p>${f(3)}</p>\n    </main>\n</program>\n";
   const fnText = (src) => {
     const out = jsOf(src);
     const at = out.indexOf("function f(");

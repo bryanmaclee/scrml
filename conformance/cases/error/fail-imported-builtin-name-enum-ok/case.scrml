@@ -1,5 +1,5 @@
 ${
-    import { AuthError } from './errs.scrml'
+    import { AuthError } from './errs.scrml';
 
     type Phase:enum = {
         Idle
@@ -11,9 +11,9 @@ ${
     // built-in error type: it resolves against the user's enum, exactly as a
     // local one would (§19.3.3).
     function check(n: string)! AuthError {
-        if (n == "") fail .Missing
-        if (n == "x") fail AuthError.Bad("no")
-        return n
+        if (n == "") fail .Missing;
+        if (n == "x") fail AuthError.Bad("no");
+        return n;
     }
 }
 
@@ -24,7 +24,7 @@ ${
         let r = check("") !{
             .Missing :> @phase = Phase.Missing,
             .Bad(why) :> @phase = Phase.Bad(why)
-        }
+        };
     }
 }
 

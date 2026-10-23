@@ -22,40 +22,40 @@
     function bodyOnly(items) {
         let out = []
         for (const it of items) {
-            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
-            out.push(row is not ? "none" : row.body + ":" + Object.keys(row).join("|"))
+            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get();
+            out.push(row is not ? "none" : row.body + ":" + Object.keys(row).join("|"));
         }
         return out.join(",")
     }
     function viaAlias(items) {
         let out = []
         for (const it of items) {
-            const row = ?{`SELECT id AS note_id, body FROM notes WHERE id = ${it.id}`}.get()
-            out.push(row is not ? "none" : row.body + ":" + row.note_id)
+            const row = ?{`SELECT id AS note_id, body FROM notes WHERE id = ${it.id}`}.get();
+            out.push(row is not ? "none" : row.body + ":" + row.note_id);
         }
         return out.join(",")
     }
     function viaQualified(items) {
         let out = []
         for (const it of items) {
-            const row = ?{`SELECT n.body FROM notes n WHERE n.id = ${it.id}`}.get()
-            out.push(row is not ? "none" : row.body)
+            const row = ?{`SELECT n.body FROM notes n WHERE n.id = ${it.id}`}.get();
+            out.push(row is not ? "none" : row.body);
         }
         return out.join(",")
     }
     function firstTag(items) {
         let out = []
         for (const it of items) {
-            const row = ?{`SELECT label FROM tags WHERE note_id = ${it.id} ORDER BY label`}.get()
-            out.push(row is not ? "none" : row.label)
+            const row = ?{`SELECT label FROM tags WHERE note_id = ${it.id} ORDER BY label`}.get();
+            out.push(row is not ? "none" : row.label);
         }
         return out.join(",")
     }
     function go() {
-        @aliased = viaAlias([{ id: 7 }, { id: 8 }]) !{ _ :> "err" }
-        @qualified = viaQualified([{ id: 7 }, { id: 8 }]) !{ _ :> "err" }
-        @firstrow = firstTag([{ id: 7 }, { id: 8 }]) !{ _ :> "err" }
-        @bodyOnly = bodyOnly([{ id: 7 }, { id: 8 }]) !{ _ :> "err" }
+        @aliased = viaAlias([{ id: 7 }, { id: 8 }]) !{ _ :> "err" };
+        @qualified = viaQualified([{ id: 7 }, { id: 8 }]) !{ _ :> "err" };
+        @firstrow = firstTag([{ id: 7 }, { id: 8 }]) !{ _ :> "err" };
+        @bodyOnly = bodyOnly([{ id: 7 }, { id: 8 }]) !{ _ :> "err" };
     }
     <button id="go" onclick=go()>go</button>
     <p id="aliased">${@aliased}</p>

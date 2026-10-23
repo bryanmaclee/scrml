@@ -2,10 +2,10 @@
 ${
     <updated> = []
     function bump(id: number, by: number) {
-        return ?{`UPDATE items SET qty = qty + ${by} WHERE id = ${id} RETURNING id, qty`}.all()
+        return ?{`UPDATE items SET qty = qty + ${by} WHERE id = ${id} RETURNING id, qty`}.all();
     }
     function onBump() {
-        @updated = bump(1, 3) !{ .Transport(_) :> return }
+        @updated = bump(1, 3) !{ .Transport(_) :> return };
     }
 }
 <button id="go" onclick=onBump()>Bump qty</>

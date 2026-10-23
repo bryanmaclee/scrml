@@ -313,7 +313,7 @@ describe("(5) dead validators (§55.5.2) are errors; `@x.isValid` on a no-surfac
     expect(codes(P(base, `        <*f/>\n        <p>\${@f.v.errors}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("writing a synthesized property → E-SYNTHESIZED-WRITE (§55.5: read-only)", () => {
-    expect(codes(P(F("req", `<input bind:value=@v/>`, `<div><*v/></div>`) + `\n    function g() { @f.isValid = true }`, `        <*f/>`))).toEqual(["E-SYNTHESIZED-WRITE"]);
+    expect(codes(P(F("req", `<input bind:value=@v/>`, `<div><*v/></div>`) + `\n    function g() { @f.isValid = true; }`, `        <*f/>`))).toEqual(["E-SYNTHESIZED-WRITE"]);
   });
 });
 

@@ -26,7 +26,7 @@ const printable = (r) => mods.print.printProgram(r.core, "t.client.js", "scrml-r
 
 describe("an error lowers to no Core — nothing to print", () => {
   test("E-SCOPE-001 (an analysis error): no Core", () => {
-    const r = run(P(`    let <n:int=0/>\n    function go() { @n = nope + 1 }`, `        <button onclick=go()>go</button>`));
+    const r = run(P(`    let <n:int=0/>\n    function go() { @n = nope + 1; }`, `        <button onclick=go()>go</button>`));
     expect(r.diags.map((d) => d.code)).toEqual(["E-SCOPE-001"]);
     expect(r.core == null).toBe(true);
   });
@@ -45,7 +45,7 @@ describe("an error lowers to no Core — nothing to print", () => {
   });
 
   test("an error alongside a warning: still no Core", () => {
-    const r = run(P(`    let <n:int=0/>\n    <effect deps=[@n]/>\n    function go() { @n = nope }`, `        <p>\${@n}</p>`));
+    const r = run(P(`    let <n:int=0/>\n    <effect deps=[@n]/>\n    function go() { @n = nope; }`, `        <p>\${@n}</p>`));
     expect(r.diags.map((d) => d.code).sort()).toEqual(["E-SCOPE-001", "W-LIFECYCLE-010"]);
     expect(r.core == null).toBe(true);
   });
@@ -53,7 +53,7 @@ describe("an error lowers to no Core — nothing to print", () => {
 
 describe("twins — non-fatal notes do not close the gate", () => {
   test("a clean program lowers and prints", () => {
-    const r = run(P(`    let <n:int=0/>\n    function go() { @n = @n + 1 }`, `        <button onclick=go()>go</button>\n        <p>\${@n}</p>`));
+    const r = run(P(`    let <n:int=0/>\n    function go() { @n = @n + 1; }`, `        <button onclick=go()>go</button>\n        <p>\${@n}</p>`));
     expect(r.diags).toEqual([]);
     expect(mods.check.checkCore(r.core)).toEqual([]);
     expect(printable(r)).toContain("function go(");
@@ -91,7 +91,7 @@ describe("the gate fails closed on a diagnostic with no / an unknown severity", 
   });
 
   test("lower: a clean program's TypedProgram plus one severity-less diagnostic lowers to NO Core", () => {
-    const r = run(P(`    let <n:int=0/>\n    function go() { @n = @n + 1 }`, `        <button onclick=go()>go</button>`));
+    const r = run(P(`    let <n:int=0/>\n    function go() { @n = @n + 1; }`, `        <button onclick=go()>go</button>`));
     expect(r.core == null).toBe(false);
     const bad = { ...r.typed, diags: r.typed.diags.concat([{ ...bare, file: "t.scrml" }]) };
     expect(mods.lower.lower(bad).core == null).toBe(true);

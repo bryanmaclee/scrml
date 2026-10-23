@@ -6,8 +6,8 @@
     // so nothing scopes it. Refused.
     ${
         function stage() {
-            ?{`CREATE TEMP TABLE staging (id INTEGER, name TEXT, tenant_id TEXT)`}.run()
-            return 1
+            ?{`CREATE TEMP TABLE staging (id INTEGER, name TEXT, tenant_id TEXT)`}.run();
+            return 1;
         }
     }
     <button onclick=${ stage() }>stage</button>

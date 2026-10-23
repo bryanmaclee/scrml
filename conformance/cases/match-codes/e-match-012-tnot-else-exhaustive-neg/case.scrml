@@ -5,7 +5,7 @@ ${
       .Admin  :> "admin",
       .Editor :> "editor",
       else    :> "none"
-    }
+    };
   }
 }
 <program>

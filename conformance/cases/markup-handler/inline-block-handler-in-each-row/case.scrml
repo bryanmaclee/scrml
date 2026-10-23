@@ -4,7 +4,7 @@
 
 <ul>
     <each in=@items key=@.id>
-        <li><button class="row" onclick={ @a = @a + 1; @b = @b + 2 }>${@.name}</></>
+        <li><button class="row" onclick={ @a = @a + 1; @b = @b + 2; }>${@.name}</></>
     </each>
 </>
 <p id="out">${@a} ${@b}</p>

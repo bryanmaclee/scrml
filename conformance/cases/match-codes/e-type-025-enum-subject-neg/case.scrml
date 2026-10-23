@@ -4,7 +4,7 @@ ${
     return match r {
       .Admin  :> "admin",
       .Editor :> "editor"
-    }
+    };
   }
 }
 <program>

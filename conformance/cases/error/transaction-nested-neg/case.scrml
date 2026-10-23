@@ -10,7 +10,7 @@
         transaction {
             if (a > 0) {
                 transaction {
-                    ?{`UPDATE orders SET name = 'x' WHERE id = ${a}`}.run()
+                    ?{`UPDATE orders SET name = 'x' WHERE id = ${a}`}.run();
                 }
             }
         }

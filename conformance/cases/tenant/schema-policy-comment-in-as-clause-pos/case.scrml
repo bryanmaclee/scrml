@@ -9,7 +9,7 @@
     // policies are `AS RESTRICTIVE` and admitted (§14.8.10 statement-kind allow-list).
     ${
         function mine() {
-            return ?{`SELECT id, name FROM assets`}.all()
+            return ?{`SELECT id, name FROM assets`}.all();
         }
     }
     <button onclick=${ mine() }>mine</button>

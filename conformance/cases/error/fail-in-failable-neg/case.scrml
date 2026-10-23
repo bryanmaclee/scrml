@@ -2,7 +2,7 @@ ${
     type MyError:enum = { Bad(msg: string) }
 
     function failable()! MyError {
-        fail MyError.Bad("ok")
+        fail MyError.Bad("ok");
     }
 }
 <p>x</>

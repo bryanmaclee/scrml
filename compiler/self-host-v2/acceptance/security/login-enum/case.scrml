@@ -4,18 +4,18 @@
     let <wrong:string=""/>
     let <right:string=""/>
     function check(pw: string) -> Auth {
-        if (pw == "hunter2") return .Granted
-        return .Denied
+        if (pw == "hunter2") return .Granted;
+        return .Denied;
     }
     function attempt(pw: string) -> string {
         return match check(pw) {
-            .Granted :> "welcome bryan"
+            .Granted :> "welcome bryan",
             .Denied :> "denied"
-        }
+        };
     }
     function login() {
-        @wrong = attempt("hunter3")
-        @right = attempt("hunter2")
+        @wrong = attempt("hunter3");
+        @right = attempt("hunter2");
     }
     <main>
         <button id="go" onclick=login()>go</button>

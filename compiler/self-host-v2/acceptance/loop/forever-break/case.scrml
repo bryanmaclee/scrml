@@ -2,12 +2,12 @@
 <program>
 
     function f() -> int {
-        let n = 0
+        let n = 0;
         for {
-            n = n + 1
-            if (n == 4) { break }
+            n = n + 1;
+            if (n == 4) { break; }
         }
-        return n
+        return n;
     }
     <main>
         <p id="o">${f()}</p>

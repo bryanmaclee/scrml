@@ -2,7 +2,7 @@ ${
     <first> = "Ada"
     <last> = "Lovelace"
     function rename() {
-        @last = "Byron"
+        @last = "Byron";
     }
 }
 <button id="rename" onclick=rename()>Rename</>

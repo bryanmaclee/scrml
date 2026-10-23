@@ -3,12 +3,12 @@
     let <wrong:string="unset"/>
     function grant(pw: string) -> string | not {
         return match pw {
-            "guest" :> "guest-view"
+            "guest" :> "guest-view",
             "hunter2" :> "admin-view"
-        }
+        };
     }
     function login() {
-        @wrong = match grant("hunter3") { not :> "denied", else :> "granted", }
+        @wrong = match grant("hunter3") { not :> "denied", else :> "granted", };
     }
     <main>
         <button id="go" onclick=login()>go</button>

@@ -5,20 +5,20 @@ type Tier:enum = { Low, High }
 // with `do`. Neither is a statement; both are the block's result expression.
 fn tintVariant(t: Tier) -> string {
     const r = match t {
-        .Low  :> { const formatted = "am"; formatted + "ber" },
-        .High :> { const doc = "in"; doc + "digo" }
-    }
-    return r
+        .Low  :> { const formatted = "am"; formatted + "ber"; }
+        .High :> { const doc = "in"; doc + "digo"; }
+    };
+    return r;
 }
 
 // Raw (literal-arm) path — same predicate, different consumer.
 fn tintLiteral(k: int) -> string {
     const r = match k {
-        1 :> { const letter = "vi"; letter + "olet" },
-        2 :> { const constant = "te"; constant + "al" },
+        1 :> { const letter = "vi"; letter + "olet"; }
+        2 :> { const constant = "te"; constant + "al"; }
         _ :> "gray"
-    }
-    return r
+    };
+    return r;
 }
 
 // The `on` guard is the one keyword that already carried a word boundary, and it
@@ -26,10 +26,10 @@ fn tintLiteral(k: int) -> string {
 // statement head, so it lifts to the arm result.
 fn tintOnPrefixed(k: int) -> string {
     const r = match k {
-        1 :> { const online = "sca"; online + "rlet" },
+        1 :> { const online = "sca"; online + "rlet"; }
         _ :> "gray"
-    }
-    return r
+    };
+    return r;
 }
 
 // The `$` continuation. scrml identifiers admit `$` (`isIdentPart = /[A-Za-z0-9_$]/`,
@@ -40,11 +40,11 @@ fn tintOnPrefixed(k: int) -> string {
 // the fence stays matched to the LANGUAGE's identifier charset rather than to `\w`.
 fn tintDollar(k: int) -> string {
     const r = match k {
-        1 :> { const do$thing = "ma"; do$thing + "genta" },
-        2 :> { const on$c = "cy"; on$c + "an" },
+        1 :> { const do$thing = "ma"; do$thing + "genta"; }
+        2 :> { const on$c = "cy"; on$c + "an"; }
         _ :> "gray"
-    }
-    return r
+    };
+    return r;
 }
 
 // Non-regression: a genuine statement tail is still NOT a value. `@`-free local
@@ -52,10 +52,10 @@ fn tintDollar(k: int) -> string {
 // falls through to the seed and renders empty.
 fn statementTail(k: int) -> string {
     const r = match k {
-        1 :> { let acc = "x"; acc = "y" },
+        1 :> { let acc = "x"; acc = "y"; }
         _ :> "gray"
-    }
-    return r
+    };
+    return r;
 }
 
 <page><main>

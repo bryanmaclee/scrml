@@ -4,37 +4,37 @@
     let <out:string=""/>
     let <log:string=""/>
     function load(id: string)! LoadError {
-        if (id == "x") fail LoadError.NotFound(id)
-        if (id == "b") fail LoadError.Busy(3, "slow")
-        if (id == "g") fail LoadError.Gone
-        return id
+        if (id == "x") fail LoadError.NotFound(id);
+        if (id == "b") fail LoadError.Busy(3, "slow");
+        if (id == "g") fail LoadError.Gone;
+        return id;
     }
     function describe(e: LoadError) -> string {
         return match e {
-            .NotFound(id) :> "missing " + id
-            .Busy(n, why) :> why
+            .NotFound(id) :> "missing " + id,
+            .Busy(n, why) :> why,
             .Gone :> "gone"
-        }
+        };
     }
     function note(e: LoadError) {
         match e {
-            .NotFound(id) :> @log = "nf " + id
+            .NotFound(id) :> @log = "nf " + id,
             .Busy(n, why) :> {
-                @log = "busy " + why
-            }
+                @log = "busy " + why;
+            },
             .Gone :> @log = "gone"
         }
     }
     function run(id: string) {
         @out = match load(id) {
-            .Ok(v) :> v
+            .Ok(v) :> v,
             // no-default-arm: the whole-error binder hands every failure to describe(), which matches each variant
             _ err :> describe(err)
-        }
+        };
         load(id) !{
             // no-default-arm: the whole-error binder hands every failure to note(), which matches each variant
             _ err :> note(err)
-        }
+        };
     }
     <main>
         <button id="b" onclick=run("b")>b</button>

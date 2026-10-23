@@ -6,8 +6,8 @@
     <step=1/>
     <doubled:int=(@count * 2)/>
 
-    function bump()    { @count = @count + @step }
-    function restart() { reset(@count) }
+    function bump()    { @count = @count + @step; }
+    function restart() { reset(@count); }
 
     <main>
         <p id="out">Count ${@count} (doubled ${@doubled})</p>

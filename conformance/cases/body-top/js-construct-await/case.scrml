@@ -1,5 +1,5 @@
 <program>
-function g() { return 1 }
+function g() { return 1; }
 await g()
 <p>x</p>
 </program>

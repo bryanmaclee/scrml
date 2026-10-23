@@ -5,7 +5,7 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadM2, source } from "./harness.js";
+import { loadM2, source, terminated } from "./harness.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
@@ -50,23 +50,30 @@ function sectionBlocks(spec, num) {
   return [...body.matchAll(/```scrml\n([\s\S]*?)```/g)].map((m) => m[1]);
 }
 
-describe("the §66.19 sources are the SPEC's code blocks, verbatim (drift guard)", () => {
+// s469 (dpa-073 F1 / F2): verbatim MODULO the terminators — each source is its
+// SPEC block with `;` and arm `,` written in (`terminated`, harness.js). The SPEC
+// blocks are still newline-terminated; their migration is owed (dpa-073 F5 step 3),
+// and then `terminated` is the identity on them and this reads "verbatim" again.
+describe("the §66.19 sources are the SPEC's code blocks, verbatim modulo the dpa-073 terminators (drift guard)", () => {
   const spec = readFileSync(join(import.meta.dir, "..", "..", "SPEC.md"), "utf8");
+  const blocks = (text, num) => sectionBlocks(text, num).map((b) => terminated(mods, b));
   test("counter.scrml is §66.19.1's one block", () => {
-    expect(sectionBlocks(spec, "66.19.1")).toEqual([lf(source("counter.scrml"))]);
+    expect(blocks(spec, "66.19.1")).toEqual([lf(source("counter.scrml"))]);
   });
   test("lib/dropdown.scrml + app.scrml are the two §66.19.3 blocks, in order", () => {
-    expect(sectionBlocks(spec, "66.19.3")).toEqual([lf(source("lib/dropdown.scrml")), lf(source("app.scrml"))]);
+    expect(blocks(spec, "66.19.3")).toEqual([lf(source("lib/dropdown.scrml")), lf(source("app.scrml"))]);
   });
   test("the guard bites: an edited §66.19.1 / §66.19.3 block, or another section's block, does not match", () => {
     const counter = lf(source("counter.scrml"));
-    const edited = lf(spec).replace(counter, counter.replace("count", "kount"));
-    expect(edited !== lf(spec)).toBe(true);       // the source IS in the SPEC to be edited
-    expect(sectionBlocks(edited, "66.19.1")).not.toEqual([counter]);
+    const block1 = sectionBlocks(spec, "66.19.1")[0];
+    const edited = lf(spec).replace(block1, block1.replace("count", "kount"));
+    expect(edited !== lf(spec)).toBe(true);       // the block IS in the SPEC to be edited
+    expect(blocks(edited, "66.19.1")).not.toEqual([counter]);
     const app = lf(source("app.scrml"));
-    const edited3 = lf(spec).replace(app, app.replace("Country", "Nation"));
+    const block3 = sectionBlocks(spec, "66.19.3")[1];
+    const edited3 = lf(spec).replace(block3, block3.replace("Country", "Nation"));
     expect(edited3 !== lf(spec)).toBe(true);
-    expect(sectionBlocks(edited3, "66.19.3")).not.toEqual([lf(source("lib/dropdown.scrml")), app]);
+    expect(blocks(edited3, "66.19.3")).not.toEqual([lf(source("lib/dropdown.scrml")), app]);
     // §66.19.2's block is a real scrml block of the SPEC, but it is not §66.19.1's
     expect(sectionBlocks(spec, "66.19.2").length).toBe(1);
     expect(sectionBlocks(spec, "66.19.1")).not.toContain(sectionBlocks(spec, "66.19.2")[0]);
@@ -151,7 +158,7 @@ describe("parse — §66 diagnostics", () => {
   });
 
   test("a spread `{ ...@x, f: v }` / `{ ...x }` parses as spread props (three touching dots)", () => {
-    const r = parse("t.scrml", "<program>\nfunction f() { @o = { ...@o, s: .Shipped }\n let y = { ...x } }\n</program>");
+    const r = parse("t.scrml", "<program>\nfunction f() { @o = { ...@o, s: .Shipped };\n let y = { ...x }; }\n</program>");
     expect(r.diags).toEqual([]);
     const body = r.ast.items[0].k.data.p.items[0].k.data.f.body.stmts;
     const obj = body[0].k.data.e.k.data.value.k.data.props;

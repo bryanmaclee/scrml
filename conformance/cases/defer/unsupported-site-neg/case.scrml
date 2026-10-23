@@ -3,7 +3,7 @@ ${
     <trace> = ""
 
     function D(s: string) {
-        @trace = @trace + s
+        @trace = @trace + s;
     }
 
     function bare() {

@@ -1,7 +1,7 @@
 ${
     <link>: string(url) = "https://scrml.dev/"
     function clearLink() {
-        @link = "javascript:alert(1)"
+        @link = "javascript:alert(1)";
     }
 }
 <program>

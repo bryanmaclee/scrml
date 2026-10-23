@@ -2,7 +2,7 @@ ${
     <m>: number = -5
     function g() {
         let k: number(>0) = 1
-        const f = () => { k = @m }
+        const f = () => { k = @m; }
         f()
         return k
     }

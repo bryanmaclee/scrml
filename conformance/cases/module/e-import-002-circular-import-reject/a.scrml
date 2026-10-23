@@ -1,4 +1,4 @@
 ${
-    import { fromEntry } from './case.scrml'
+    import { fromEntry } from './case.scrml';
 }
 export const fromA = fromEntry

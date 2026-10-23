@@ -2,19 +2,19 @@
 ${
     <total> = 0
     function sumAmounts(rows) {
-        let s = 0
-        let i = 0
-        while (i < rows.length) { s = s + rows[i].amount; i = i + 1 }
+        let s = 0;
+        let i = 0;
+        while (i < rows.length) { s = s + rows[i].amount; i = i + 1; }
         return s
     }
     function loadTotal() {
-        const rows = ?{`SELECT id, amount FROM sales`}.all() !{ _ :> [] }
-        const picker0 = sumAmounts
-        const picker = picker0
-        return picker(rows)
+        const rows = ?{`SELECT id, amount FROM sales`}.all() !{ _ :> [] };
+        const picker0 = sumAmounts;
+        const picker = picker0;
+        return picker(rows);
     }
     function onLoad() {
-        @total = loadTotal() !{ .Transport(_) :> return }
+        @total = loadTotal() !{ .Transport(_) :> return };
     }
 }
 <button id="load" onclick=onLoad()>Total</>

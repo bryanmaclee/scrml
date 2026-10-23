@@ -5,6 +5,6 @@
   function beacon(v) {
     return v
   }
-  <effect deps=[@d]>${ beacon(@d) }</>
+  <effect deps=[@d]>${ beacon(@d); }</>
   <p>${@p}</p>
 </program>

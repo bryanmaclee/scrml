@@ -8,6 +8,6 @@ ${
         }
         @out = "ran"
     }
-    function go() { pick(K.A) }
+    function go() { pick(K.A); }
 }
 <button id="go" onclick=go()>go</>

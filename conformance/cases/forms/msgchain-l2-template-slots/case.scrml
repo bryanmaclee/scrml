@@ -1,6 +1,6 @@
 <program>
 ${
-    import { registerMessages } from 'scrml:data'
+    import { registerMessages } from 'scrml:data';
     registerMessages({
         .Required:        "{field} cannot be left empty",
         .LengthFailed:    "{field} needs a length {predicate}",

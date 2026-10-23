@@ -4,7 +4,7 @@
     let <a:User | not=not/>
     let <b:User | not=not/>
     <main>
-        <button id="set" onclick={ @a = { name: "x" }; @b = { name: "x" } }>set</button>
+        <button id="set" onclick={ @a = { name: "x" }; @b = { name: "x" }; }>set</button>
         <p id="eq">${@a == @b}</p>
     </main>
 </program>

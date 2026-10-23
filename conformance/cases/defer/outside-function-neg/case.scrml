@@ -3,7 +3,7 @@ ${
     defer @n = 5
 
     function go() {
-        @n = 1
+        @n = 1;
     }
 }
 <program>

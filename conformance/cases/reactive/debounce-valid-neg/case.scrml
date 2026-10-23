@@ -1,7 +1,7 @@
 ${
     <searchTerm debounced=300ms> = ""
     function setIt() {
-        @searchTerm = "hi"
+        @searchTerm = "hi";
     }
 }
 <button id="s" onclick=setIt()>set</>

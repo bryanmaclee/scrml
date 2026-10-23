@@ -1,6 +1,6 @@
 <program>
 ${
-    import { greet } from './helpers.scrml'
+    import { greet } from './helpers.scrml';
     <who> = "World"
 }
 <p id="msg">${greet(@who)}</>

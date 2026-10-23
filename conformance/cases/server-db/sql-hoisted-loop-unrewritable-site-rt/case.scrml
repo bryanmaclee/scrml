@@ -12,14 +12,14 @@
     function firstOn(items) {
         for (const it of items) {
             if (it.on) {
-                return ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get()
+                return ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get();
             }
         }
-        return not
+        return not;
     }
     function go() {
-        const row = firstOn([{ id: 8, on: false }, { id: 7, on: true }]) !{ _ :> not }
-        @found = row is not ? "none" : row.body
+        const row = firstOn([{ id: 8, on: false }, { id: 7, on: true }]) !{ _ :> not };
+        @found = row is not ? "none" : row.body;
     }
     <button id="go" onclick=go()>go</button>
     <p id="found">${@found}</p>

@@ -3,15 +3,15 @@
     // an fts5 table with closed options, an index, a closed-list PRAGMA, transaction control, DML.
     ${
         function setup() {
-            ?{`CREATE TABLE IF NOT EXISTS log (id INTEGER PRIMARY KEY, msg TEXT NOT NULL DEFAULT '')`}.run()
-            const cols = ?{`PRAGMA table_info(log)`}.all()
-            if (cols.filter(c => c.name == "extra").length == 0) { ?{`ALTER TABLE log ADD COLUMN extra TEXT NOT NULL DEFAULT ''`}.run() }
-            ?{`CREATE VIRTUAL TABLE IF NOT EXISTS log_fts USING fts5(msg, tokenize = 'porter')`}.run()
-            ?{`CREATE UNIQUE INDEX IF NOT EXISTS log_msg ON log (msg) WHERE msg <> ''`}.run()
-            ?{`BEGIN`}.run()
-            ?{`INSERT INTO log (msg) VALUES ('hello')`}.run()
-            ?{`COMMIT`}.run()
-            return 1
+            ?{`CREATE TABLE IF NOT EXISTS log (id INTEGER PRIMARY KEY, msg TEXT NOT NULL DEFAULT '')`}.run();
+            const cols = ?{`PRAGMA table_info(log)`}.all();
+            if (cols.filter(c => c.name == "extra").length == 0) { ?{`ALTER TABLE log ADD COLUMN extra TEXT NOT NULL DEFAULT ''`}.run(); }
+            ?{`CREATE VIRTUAL TABLE IF NOT EXISTS log_fts USING fts5(msg, tokenize = 'porter')`}.run();
+            ?{`CREATE UNIQUE INDEX IF NOT EXISTS log_msg ON log (msg) WHERE msg <> ''`}.run();
+            ?{`BEGIN`}.run();
+            ?{`INSERT INTO log (msg) VALUES ('hello')`}.run();
+            ?{`COMMIT`}.run();
+            return 1;
         }
     }
     <button onclick=${ setup() }>setup</button>

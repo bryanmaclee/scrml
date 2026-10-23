@@ -6,22 +6,22 @@ ${
     <seen> : string = "none"
     <after> : string = "not-run"
     function risky(n: number)! E {
-        if (n < 0) { fail E.Boom("neg") }
-        return n
+        if (n < 0) { fail E.Boom("neg"); }
+        return n;
     }
     function viaQ(k: K, n: number)! E {
         const r = match k {
             .A :> risky(n)?,
             .B :> 0,
             .C :> 1
-        }
-        @out = "r=" + r
+        };
+        @out = "r=" + r;
     }
     function go() {
         viaQ(K.A, -1) !{
             .Boom(m) :> @seen = "boom:" + m,
             .Other :> @seen = "other"
-        }
+        };
     }
 }
 <button id="go" onclick=go()>go</>

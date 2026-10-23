@@ -1,11 +1,11 @@
 ${
     <n> = 0
     fn bad(x: number) -> number {
-        defer @n = 5
-        return x + 1
+        defer @n = 5;
+        return x + 1;
     }
     function go() {
-        @n = bad(1)
+        @n = bad(1);
     }
 }
 <program>

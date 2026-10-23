@@ -1,5 +1,5 @@
 ${
-    import { tableFor } from 'scrml:data'
+    import { tableFor } from 'scrml:data';
     type Item:struct = { sku: string, name: string }
     <items>: Item[] = []
     <picked>: string[] = []

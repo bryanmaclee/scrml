@@ -29,7 +29,7 @@ const twice = (src) => run(src).diags.filter((d) => d.code === "E-BOOTSTRAP-UNSU
 const prog = (body, decls = "") => `<program>
     let <step:number=1/>
     let <ok:boolean=true/>
-    function go(n: number) { @step = n }
+    function go(n: number) { @step = n; }
 ${decls}
     <main>
 ${body}

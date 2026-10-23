@@ -1,7 +1,7 @@
 type LoadError:enum = { Empty, Bad }
 
 ${
-    function risky()! -> LoadError { fail LoadError.Empty }
+    function risky()! -> LoadError { fail LoadError.Empty; }
 }
 
 <r> = 0

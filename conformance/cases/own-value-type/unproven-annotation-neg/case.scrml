@@ -3,7 +3,7 @@
 // cast nothing checks.
 <program>
     function pick(b: bool) {
-        if (b) { return 5 } else { return "five" }
+        if (b) { return 5; } else { return "five"; }
     }
     <v:int=(pick(true))/>
     <main><p>${@v}</p></main>
