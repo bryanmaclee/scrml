@@ -162,3 +162,27 @@ describe("§3 a regex after a binary `+` (the lexer reads that `/` as division) 
     expect(good.js).toContain("/a,b/");
   });
 });
+
+describe("§4 the deprecated `->` arrow in a comma list (S469 r4, final review F2)", () => {
+  test("`\"a\" -> f(2, 3),` / `else -> \"z\"` — the token-joined `- >` is read as an arm arrow", () => {
+    const t = fnPage(`      "a" -> f(2, 3)@1
+      "b" -> f("x, y", 1)@2
+      else -> "z"@3`);
+    const lines = compileAt(spell(t, "newline"), "arrow-dash");
+    const commas = compileAt(spell(t, "comma"), "arrow-dash");
+    const mixed = compileAt(spell(t, "mixed"), "arrow-dash");
+    expect(lines.codes.filter((c) => c.startsWith("E-"))).toEqual([]);
+    expect(commas.codes).toEqual(lines.codes);
+    expect(mixed.codes).toEqual(lines.codes);
+    expect(commas.out).toBe(lines.out);
+    expect(mixed.out).toBe(lines.out);
+    expect(lines.js).toContain(`=== "b"`);
+    // (a regex right after a source `->` is lexed as division at the SOURCE — `-` `>` are two
+    // PUNCT tokens there — the g-impl1-regex-after-binary-operator-lexed-as-division-s469 class)
+  });
+
+  test("splitArmSeparatorCommas reads the joined `- >`", () => {
+    expect(splitArmSeparatorCommas(`"a" - > f ( 2 , 3 ) , else - > "y"`)).toEqual([`"a" - > f ( 2 , 3 )`, `else - > "y"`]);
+    expect(rawArmHasStrayComma(`"a" - > f ( 2 , 3 )`)).toBe(false);
+  });
+});
