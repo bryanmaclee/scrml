@@ -33,7 +33,17 @@ where the terminator goes (the fix-it). impl#1 is unchanged (it keeps reading ne
      F6's ruled reading (returns / lifts `expr`) waits for the newline-terminated corpus migration;
    - `fail⏎.E` → E-STMT-MISSING-SEMICOLON + a misleading E-SCOPE-001; `defer⏎`, `transaction⏎{` likewise (R8);
    - `break⏎label` / `continue⏎label` — label only on the same line (fails closed);
-   - NOT fail-closed: a statement `match`'s `}` is not a statement boundary — `match k {…}⏎-1;` glues into one
-     expression (`Eval(Binary)`).
+   - (fixed in r3, below) a statement `match`'s `}` was not a statement boundary — `match k {…}⏎-1;` glued.
 5. SPEC.md untouched. To a SPEC lane after #1501 lands: the §19.4.5 wording, and the E-PARSE-ARM vs E-PARSE-001 code
    question.
+
+## Round 3 — the statement-`match` boundary
+- parse.scrml parseStmt: a `match` that starts a statement is parsed by parseMatch and ends at its `}` (F3 (i)):
+  `match k {…}⏎-1;`, ⏎`.A;`, ⏎`(x);`, ⏎`[1];`, ⏎a template — each a separate statement, never glued. On the SAME
+  line a token that would continue an expression (binary / assignment operator, `.`, `?.`, `(`, `[`, `?`, `!`, a
+  template) is REFUSED with E-PARSE-TRAILING, not split: the writer plainly meant one expression, and splitting
+  would silently run `+ 2` as a statement of its own; the message names the value form `(match … { … }) + 2`.
+  A value match (`const v = match …`, `@x = match …`, inside an expression) is unchanged and keeps its `;`.
+- Equivalence: OLD (HEAD before r3) vs NEW bootstrap over 4,481 recorded slice source sets — all identical
+  (codes and printed client/server artifacts; 1,601 with artifacts). bootstrap-conformance --check unchanged.
+
