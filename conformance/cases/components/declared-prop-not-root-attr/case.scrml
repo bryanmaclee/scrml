@@ -21,7 +21,7 @@ const Card = <div class="card" props={ title: string, href: string, disabled: bo
         ${ for (r of @rows) { lift <li><Card title=r.t href=r.url disabled=@off id="c-lift"/></li> } }
     </ol>
     <div id="arm">
-        <match for=Phase; on=@phase>
+        <match for=Phase on=@phase>
             <Idle>
                 <p>idle</p>
             </>

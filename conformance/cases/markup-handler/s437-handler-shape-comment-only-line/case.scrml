@@ -12,14 +12,14 @@ ${ function t(x) { @log = @log + x + "," } }
 
 <button id="top" onclick={
             // record the click
-            t("T");
+            t("T")
         }>top</button>
 
 <engine for=Phase initial=.Idle>
     <Idle>
         <button id="eng" onclick={
             // record the click
-            t("E");
+            t("E")
         }>engine</button>
     </>
     <Loading : "Loading…">
@@ -29,7 +29,7 @@ ${ function t(x) { @log = @log + x + "," } }
     <Idle>
         <button id="mat" onclick={
             // record the click
-            t("M");
+            t("M")
         }>match</button>
     </>
     <Loading><p>Loading…</p></>
@@ -39,7 +39,7 @@ ${ function t(x) { @log = @log + x + "," } }
     <each in=@items key=@.id>
         <li><button class="row" onclick={
             // record the click
-            t("R");
+            t("R")
         }>${@.name}</button></li>
     </each>
 </ul>
