@@ -115,7 +115,7 @@ import { srcmapMark } from "./srcmap-provenance.ts";
 import { iterDestructuredNames } from "../type-system.ts";
 import { lowerPresenceCheck, lowerAbsenceCheck, lowerVariantCheck } from "./is-predicate-lowering.ts";
 import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw, droppedStatementTextOf, hasLostTrailingContent, rawArmHasStrayComma } from "../expression-parser.ts";
-import { armHasDivisionSlash, rawArmHasLeadingPipeArm } from "../arm-list-split.ts";
+import { armHasDivisionSlash, rawArmHasLeadingPipeArm, armPiecesCover } from "../arm-list-split.ts";
 import { sqlQueryExprShape, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { emitSqlQueryShape, emitNestedGuardExpr, emitServerFnValueFromText, emitServerFnValue } from "./emit-logic.js";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
@@ -5109,10 +5109,13 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
   // read past (it used to drop arms or dispatch on the wrong one).
   // Read per ARM, as the lowering splits them (a raw arm can hold several juxtaposed arms, and a
   // `|` after one arm's body is only a leading `|` relative to that arm).
+  // r6 — also on the WHOLE raw arm text, for a `|` that starts it (a splitter that drops a prefix
+  // must not be able to hide it).
   for (const arm of node.rawArms) {
     if (typeof arm !== "string" || !arm.includes("|")) continue;
-    const pieces = splitMultiArmString(arm.trim().replace(/-\s*>/g, "->"));
-    if (!pieces.some((p) => rawArmHasLeadingPipeArm(p))) continue;
+    const text = arm.trim().replace(/-\s*>/g, "->");
+    const pieces = splitMultiArmString(text);
+    if (!rawArmHasLeadingPipeArm(text, { startOnly: true }) && !pieces.some((p) => rawArmHasLeadingPipeArm(p))) continue;
     recordRefusedLowering(new CGError(
       "E-PARSE-001",
       `E-PARSE-001: the \`match\` arm \`${excerptRaw(arm)}\` is led by \`|\` — a \`match\` arm takes no leading ` +
@@ -5135,6 +5138,22 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
             "`/` as division (g-impl1-regex-after-binary-operator-lexed-as-division-s469): wrap the regular " +
             "expression in parentheses — `(/a,b/)`."
           : ""),
+      (node as { span?: object }).span ?? {},
+    ), node as object);
+    return "null /* E-PARSE-001 */";
+  }
+  // S469 r6 — the COVERAGE invariant (arm-list-split.ts `armPiecesCover`): the arms the lowering
+  // splits a raw arm text into, plus separators and whitespace, must account for every
+  // non-whitespace character of it. A split that loses text (three shipped: a quote in a regex, a
+  // negative alternate, a `|`-led prefix) is refused here — never emitted with an arm missing.
+  for (const arm of node.rawArms) {
+    if (typeof arm !== "string") continue;
+    const text = arm.trim().replace(/-\s*>/g, "->");
+    if (armPiecesCover(text, splitMultiArmString(text))) continue;
+    recordRefusedLowering(new CGError(
+      "E-PARSE-001",
+      `E-PARSE-001: the \`match\` arm text \`${excerptRaw(arm)}\` cannot be read as arms without losing part of it. ` +
+        "Write one arm per `<pattern> :> body`, separated by `,` or a line break (§18.2).",
       (node as { span?: object }).span ?? {},
     ), node as object);
     return "null /* E-PARSE-001 */";

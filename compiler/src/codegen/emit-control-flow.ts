@@ -18,7 +18,7 @@ import { tenantFloorTouchesSql } from "./rewrite.js";
 import { SQL_ERROR_VARIANT_FIELDS, sqlQueryExprShape, unhandledFailureThrow, handledSqlGuardInner, SQL_ATTEMPT_FN } from "./sql-attempt.ts";
 import { HOIST_VALUES_PLACEHOLDER } from "../hoist-sql-shape.ts";
 import { programStatementRefusal, sqlHoldsOneStatement } from "./sql-one-statement-guard.ts";
-import { literalSpans } from "../arm-list-split.ts";
+import { literalSpans, armPiecesCover } from "../arm-list-split.ts";
 
 // ---------------------------------------------------------------------------
 // Module-level Tier 2 hoist registry (§8.10)
@@ -2310,6 +2310,17 @@ function _matchArmInlineToMatchArm(node: any): MatchArm | null {
  * Returns [s] when only zero or one arm boundary is found.
  */
 export function splitMultiArmString(s: string): string[] {
+  const pieces = _splitMultiArmStringImpl(s);
+  // S469 r6 — test-observable COVERAGE audit (arm-list-split.ts `armPiecesCover`). When a test sets
+  // `globalThis.__scrmlArmSplitAudit = []`, every split records whether its pieces account for
+  // every non-whitespace character of the input, so a suite can fail on ANY dropped text — from
+  // every caller, including the analyses that do not refuse — even where the dispatch looks right.
+  const audit = (globalThis as { __scrmlArmSplitAudit?: unknown }).__scrmlArmSplitAudit;
+  if (Array.isArray(audit)) audit.push({ text: s, pieces, covered: armPiecesCover(s, pieces) });
+  return pieces;
+}
+
+function _splitMultiArmStringImpl(s: string): string[] {
   const armStartPositions: number[] = [];
   let inString: string | null = null;
   let braceDepth = 0; // skip arm detection inside nested { } blocks
@@ -3956,7 +3967,21 @@ function collectMatchArms(body: any[], opts?: any): MatchArm[] {
     // be invisible to it). `->` is never a value-expression operator in scrml,
     // so a global collapse of `- >` is safe.
     const _armsBefore = arms.length;
-    const armStrings = splitMultiArmString(trimmed.replace(/-\s*>/g, "->"));
+    const armText = trimmed.replace(/-\s*>/g, "->");
+    const armStrings = splitMultiArmString(armText);
+    // S469 r6 — the COVERAGE invariant (arm-list-split.ts `armPiecesCover`): the split must
+    // account for every non-whitespace character of the arm text, or the match is refused —
+    // never lowered with text (an arm, an alternate, a sign) silently missing.
+    if (!armPiecesCover(armText, armStrings)) {
+      const refusal = new CGError(
+        "E-PARSE-001",
+        `E-PARSE-001: the \`match\` arm text \`${armText.length > 60 ? armText.slice(0, 60) + "…" : armText}\` cannot be read ` +
+        "as arms without losing part of it. Write one arm per `<pattern> :> body`, separated by `,` or a line break (§18.2).",
+        (child?.span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as ConstructorParameters<typeof CGError>[2],
+      );
+      if (opts?.errors) opts.errors.push(refusal); else recordRefusedLowering(refusal, child);
+      continue;
+    }
     for (const armStrRaw of armStrings) {
       // S469 (dpa-073 F2) — a raw arm list is a comma list: the `,` that ends an
       // arm is its separator, not part of its body (scrml has no comma operator).

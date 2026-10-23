@@ -115,6 +115,27 @@ export function rawArmHasStrayComma(arm: string): boolean {
   return topLevelCommaIdx(ts).length > 0;
 }
 
+/**
+ * S469 r6 — the COVERAGE invariant of an arm split. The pieces a splitter returns, plus the
+ * separators and whitespace between them, must account for EVERY non-whitespace character of the
+ * input, in order: pieces are trimmed slices of the input; between two pieces (and before the
+ * first, and after the last) only whitespace and at most one arm-separator `,` may be consumed.
+ * A split that loses text — a prefix before the first arm head, an alternate, a sign — fails it,
+ * and the lowering refuses (E-PARSE-001) instead of emitting a match with an arm missing.
+ * (Three such losses shipped in this lane: a quote in a regex, a negative alternate, a `|`-led prefix.)
+ */
+export function armPiecesCover(text: string, pieces: string[]): boolean {
+  let at = 0;
+  const gapOk = (g: string) => /^\s*,?\s*$/.test(g);
+  for (const p of pieces) {
+    if (!p) continue;
+    const k = text.indexOf(p, at);
+    if (k < 0 || !gapOk(text.slice(at, k))) return false;
+    at = k + p.length;
+  }
+  return gapOk(text.slice(at));
+}
+
 /** A token that can be part of an arm PATTERN (a literal, a variant, `_` / `else` / `not`, a binder). */
 function isPatternTok(t: ArmTok): boolean {
   if (t.kind === "STRING" || t.kind === "NUMBER" || t.kind === "IDENT") return true;
@@ -132,8 +153,11 @@ function isPatternTok(t: ArmTok): boolean {
  * alternation `|` inside a head (`.A | .B :>`, no arrow before it in the arm), a bitwise `|` in a
  * body (no arm arrow after its operand), and `| _` / `| else` / `| ( … )` — the whole-product
  * wildcard / product arm impl#1 accepts (§18.19; a filed divergence).
+ * `startOnly`: check only a `|` that STARTS the text — the form that is sound on a whole raw arm
+ * text holding several juxtaposed arms (there, a `|` after an arrow may be the next arm's head
+ * alternation, `1 :> "a" "b" | "c" :> …`); the after-a-body check needs one split arm.
  */
-export function rawArmHasLeadingPipeArm(arm: string): boolean {
+export function rawArmHasLeadingPipeArm(arm: string, opts: { startOnly?: boolean } = {}): boolean {
   if (typeof arm !== "string" || !arm.includes("|")) return false;
   const ts = armTokens(arm);
   if (!ts) return false;
@@ -145,7 +169,7 @@ export function rawArmHasLeadingPipeArm(arm: string): boolean {
     const isBar = t.kind === "PUNCT" && t.text === "|" &&
       !(ts[k + 1] && ts[k + 1].kind === "PUNCT" && ts[k + 1].text === "|") &&
       !(ts[k - 1] && ts[k - 1].kind === "PUNCT" && ts[k - 1].text === "|");
-    if (depth === 0 && isBar && (k === 0 || sawArrow)) {
+    if (depth === 0 && isBar && (k === 0 || (sawArrow && !opts.startOnly))) {
       const n = ts[k + 1];
       const wildOrProduct = !!n && ((n.kind === "IDENT" && n.text === "_") || (n.kind === "KEYWORD" && n.text === "else") || (n.kind === "PUNCT" && n.text === "("));
       if (!wildOrProduct) {
