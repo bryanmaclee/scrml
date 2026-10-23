@@ -119,6 +119,17 @@ describe("4 — the claim-gate surface floor", () => {
   test("every excuse carries a reason", () => {
     for (const [p, why] of Object.entries(SURFACE_UNGATED)) expect(why.length, p).toBeGreaterThan(10);
   });
+  test("S469 Banner + exempt: the dated pieces are excused one by one; docs/articles stays gated", () => {
+    expect(PUBLIC_SURFACE).toContain("docs/articles");
+    expect(Object.keys(SURFACE_UNGATED)).not.toContain("docs/articles");
+    for (const p of ["docs/articles/i-am-jacks-engine-PUBLISH.md", "docs/articles/if-you-give-a-dev-an-enum-2026-08-31.md", "docs/website/v0.3.0-announce-2026-05-14.md"]) {
+      expect(Object.keys(SURFACE_UNGATED)).toContain(p);
+    }
+    expect(Object.keys(SURFACE_UNGATED).some((p) => p.includes("llm-kickstarter"))).toBe(false);
+    // a file-level excuse covers that file only, not its siblings
+    const miss = uncoveredDocs(root, new Set(["README.md"]), { ungated: { "docs/changes": "internal records", "docs/new-guide.md": "test excuse, one file" } });
+    expect(miss).toEqual(["docs/guide/list.md"]);
+  });
   test("the round-3 additions are in the surface", () => {
     for (const p of ["docs/lin.md", "docs/external-js.md", "docs/website"]) expect(PUBLIC_SURFACE).toContain(p);
   });

@@ -9,7 +9,7 @@ Owner rulings: scrml-support `user-voice-scrml.md`, S469, "public docs teach the
 | Gate | Checks | In CI |
 |---|---|---|
 | `bun scripts/snippet-gate.js` | every `.scrml` file under `docs/tutorial-snippets/`, `docs/readme-snippets/`, `docs/website/`; and that a fence under `<!-- snippet: path -->` is an exact copy of its file | yes (required) |
-| `bun scripts/claim-gate.js` | every other ` ```scrml ` fence in the public surface (README, NERDME, DESIGN, tutorial, `docs/articles/`, `docs/adopter/`, `docs/lin.md`, `docs/external-js.md`, `docs/website/*.md`) | not yet (`--report` to measure) |
+| `bun scripts/claim-gate.js` | every other ` ```scrml ` fence in the public surface (README, NERDME, DESIGN, tutorial, `docs/articles/`, `docs/adopter/`, `docs/lin.md`, `docs/external-js.md`, `docs/website/*.md`) | yes (blocking: a step in `checks`, which `gate` needs). Dated pre-S469 articles and the v0.2.0 / v0.3.0 announcements are bannered and listed in `SURFACE_UNGATED` |
 
 Both print per-mode counts: impl1 and bootstrap (ruled).
 
@@ -71,3 +71,7 @@ Grammar and checks: `scripts/doc-gate-markers.js`. Tests: `compiler/tests/unit/d
 ## Archived drafts
 
 `docs/articles/archive/` holds the April–May 2026 devto drafts and `llm-kickstarter-v1`, which are superseded. Each carries a "SUPERSEDED. DO NOT PASTE." banner. The directory is outside both gates on purpose, and outside the drift check: its code is an older dialect and is not checked. Do not link to it as current material.
+
+## Dated pieces (banner + exempt)
+
+The dated articles in `docs/articles/` (the `i-am-jacks-*` and `if-you-give-a-dev-an-enum` drafts and their `-PUBLISH` copies) and the v0.2.0 / v0.3.0 announcements in `docs/website/` were written before the S469 rulings, in bryan's voice. They stay where they are, unedited, with a banner at the top: their code is the older dialect and is not checked. claim-gate excuses them **one file at a time** in `SURFACE_UNGATED` (`scripts/claim-gate-surface.js`), so `docs/articles/` itself stays in the surface: `llm-kickstarter-v2` (ruled) and any new article are gated. Owner ruling: S469 "Banner + exempt".

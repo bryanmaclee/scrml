@@ -1,6 +1,7 @@
-// NERDME.md "Client navigation" — the persistent shell. Gated by scripts/snippet-gate.js.
+// NERDME.md "Client navigation" — the persistent shell. Ruled; spec-ahead on the bootstrap (no navigate(), no <outlet>).
 // In a real app the routes live in pages/*.scrml and compose into <outlet/>.
 <program>
+
 <nav>
     <a href="/">Home</a>
     <a href="/settings">Settings</a>
@@ -8,4 +9,5 @@
 </nav>
 <button onclick=navigate("/settings")>Open settings</button>
 <outlet/>
+
 </program>
