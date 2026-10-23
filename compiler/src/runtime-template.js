@@ -1620,7 +1620,9 @@ function _scrml_mount_track(dispose) {
 // Shipped with the 'reconciliation' chunk (CHUNK_DEPENDENCIES) and whenever the client
 // names one of its helpers (every <match> / <engine> dispatcher calls _scrml_arm_scope).
 // The always-included 'scope' chunk is untouched: _scrml_effect, _scrml_create_scope and
-// _scrml_unmount_scope reach this chunk through typeof guards.
+// _scrml_unmount_scope reach this chunk through a typeof guard on _scrml_scope_recs. The
+// guard reads the CONST, not a function name: a sibling runtime evaluated into the same
+// global (test harnesses do this) leaks its function declarations, never its consts.
 //
 // A scope OWNS what is created while it is active: the disposers _scrml_mount_track /
 // _scrml_region_track register into it, and every effect remembers it (see
@@ -1794,7 +1796,7 @@ function _scrml_create_scope() {
   // Tracked in the owner tree (chunk 'owner', when shipped) as a ROOT: the rows and arms rendered
   // inside this mount become its children, so _scrml_unmount_scope tears them down.
   const id = "if_" + (++_scrml_scope_counter);
-  return typeof _scrml_scope_track === "function" ? _scrml_scope_track(id, null) : id;
+  return typeof _scrml_scope_recs !== "undefined" ? _scrml_scope_track(id, null) : id;
 }
 
 /**
@@ -1882,7 +1884,7 @@ function _scrml_unmount_scope(root, scopeId) {
   // Through the owner tree when it shipped, so the rows and arms rendered inside this
   // mount (its child scopes) are torn down with it.
   if (scopeId) {
-    if (typeof _scrml_owner_destroy === "function") _scrml_owner_destroy(scopeId);
+    if (typeof _scrml_scope_recs !== "undefined") _scrml_owner_destroy(scopeId);
     else _scrml_destroy_scope(scopeId);
   }
   if (!root) return;
