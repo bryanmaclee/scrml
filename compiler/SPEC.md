@@ -18046,8 +18046,10 @@ When the empty-state condition does NOT hold, the `<empty>` body is NOT rendered
 > inside a row is in that row and is **E-COMPONENT-ENGINE-SCOPE** (§51.0.K). In the `<empty>` body of a list that is
 > NOT in a row the row rule does not reach it — the fallback renders once — but impl#1's list renderer has no engine
 > lowering (it dropped the engine at exit 0), so impl#1 refuses it as an unsupported emission, **E-CG-003**, rather
-> than drop it. ⚑ **OPEN** — whether an engine there renders (as one in an `if=` branch does) or is refused by the
-> language is the owner's call; the refusal is reversible.
+> than drop it. ⚑ **OPEN** — whether an engine there renders (as one under a lone `if=` does — an `if=` with no
+> `else`; in a branch of an `if=` / `else` chain impl#1 drops it today,
+> [[g-engine-in-if-else-chain-branch-renders-nothing-s469]]) or is refused by the language is the owner's call; the
+> refusal is reversible.
 
 #### 17.7.5 `key=` inference + the `W-EACH-KEY-001` info-lint
 

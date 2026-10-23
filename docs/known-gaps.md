@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 262 | 4 |
+| HIGH | 263 | 4 |
 | MED | 678 | 8 |
-| LOW | 473 | 0 |
+| LOW | 474 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -465,7 +465,7 @@ position is refused (`E-MATCH-BLOCK-IN-LIFT`); the engine owes the same refusal,
 Found while closing [[g-engine-inside-each-row-renders-nothing]]. `<each in=@xs …>…<empty><engine for=Phase
 initial=.Active>…</></empty></each>` with an empty list rendered nothing at all at exit 0 (the whole fallback
 vanished). The §51.0.K row rule does not reach it — the fallback renders once, while the list is empty, like an
-engine in an `if=` branch (which renders) — so the language question is open: render it (impl work in the list
+engine under a lone `if=` (which renders; in an `if=`/`else` chain branch it is dropped, [[g-engine-in-if-else-chain-branch-renders-nothing-s469]]) — so the language question is open: render it (impl work in the list
 renderer) or refuse it. impl#1 now refuses it as an unsupported emission, **E-CG-003** (fail closed, loud,
 reversible; §17.7.4 carries the ⚑ OPEN). An `<empty>` of a list that is itself in a row IS in that row
 (E-COMPONENT-ENGINE-SCOPE).
@@ -478,6 +478,28 @@ reversible; §17.7.4 carries the ⚑ OPEN). An `<empty>` of a list that is itsel
 (the emit-each row backstop catches it — it compiled at exit 0 with no engine before S469), but the error says
 `1:61`: the CE re-parse of the component body carries body-local spans, and CE's own component-engine check did not
 fire on an engine nested in a list in the body. Refused either way; only the location is wrong.
+
+### g-engine-in-if-else-chain-branch-renders-nothing-s469 — an `<engine>` in ANY branch of a top-level `if=` / `else` chain renders nothing at exit 0 (a lone `if=` with no `else` renders) — `NEW S469 (review of s469-engine-in-row); HIGH; open`
+
+<!-- @gap id=g-engine-in-if-else-chain-branch-renders-nothing-s469 sev=HIGH status=open locus=searched:compiler/src/codegen(the if-chain branch template emission — data-scrml-if-chain / _scrml_chain_tpl)—not-traced prov=empirical:S469-review-of-s469-engine-in-row+reproduced-under-happy-dom-on-adcdda368 -->
+
+Pre-existing silent drop, found by the final review of `s469-engine-in-row`.
+`<div if=@f><engine for=Phase initial=.Active>…</></div><div else>b</div>` with `@f = true` mounts `<div></div>`:
+no state body, no diagnostic. The engine in the `else` branch (`@f = false`) is dropped the same way. The chain's
+branch templates carry no engine lowering. A lone `<div if=@f><engine …/></div>` (no `else`) renders the engine
+(`data-scrml-engine-mount`). It fails closed (nothing renders), so it is not a guard hole. But this is authored UI
+silently missing at exit 0, and an `else` fallback is exactly where state-machine UI tends to go. Owed: render it
+(the branch is a singleton position) or refuse it loudly.
+
+### g-component-body-each-row-engine-unused-compiles-clean-s469 — an `<engine>` in an `<each>` row inside the body of a component that is never USED compiles clean — `NEW S469 (review of s469-engine-in-row); LOW; open`
+
+<!-- @gap id=g-component-body-each-row-engine-unused-compiles-clean-s469 sev=LOW status=open locus=compiler/src/component-expander.ts(collectBodyEngines does not reach an engine-decl in an each row of the body; the codegen row backstop only runs on an expanded use) prov=empirical:S469-review-of-s469-engine-in-row+reproduced-on-adcdda368 -->
+
+`const Card = <div><each in=@groups key=@.id as g><li>${g.id}<engine for=Phase …>…</></li></each></div>` with no
+`<Card/>` anywhere compiles at exit 0, with no diagnostic, on both base `c9f8cd25b` and head. Nothing renders, so nothing
+leaks. But §51.0.K refuses an engine in a component body whether or not the component is used, and the
+component expander's walk misses an engine inside a list in the body (see
+[[g-component-each-row-engine-refusal-arm-local-span-s469]]). Once the component is used, the codegen row backstop refuses it.
 
 ### g-ifmount-chunk-ships-for-row-scoped-structural-if-s469 — a page whose only `if=` is on a row-scoped `<each>` / `<match>` ships the `ifmount` runtime chunk, which nothing calls — `NEW S469 (split from g-structural-if-inside-each-row-template-fails-open); LOW; open`
 
@@ -18159,7 +18181,7 @@ emit-each `renderTemplateChildToJs` (whose `engine-decl` fall-through was the dr
 arm-local). An engine in the `<empty>` of a list NOT in a row is not a row position; impl#1 cannot lower it either
 and now refuses it as **E-CG-003** (⚑ OPEN to the owner, §17.7.4). Corpus: 0 sources affected (emit-differential
 base `c9f8cd25b` vs head, every artifact byte-identical). Pins: `compiler/tests/browser/engine-in-each-row-refused-s469.browser.test.js`
-(28 cases — every position above refused exactly once, the non-row neighbours still render, and the supported
+(30 cases — every position above refused exactly once (a component-held engine in a row: once, by CE), the non-row neighbours still render, and the supported
 spelling — one engine outside the `<each>`, advanced from the rows — dispatches, enforces `rule=`, follows keyed
 reorder / same-key replace, and a removed row's reader is disposed by the owner tree). Original entry:
 

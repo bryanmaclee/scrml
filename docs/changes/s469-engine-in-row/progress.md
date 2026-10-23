@@ -32,4 +32,14 @@ was stale. So this dispatch implements the REFUSAL, not per-row engines.
 
 ## Commits
 
-- `6dcb905ae` src + browser test · `253a9b7bf` security pack n25 · docs commit (SPEC + SPEC-INDEX + gaps + this file).
+- `6dcb905ae` src + browser test · `253a9b7bf` security pack n25 · `d76efb17d` docs (SPEC + SPEC-INDEX + gaps + this file).
+
+## Review round (PA: LAND-W-F/U)
+
+- [x] MED: a component holding an engine, used in a row, was reported twice (CE + the CG backstop). CE marks the
+      engines it reports (matched by span), SYM B17 marks too, and the backstop skips marked engines. Browser test pins
+      exactly one diagnostic with `<Row/>` used once and twice (30 tests). Commit `adcdda368`.
+- [x] Filed LOW g-component-body-each-row-engine-unused-compiles-clean-s469 and HIGH
+      g-engine-in-if-else-chain-branch-renders-nothing-s469 (pre-existing; reproduced for the if branch and the else
+      branch). Qualified the §17.7.4 ⚑ OPEN note and the empty-fallback gap: "renders" holds only under a lone `if=`.
+- [ ] merge origin/main
