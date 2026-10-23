@@ -50,14 +50,34 @@ const ALTS = [
   ["string ×3", "number | string", `"a"`, [`"a"`, `"b"`, `"c"`], `"d"`],
   ["mixed ×2", "number | string", "1", ["1", `"x"`], "3"],
   ["mixed ×3", "number | string", "1", [`"x"`, "1", `"y"`], "3"],
+  // S469 r4 (final review F1) — a NEGATIVE later alternate lost its sign and every alternate
+  // before it (`1 | -3 :>` emitted `=== 3`); spaced as the tokenizer joins it, too.
+  ["negative later alternate", "number | string", "1", ["1", "-3"], "3"],
+  ["negative later alternate, spaced", "number | string", "1", ["1", "- 3"], "3"],
+  ["string then negative decimal", "number | string", "1", [`"a"`, "-1.5"], "2"],
+  ["deny-list 0 | -1", "number | string", "1", ["0", "-1"], "1"],
 ];
 
 const SEPS = { newline: ["", "", ""], comma: [",", ",", ","], mixed: [",", "", ","] };
 
-/** The arm list, one arm per line, `sep[i]` after arm i. */
-const arms = (alts, next, sep, indent) =>
-  [`${alts.join(" | ")} :> "low"${sep[0]}`, `${next} :> "mid"${sep[1]}`, `_ :> "hi"${sep[2]}`]
+/** The arm list, one arm per line, `sep[i]` after arm i, with arm arrow `ar`. */
+const arms = (alts, next, sep, indent, ar = ":>") =>
+  [`${alts.join(" | ")} ${ar} "low"${sep[0]}`, `${next} ${ar} "mid"${sep[1]}`, `_ ${ar} "hi"${sep[2]}`]
     .map((l) => indent + l).join("\n");
+
+/** A literal as the dispatch compares it: `- 3` → `-3`, `"a"` → `"a"`. */
+const norm = (lit) => (/^["']/.test(lit) ? JSON.stringify(lit.slice(1, -1)) : String(Number(lit.replace(/\s+/g, ""))));
+/** The literal tests of each match dispatch in `js`, in order (`_scrml_match_N === lit`). */
+function dispatchTests(js) {
+  const g = {};
+  const re = /(_scrml_(?:match|tag)_\d+) === ("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|-?\s*[\d.]+)/g;
+  let m;
+  while ((m = re.exec(js))) {
+    if (m[2] === '"object"') continue;
+    (g[m[1]] ??= []).push(norm(m[2]));
+  }
+  return Object.values(g).map((a) => a.join(" "));
+}
 
 const POSITIONS = {
   "@cell = match": (ty, init, a) => `<k>: ${ty} = ${init}
@@ -123,24 +143,29 @@ ${a("  ")}
 }}</p>`,
 };
 
-describe("literal alternation arms: every alternate is lowered, in every spelling and position", () => {
+describe("literal alternation arms: every alternate is lowered, in every spelling, position and arrow", () => {
   let slot = 0;
-  for (const [pos, page] of Object.entries(POSITIONS)) {
-    for (const [an, ty, init, alts, next] of ALTS) {
-      test(`${pos} — ${an}`, () => {
-        const id = `p-${++slot}`;
-        const r = {};
-        for (const [sn, sep] of Object.entries(SEPS)) {
-          r[sn] = compileAt(page(ty, init, (ind) => arms(alts, next, sep, ind)), id);
-        }
-        expect(r.newline.codes).toEqual([]);
-        expect(r.comma.codes).toEqual([]);
-        expect(r.mixed.codes).toEqual([]);
-        expect(r.comma.out).toBe(r.newline.out);
-        expect(r.mixed.out).toBe(r.newline.out);
-        // every alternate reaches the dispatch (`=== 1` / `=== "a"`), and so does the next arm
-        for (const lit of [...alts, next]) expect(r.newline.js).toMatch(new RegExp(`=== ${lit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b|=== ${lit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-      });
+  for (const ar of [":>", "->"]) {
+    for (const [pos, page] of Object.entries(POSITIONS)) {
+      for (const [an, ty, init, alts, next] of ALTS) {
+        test(`${pos} — ${an} (${ar})`, () => {
+          const id = `p-${++slot}`;
+          const r = {};
+          for (const [sn, sep] of Object.entries(SEPS)) {
+            r[sn] = compileAt(page(ty, init, (ind) => arms(alts, next, sep, ind, ar)), id);
+          }
+          expect(r.newline.codes.filter((c) => !/^[WI]-/.test(c))).toEqual([]);
+          expect(r.comma.codes).toEqual(r.newline.codes);
+          expect(r.mixed.codes).toEqual(r.newline.codes);
+          expect(r.comma.out).toBe(r.newline.out);
+          expect(r.mixed.out).toBe(r.newline.out);
+          // every dispatch compares exactly the written alternates, in order, then the next arm
+          const want = [...alts, next].map(norm).join(" ");
+          const seqs = dispatchTests(r.newline.js);
+          expect(seqs.length).toBeGreaterThan(0);
+          for (const seq of seqs) expect(seq).toBe(want);
+        });
+      }
     }
   }
 });
@@ -154,6 +179,29 @@ describe("splitMultiArmString — a literal alternate is never an arm start", ()
     [`1 | "x" :> "low" 3 :> "mid"`, [`1 | "x" :> "low"`, `3 :> "mid"`]],
     // `||` is logical or inside a body, not an alternation
     [`"a" :> p || q "b" :> 2`, [`"a" :> p || q`, `"b" :> 2`]],
+    // S469 r4 — a negative later alternate is part of its head
+    [`1 | -3 :> "neg" 3 :> "p"`, [`1 | -3 :> "neg"`, `3 :> "p"`]],
+    [`1 | - 3 :> "neg" 3 :> "p"`, [`1 | - 3 :> "neg"`, `3 :> "p"`]],
+    [`"a" | -1.5 :> "neg" 2 :> "p"`, [`"a" | -1.5 :> "neg"`, `2 :> "p"`]],
+    // S469 r4 — a literal right after an arm arrow is that arm's BODY, never a head: the text
+    // below is not split into a bogus `"one" | 2` alternation (it stays one arm, which the
+    // lowering refuses — see the next describe)
+    [`1 :> "one" | 2 :> "two"`, [`1 :> "one" | 2 :> "two"`]],
   ];
   for (const [s, want] of cases) test(s, () => expect(splitMultiArmString(s)).toEqual(want));
+});
+
+describe("fail closed: a body followed by `| literal :>` on the same line", () => {
+  test("`@n = match @k { 1 :> \"one\" | 2 :> \"two\" }` is refused, never lowered as `\"one\" | 2`", () => {
+    const r = compileAt(`<k>: number | string = 1
+<n> = ""
+\${
+  function go() {
+    @n = match @k { 1 :> "one" | 2 :> "two" }
+  }
+}
+<button onclick=go()>go</>
+<p>\${@n}</>`, "fc-1");
+    expect(r.codes.some((c) => /^E-/.test(c))).toBe(true);
+  });
 });
