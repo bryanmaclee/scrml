@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 265 | 4 |
-| MED | 669 | 7 |
+| MED | 669 | 8 |
 | LOW | 462 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -465,6 +465,25 @@ Executed S468 fix round 1 (happy-dom, wrong + right password) on base `5c43c3b8e
 <!-- @gap id=g-impl1-failable-fn-value-refused-s469 sev=MED status=carried locus=compiler/src/failable-value-calls.ts(Walker.expr ident — a value read of a failable function is reported)+compiler/src/type-system.ts(reportUnhandledFailableValueCall fnValueRead; the declared-component-prop branch of the handler-reference check) prov=ruling:user-voice-scrml.md S469 "Split + audit" -->
 
 §19.4.3 (S469): a failable function MAY be used as a value — passed as an argument or a component prop, returned, stored in a binding — and its failability travels with its type, so each eventual call is checked like a direct one. impl#1 has no function types that carry failability: it follows only a direct call and a `const` alias by name, so it refuses every other read with `E-IMPL1-FAILABLE-FN-VALUE` ("impl#1 cannot check a failable function used as a value; call it directly, alias it with const, or handle it at the call with !{}"). Exempt: `<formFor onsubmit=…>` (§41.14.3 requires a failable function there) and an event-handler reference (the S441 rule, E-ERROR-002). A component callback prop (`<Btn onSave=risky/>`) is refused too: impl#1 cannot verify the component's call. Pinned: `conformance/cases/error/handler-failable-reference-component-prop-neg` (impl1-ts xfail — the case asserts the SPEC's clean compile). Measured S469 (every `.scrml` under examples/ samples/ stdlib/ benchmarks/ conformance/ + giti + flogence, 2960 files, compiled one by one): **3** sites, all in conformance fixtures — the 2 callback props of that case and 1 in `handler-failable-reference-via-component-prop-pos` (already E-ERROR-002 at that call site); **0** real sites.
+
+### g-impl1-ruled-forms-emitted-verbatim-fail-open-s469 — impl#1 compiled today's ruled forms it does not implement (`int.parse`, `Enum.parse`, a tape's `.append`, `for { }`, `for (cond)`, `a..b`, a value arm's `lift` after an expression statement) with no error and emitted them verbatim: a ReferenceError / TypeError at run time, or a silently wrong value — `NEW S469 (filed; pre-existing); HIGH; RESOLVED S469 by refusal (ruled); the unprovable-receiver residual is carried — g-impl1-tape-method-unproven-receiver-throws-s469`
+
+<!-- @gap id=g-impl1-ruled-forms-emitted-verbatim-fail-open-s469 sev=HIGH status=resolved locus=compiler/src/impl1-ruled-form-refusal.ts(the refused-form list, lexicalRuledForms)+compiler/src/type-system.ts(checkRuledCallForms from checkLogicExprIdents; collectRuledStatementForms in runTS; COPY_WALK_KEPT_CODES; when-effect case; parameter defaults)+compiler/src/ast-builder.js(for-stmt.ruledHead) prov=ruling:user-voice-scrml.md S469 "⭐ RULED — impl#1 refuses ruled forms it doesn't implement" -->
+
+**Resolved S469 by refusal** (ruling:user-voice-scrml.md S469 "⭐ RULED — impl#1 refuses ruled forms it doesn't implement" — *"Refuse them in impl#1 (Recommended)"*; a narrow exception to the S435 freeze). impl#1 now refuses each such form with **E-IMPL1-RULED-FORM-UNSUPPORTED** (§34), whose message names the form, its SPEC section and `bun run boot:compile`, and says it is an impl#1 limit, not a language rule:
+
+- `int.parse` / `number.parse` / `bool.parse` (and `integer.parse` / `boolean.parse`), and `E.parse` on a local or imported enum (§14.13.4);
+- the tape methods `append` / `prepend` / `insert` / `remove` on a receiver impl#1 can show is a tape: an annotated tape type, a cell whose declaration initializer is an array literal, or a local whose every binding is one (§66.12.6);
+- `for { … }`, `for (cond)` and a range `a..b` / `a..=b` anywhere (§49);
+- a value `match` arm or value-form `for` body whose `lift` follows an expression statement, nested ones included (§18.5, §49.6).
+
+Matched in the dotted and string-literal bracket spellings, in every logic position: expressions, handler values (block-bodied arrows too), engine bodies, `when … changes` bodies, parameter defaults, and the text bodies of block-bodied arrows / `function` expressions (an unreadable body is matched lexically). Measured S469: **0** corpus sources newly refused (2893 sources: examples, samples, conformance, stdlib, compiler/tests/fixtures); conformance (1807 cases) and the browser tier (1774 tests) are per-case identical. The forms impl#1 runs with a meaning that DIVERGES from the ruling (UTF-16 string positions, `indexOf` → -1, negative positions, mutating `sort` / `reverse` / `fill`, JS `sort()` order, out-of-range `xs[i]`) are not refused — ruled S469 "Leave and document" (the SPEC note is the catch-up lane's).
+
+### g-impl1-tape-method-unproven-receiver-throws-s469 — a tape method named after its grant (`.append` / `.prepend` / `.insert` / `.remove`) on a value impl#1 cannot prove is a tape still compiles clean and throws a TypeError at run time — `NEW S469 (residual of g-impl1-ruled-forms-emitted-verbatim-fail-open-s469); MED; carried (owed by the bootstrap)`
+
+<!-- @gap id=g-impl1-tape-method-unproven-receiver-throws-s469 sev=MED status=carried locus=compiler/src/impl1-ruled-form-refusal.ts(ruledFormOfCall refuses a grant method only on a receiver whose kind is proven "array") prov=review:S469-impl1-refuse-ruled-M3;ruling:user-voice-scrml.md S469 "⭐ RULED — impl#1 refuses ruled forms it doesn't implement" -->
+
+impl#1 infers no type for an array literal and none for most call results, so it refuses a grant method only where the receiver is shown to be a tape (above). Unproven receivers — an annotated function's return (`load().append(x)`), a `.filter(…)` / `.map(…)` result, an untyped parameter — reach the emitted JavaScript and throw (`… .append is not a function`). It is not refused because the same names are other methods on unproven values (a DOM `el.remove()`, `FormData.append`, a map's `insert` / `remove`, §66.12.6 rule 2). Related, also carried: `const ys = @xs; ys.sort()` sorts the CELL in place (impl#1's alias shares the JS array; §66.12.6 makes `sort` return a new tape). The bootstrap types tapes and implements the methods. Pinned: `conformance/cases/reactive/tape-append-on-returned-tape-rt` (impl1-ts xfail — `seed() -> int[append]`, then `ys.append(3)`; the case asserts the SPEC's result).
 
 ### g-match-failable-ok-named-error-variant-reads-as-success-s469 — (security) an error enum with a variant named `Ok`: `match check(p) { .Ok :> true  _ :> false }` reads that ERROR as success, so a wrong password logs in — `NEW S469 (filed; pre-existing on main); HIGH; open`
 
