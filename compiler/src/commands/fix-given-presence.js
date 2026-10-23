@@ -97,6 +97,7 @@ import { isExecutableEventHandlerAttrName } from "../attr-injection-sink.ts";
 import { compileScrml } from "../api.js";
 import { LIFT_BRANCH_RUN_BANNER, LIFT_BRANCH_RUN_HELPER } from "../codegen/emit-reactive-wiring.ts";
 import { errorSeverityCodes, scratchRefusalReason, writeScratchProject } from "./fix-verify-shared.js";
+import { foldBuildIdentity } from "../codegen/build-identity.ts";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "node:path";
@@ -407,7 +408,9 @@ export function normalizePresenceParens(js) {
  * backtick is compared with its indentation intact (fail closed).
  */
 export function normalizeForCompare(js) {
-  const t = normalizePresenceParens(js);
+  // The §20.8.2 build identity hashes the whole build, so it differs whenever the
+  // client delta this compare tolerates exists — fold it (build-identity.ts).
+  const t = normalizePresenceParens(typeof js === "string" ? foldBuildIdentity(js) : js);
   return t.includes("`") ? t : t.replace(/^[ \t]+/gm, "");
 }
 
