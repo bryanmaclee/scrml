@@ -1,0 +1,14 @@
+// §20.7.2: a number's text is ECMAScript Number::toString — the shortest text that reads back.
+<program>
+    fn show(x: number) -> string {
+        return `[${x}]`
+    }
+    <main>
+        <p id="sum">${show(0.1 + 0.2)}</p>
+        <p id="big">${show(1e21)}</p>
+        <p id="tiny">${show(1e-7)}</p>
+        <p id="negzero">${show(0 * -1.5)}</p>
+        <p id="half">${show(2.5)}</p>
+        <p id="int">${show(5)}</p>
+    </main>
+</program>

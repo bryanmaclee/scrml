@@ -390,8 +390,10 @@ describe("C — no check against what failed to parse", () => {
   test("`@s = #` — only the parse error (the recovery node is not `not`)", () => {
     expect(inApp("    let <s:string=\"\"/>\n    function f() { @s = # }")).toEqual(["E-PARSE-EXPR"]);
   });
-  test("a back-tick template — only the parse error", () => {
-    expect(inApp("    let <s:string=\"\"/>\n    function f() { @s = `t` }")).toEqual(["E-PARSE-EXPR"]);
+  // s469: logic backtick templates parse (§14.13.3) — a REFUSED one (a legacy octal escape) is the parse error alone
+  test("a refused back-tick template — only the parse error", () => {
+    expect(inApp("    let <s:string=\"\"/>\n    function f() { @s = `t\\1` }")).toEqual(["E-PARSE-TEMPLATE"]);
+    expect(inApp("    let <s:string=\"\"/>\n    function f() { @s = `t` }")).toEqual([]);
   });
   // s469: `T | not` in an opener parses now (S451) — an unreadable continuation (`int&not`) is the opener type the slice cannot read
   test("`let <x:int&not=0/>` then `@x = not` — only the parse error (the cell's type did not parse)", () => {

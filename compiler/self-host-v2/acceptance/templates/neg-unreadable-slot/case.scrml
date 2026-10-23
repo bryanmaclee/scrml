@@ -1,0 +1,9 @@
+// a slot JavaScript could end at a different `}` is refused by name.
+<program>
+    fn show(n: int) -> string {
+        return `v=${ { a: 1 } / n }`
+    }
+    <main>
+        <p>${show(1)}</p>
+    </main>
+</program>

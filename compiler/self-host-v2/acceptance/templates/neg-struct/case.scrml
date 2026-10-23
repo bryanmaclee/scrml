@@ -1,0 +1,11 @@
+// §14.13.2: a struct in a slot is refused.
+<program>
+    type P:struct = { name: string }
+    let <p:P=({ name: "a" })/>
+    fn show(v: P) -> string {
+        return `p=${v}`
+    }
+    <main>
+        <p>${show(@p)}</p>
+    </main>
+</program>

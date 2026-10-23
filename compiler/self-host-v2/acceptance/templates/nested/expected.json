@@ -1,0 +1,20 @@
+{
+  "id": "acceptance-templates-nested",
+  "description": "templates nest: a slot holds a template, whose slots hold templates; strings and comments in a slot hold `}` and backticks.",
+  "language-version": "1.0",
+  "spec": "§14.13.3",
+  "rationale": "§14.13.3: a slot holds any expression whose value is a primitive — a template is a `string`.",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "<(7)|}|8>"
+      },
+      {
+        "selector": "#markup",
+        "text": "n=7, twice=14"
+      }
+    ]
+  }
+}

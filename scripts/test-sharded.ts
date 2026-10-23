@@ -34,6 +34,14 @@
 //   Second-valued settings above 2,000,000 are refused (exit 2): setTimeout would overflow and fire at once.
 //   --verbose   stream every shard's output live (prefixed `[sK]`) instead of only failures + summaries.
 //   --plan      print the shard assignment (files + estimated seconds per shard) and exit 0 without running.
+//   --group[=K=V[,K=V…]]  start a new PATH GROUP: the paths after it (up to the next --group) form their own
+//               shards and NEVER share a `bun test` process with another group's files; with `=K=V,…` every shard
+//               of the group runs with those environment variables set. Paths before the first --group are group 0.
+//               The same file may appear in two groups (e.g. slice-m1 run plain and again with SLICE_CORE=lowered);
+//               inside one group it runs once. The shard count N is shared out over the groups by estimated time
+//               (each group gets at least one shard, so N below the group count runs one shard per group). Timings
+//               of an env group are cached under `<file> [K=V,…]`, separate from the plain file's. (S469,
+//               s469-hook-slices: the pre-commit hook's bootstrap-slice step.)
 //   any other `--flag` is passed through to every `bun test` invocation (e.g. `--timeout=20000`).
 //
 // WHY THIS EXISTS. The pre-commit hook ran `bun test <unit> <integration> <conformance> <top-level> --bail` in
@@ -110,7 +118,33 @@ interface Options {
   slotWaitS: number;
   shardsWhy?: string;
   passthrough: string[];
+  groups: Group[]; // >= 1; group 0 = the paths before the first --group
+}
+
+// A PATH GROUP (--group): its files get shards of their own, run with `env` added to the environment.
+interface Group {
+  env: Record<string, string>;
   paths: string[];
+}
+
+// The timing-cache key of a file run under a group's env: the plain path when the env is empty, else
+// `<path> [K=V,…]` — an env that changes what a file does (SLICE_CORE=lowered) also changes how long it takes.
+function envTag(env: Record<string, string>): string {
+  const kv = Object.entries(env).map(([k, v]) => `${k}=${v}`);
+  return kv.length === 0 ? "" : ` [${kv.join(",")}]`;
+}
+
+function parseGroupEnv(spec: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const part of spec.split(",")) {
+    const m = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(part);
+    if (!m) {
+      console.error(`test-sharded: --group=${spec}: each entry must be NAME=VALUE, got ${JSON.stringify(part)}`);
+      process.exit(2);
+    }
+    env[m[1]] = m[2];
+  }
+  return env;
 }
 
 // MemAvailable (bytes) from /proc/meminfo — the kernel's estimate of what can be allocated without swapping,
@@ -230,7 +264,7 @@ function parseShardCount(raw: string, from: string): number {
 }
 
 function parseArgs(argv: string[]): Options {
-  const o: Options = { bail: false, shards: 0, verbose: false, plan: false, timeoutS: 0, memMb: 0, slotWaitS: 0, passthrough: [], paths: [] };
+  const o: Options = { bail: false, shards: 0, verbose: false, plan: false, timeoutS: 0, memMb: 0, slotWaitS: 0, passthrough: [], groups: [{ env: {}, paths: [] }] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--bail") o.bail = true;
@@ -241,8 +275,18 @@ function parseArgs(argv: string[]): Options {
     else if (a.startsWith("--shard-timeout=")) o.timeoutS = parsePositive(a.slice("--shard-timeout=".length), "--shard-timeout", MAX_SECONDS);
     else if (a.startsWith("--slot-wait=")) o.slotWaitS = parsePositive(a.slice("--slot-wait=".length), "--slot-wait", MAX_SECONDS);
     else if (a.startsWith("--shard-mem=")) o.memMb = parsePositive(a.slice("--shard-mem=".length), "--shard-mem");
+    else if (a === "--group") o.groups.push({ env: {}, paths: [] });
+    else if (a.startsWith("--group=")) o.groups.push({ env: parseGroupEnv(a.slice("--group=".length)), paths: [] });
     else if (a.startsWith("-")) o.passthrough.push(a);
-    else o.paths.push(a);
+    else o.groups[o.groups.length - 1].paths.push(a);
+  }
+  // Group 0 is implicit; drop it when every path came after a --group.
+  if (o.groups.length > 1 && o.groups[0].paths.length === 0) o.groups.shift();
+  for (const [i, g] of o.groups.entries()) {
+    if (g.paths.length === 0 && o.groups.length > 1) {
+      console.error(`test-sharded: path group ${i}${envTag(g.env)} has no paths`);
+      process.exit(2);
+    }
   }
   if (o.timeoutS === 0) o.timeoutS = envNumber("SCRML_HOOK_SHARD_TIMEOUT_S", 1200, MAX_SECONDS);
   if (o.slotWaitS === 0) o.slotWaitS = envNumber("SCRML_HOOK_SLOT_WAIT_S", 1800, MAX_SECONDS);
@@ -266,7 +310,7 @@ function parseArgs(argv: string[]): Options {
       }
     }
   }
-  if (o.paths.length === 0) {
+  if (o.groups.every((g) => g.paths.length === 0)) {
     console.error("test-sharded: no test paths given (e.g. compiler/tests/unit)");
     process.exit(2);
   }
@@ -361,23 +405,58 @@ interface Shard {
   index: number;
   files: string[];
   estimate: number;
+  group: number; // index into Options.groups
+  env: Record<string, string>; // the group's env, added to this shard's environment
+  tag: string; // envTag(env): the timing-cache key suffix
 }
 
-function estimates(files: string[], timings: Timings): Map<string, number> {
-  const sizes = new Map(files.map((f) => [f, Math.max(1, statSync(join(REPO_ROOT, f)).size)]));
-  const ratios = files
-    .filter((f) => typeof timings[f] === "number" && timings[f] > 0)
-    .map((f) => timings[f] / sizes.get(f)!)
+// Estimated seconds per file. A file run under an env (`tag`) uses its own measured time when there is one, else
+// the plain file's, else its size scaled by the median seconds-per-byte over every file of every group that has a
+// measurement (one median for all groups, so the groups' estimates are in the same unit and can be compared).
+function estimates(groups: { files: string[]; env: Record<string, string> }[], timings: Timings): Map<string, number>[] {
+  const known = (f: string, tag: string): number | undefined => {
+    const t = timings[f + tag] ?? timings[f];
+    return typeof t === "number" && t > 0 ? t : undefined;
+  };
+  const sizes = new Map<string, number>();
+  for (const g of groups) for (const f of g.files) if (!sizes.has(f)) sizes.set(f, Math.max(1, statSync(join(REPO_ROOT, f)).size));
+  const ratios = groups
+    .flatMap((g) => g.files.map((f) => known(f, envTag(g.env))).map((t, i) => (t === undefined ? -1 : t / sizes.get(g.files[i])!)))
+    .filter((r) => r >= 0)
     .sort((a, b) => a - b);
   // No measurements at all: plain size (units do not matter, only proportions do).
   const perByte = ratios.length > 0 ? ratios[Math.floor(ratios.length / 2)] : 1;
-  return new Map(files.map((f) => [f, typeof timings[f] === "number" && timings[f] > 0 ? timings[f] : sizes.get(f)! * perByte]));
+  return groups.map((g) => new Map(g.files.map((f) => [f, known(f, envTag(g.env)) ?? sizes.get(f)! * perByte])));
 }
 
-function plan(files: string[], n: number, timings: Timings): Shard[] {
+// Share N shards out over the path groups: one each, then every further shard to the group whose per-shard
+// estimate is currently the largest (the group that bounds the wall time), never more shards than files.
+// With a single group this is exactly the pre-S469 plan.
+function plan(groups: { files: string[]; env: Record<string, string> }[], n: number, timings: Timings): Shard[] {
+  const ests = estimates(groups, timings);
+  const totals = groups.map((g, i) => g.files.reduce((t, f) => t + ests[i].get(f)!, 0));
+  const counts = groups.map(() => 1);
+  for (let left = n - groups.length; left > 0; left--) {
+    let best = -1;
+    for (let i = 0; i < groups.length; i++) {
+      if (counts[i] >= groups[i].files.length) continue;
+      if (best < 0 || totals[i] / counts[i] > totals[best] / counts[best]) best = i;
+    }
+    if (best < 0) break;
+    counts[best]++;
+  }
+  const shards: Shard[] = [];
+  groups.forEach((g, gi) => {
+    for (const s of planGroup(g.files, counts[gi], ests[gi])) {
+      shards.push({ index: shards.length, files: s.files, estimate: s.estimate, group: gi, env: g.env, tag: envTag(g.env) });
+    }
+  });
+  return shards;
+}
+
+function planGroup(files: string[], n: number, est: Map<string, number>): { files: string[]; estimate: number }[] {
   const count = Math.max(1, Math.min(n, files.length));
-  const shards: Shard[] = Array.from({ length: count }, (_, index) => ({ index, files: [], estimate: 0 }));
-  const est = estimates(files, timings);
+  const shards = Array.from({ length: count }, () => ({ files: [] as string[], estimate: 0 }));
   const pinned = new Set(SERIAL_PINS.map((p) => p.file));
   for (const f of files) {
     if (!pinned.has(f)) continue;
@@ -503,16 +582,21 @@ async function pump(
 
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
-  const files = enumerate(opts.paths);
-  if (files.length === 0) {
-    console.error("test-sharded: no test files under the given paths");
-    process.exit(2);
-  }
-  const shards = plan(files, opts.shards, loadTimings());
+  const pathGroups = opts.groups.map((g, i) => {
+    const gf = enumerate(g.paths);
+    if (gf.length === 0) {
+      console.error(`test-sharded: no test files under the given paths${opts.groups.length > 1 ? ` (path group ${i}${envTag(g.env)})` : ""}`);
+      process.exit(2);
+    }
+    return { files: gf, env: g.env };
+  });
+  const files = pathGroups.flatMap((g) => g.files); // one entry per (group, file) run
+  const shards = plan(pathGroups, opts.shards, loadTimings());
+  const groupNote = (s: Shard) => (pathGroups.length > 1 ? `, group ${s.group}${s.tag}` : "");
 
   if (opts.plan) {
     for (const s of shards) {
-      console.log(`shard ${s.index}: ${s.files.length} files, est ${s.estimate.toFixed(1)}`);
+      console.log(`shard ${s.index}: ${s.files.length} files, est ${s.estimate.toFixed(1)}${groupNote(s)}`);
       for (const f of s.files) console.log(`  ${f}`);
     }
     return;
@@ -534,6 +618,9 @@ async function main(): Promise<void> {
   const started = Date.now();
   console.log(
     `test-sharded: ${files.length} files in ${shards.length} shard(s)` +
+      (pathGroups.length > 1
+        ? ` over ${pathGroups.length} path groups (${pathGroups.map((g, i) => `${i}${envTag(g.env)}: ${g.files.length} files, ${shards.filter((s) => s.group === i).length} shard(s)`).join("; ")})`
+        : "") +
       `${opts.bail ? " (--bail)" : ""} [N: ${opts.shardsWhy}]; timeout ${opts.timeoutS}s, ceiling ${opts.memMb} MB per shard;` +
       ` SCRML_HOOK_SHARDS=1 for the single-process run`,
   );
@@ -686,7 +773,7 @@ async function main(): Promise<void> {
           if (!stopReason.has(shard.index)) bail(shard.index);
         }
       };
-      const spawnOpts = { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe", stdin: "ignore", env: process.env, detached: true } as const;
+      const spawnOpts = { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe", stdin: "ignore", env: { ...process.env, ...shard.env }, detached: true } as const;
       const pumpAll = (p: ReturnType<typeof spawn>) =>
         Promise.all([pump(p.stdout as ReadableStream<Uint8Array>, onLine), pump(p.stderr as ReadableStream<Uint8Array>, onLine)]);
       let proc: ReturnType<typeof spawn>;
@@ -767,11 +854,11 @@ async function main(): Promise<void> {
       if (!opts.verbose) {
         const status = outcome === "ok" ? "ok" : outcome === "stopped" ? "stopped" : `${outcome.toUpperCase()} (exit ${exitCode})`;
         const c = counts ? `${counts.pass} pass, ${counts.fail} fail, ${counts.skip} skip` : "no summary";
-        console.log(`[s${shard.index}] ${status}: ${shard.files.length} files, ${c}, ${seconds.toFixed(1)}s`);
+        console.log(`[s${shard.index}] ${status}: ${shard.files.length} files${groupNote(shard)}, ${c}, ${seconds.toFixed(1)}s`);
       }
       let measured: Timings = {};
       try {
-        measured = parseJunitFileTimes(readFileSync(junit, "utf8"));
+        for (const [f, t] of Object.entries(parseJunitFileTimes(readFileSync(junit, "utf8")))) measured[f + shard.tag] = t;
       } catch {
         /* killed / bailed before the report was written */
       }
@@ -796,7 +883,8 @@ async function main(): Promise<void> {
             : r.outcome === "signal"
             ? `KILLED BY A SIGNAL THIS RUNNER DID NOT SEND (exit ${r.exitCode}; OOM killer?)`
               : `FAILED (exit ${r.exitCode})`;
-    console.log(`\n===== shard ${r.shard.index} ${head} — failure report; full output: ${log} =====`);
+    console.log(`\n===== shard ${r.shard.index}${groupNote(r.shard)} ${head} — failure report; full output: ${log} =====`);
+    if (r.shard.tag) console.log(`(this shard ran with${r.shard.tag.slice(1, -1).split(",").map((kv) => ` ${kv}`).join("")} — set it to reproduce)`);
     if (r.outcome !== "failed") {
       console.log(`last file header printed: ${r.lastFile ?? "(none)"}`);
       console.log(`assigned files (${r.shard.files.length}):`);
@@ -836,7 +924,7 @@ async function main(): Promise<void> {
         (c
           ? `${String(c.pass).padStart(5)} ${String(c.fail).padStart(5)} ${String(c.skip).padStart(5)} ${String(c.todo).padStart(5)}`
           : "    -     -     -     -") +
-        `  ${r.seconds.toFixed(1).padStart(7)}  ${r.peakRssMb.toFixed(0).padStart(6)}${state}`,
+        `  ${r.seconds.toFixed(1).padStart(7)}  ${r.peakRssMb.toFixed(0).padStart(6)}${state}${pathGroups.length > 1 ? `  group ${r.shard.group}${r.shard.tag}` : ""}`,
     );
     if (c) for (const k of Object.keys(total) as (keyof Counts)[]) total[k] += c[k];
   }

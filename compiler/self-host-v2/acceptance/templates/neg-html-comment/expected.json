@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-templates-neg-html-comment",
+  "description": "E-PARSE-TEMPLATE: a line-initial `-->` inside a slot (a classic script reads the rest of the line as a comment, a module reads `n-- > 1`).",
+  "language-version": "1.0",
+  "spec": "§14.13.3",
+  "rationale": "Annex B: a classic script reads a line-initial `-->` (and `<!--`) as a line comment, a module does not; impl#1 refuses both in a slot, lexically (inside strings too).",
+  "expect": {
+    "codes": [
+      "E-PARSE-TEMPLATE"
+    ],
+    "codeCounts": {
+      "E-PARSE-TEMPLATE": 1
+    }
+  }
+}
