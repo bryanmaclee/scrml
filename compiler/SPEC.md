@@ -8068,7 +8068,7 @@ c = stepped(c)
 | JS-style `match` arms (§18) and `!{}` arms (§19) | ~~arms are newline-separated (§18.2, unchanged)~~ arms are a comma list, trailing `,` optional (S469, dpa-073 F2 — §18.2 amendment; newline-separated lists are still read during the F5 migration). See "Arm heads" below |
 | `?{ … }` SQL (§8), `_{ … }` foreign code (§23.2.3), `#{ … }` CSS | **exempt** — a foreign grammar; its own newlines and `;` are its own. The block itself is an expression inside a scrml statement and takes this rule after its closing `}` |
 
-**Arm heads — the `.Variant :>` line (structural, not a lookahead).** Directly inside a `match { … }` body or a `!{ … }` handler body (and, S452, in the leading message-arm region of an engine state-child, §51.0.S.2.3), the unit at depth 0 is the **arm**, not a statement (§18.2: arms are juxtaposed, one per line). A line at that level begins an arm, so its first token is an arm pattern (`.Variant`, `::Variant`, `Type.Variant`, `| ::E` (the soft-deprecated `|`-led `!{}` arm, §19.4.5), `else`, `_`, a literal or `(` tuple pattern) — a leading `.` there is the arm's pattern, not a leading operator. Which reading applies is decided by **position** (arm level vs statement level), never by looking ahead for `:>`. Inside an arm's `{ … }` block body the level is statement level again, and a line starting with `.` there is `E-STMT-LEADING-OPERATOR`. A single-expression arm body (`.A :> expr`) ends at its line break unless the line ends in a continuation token (rule 2); a following line that starts with `.` at arm level is read as an arm head, and if it does not form an arm (`.map(f)` with no `:>`) it is a parse error whose message SHOULD carry the rule-3 suggestion.
+**Arm heads — the `.Variant :>` line (structural, not a lookahead).** Directly inside a `match { … }` body or a `!{ … }` handler body (and, S452, in the leading message-arm region of an engine state-child, §51.0.S.2.3), the unit at depth 0 is the **arm**, not a statement (§18.2: ~~arms are juxtaposed, one per line~~ arms are a comma list, trailing `,` optional — S469 — dpa-073 F2, the §18.2 comma-list amendment). A line at that level begins an arm, so its first token is an arm pattern (`.Variant`, `::Variant`, `Type.Variant`, `| ::E` (the soft-deprecated `|`-led `!{}` arm, §19.4.5), `else`, `_`, a literal or `(` tuple pattern) — a leading `.` there is the arm's pattern, not a leading operator. Which reading applies is decided by **position** (arm level vs statement level), never by looking ahead for `:>`. Inside an arm's `{ … }` block body the level is statement level again, and a line starting with `.` there is `E-STMT-LEADING-OPERATOR`. A single-expression arm body (`.A :> expr`) ends at its line break unless the line ends in a continuation token (rule 2); a following line that starts with `.` at arm level is read as an arm head, and if it does not form an arm (`.map(f)` with no `:>`) it is a parse error whose message SHOULD carry the rule-3 suggestion.
 
 > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 6, ACCEPTED: *"arm heads by position"* — position, never a `:>` lookahead, decides arm head vs statement; S446 Call 4a (i) already ruled out a `.Variant`-arm vs chain lookahead).
 
@@ -17610,7 +17610,7 @@ value-form-if     ::= 'if' condition '{' expression '}'
                       ('else' 'if' condition '{' expression '}')*
                       ('else' '{' expression '}')?
 
-value-form-match  ::= 'match' expression '{' inline-arm+ '}'
+value-form-match  ::= 'match' expression '{' inline-arm (',' inline-arm)* ','? '}'   -- S469 — dpa-073 F2, the §18.2 comma-list amendment (was `inline-arm+`)
 inline-arm        ::= arm-pattern ':>' expression        -- §18.1 `arm-body ::= expression`
 ```
 
@@ -19688,7 +19688,7 @@ the intent explicit.
 partial-match-expr ::= 'partial' match-expr
 
 match-expr ::= 'match' expression '{' match-arms '}'
-match-arms ::= match-arm+
+match-arms ::= match-arm (',' match-arm)* ','?   // S469 — dpa-073 F2, the §18.2 comma-list amendment (was `match-arm+`)
 match-arm  ::= is-pattern '=>' arm-body  // canonical; aliases valid per §18.1
 ```
 
@@ -20036,7 +20036,7 @@ bodies produce a common result type.
 **Reused (no new code):** `E-TYPE-020` / `E-TYPE-006` (non-exhaustive enum / union, extended to
 the product, §18.8); `E-SYNTAX-012` (a nested pattern in a position, §18.11); `E-SYNTAX-011`
 (guard clause, §18.10); `E-MATCH-SUBSET-DEAD-ARM` (a dead variant in a subset-refined position,
-§18.8.1 / §53.15); `E-MATCH-ARM-SEPARATOR` (a stray `,` after an arm body, §18.2).
+§18.8.1 / §53.15); `E-MATCH-ARM-SEPARATOR` (~~a stray `,` after an arm body~~ an arm list not separated by `,` — its S469 meaning, §18.2).
 
 #### Cross-references
 
@@ -20450,7 +20450,7 @@ legacy-arm-pattern ::= arm-pattern                                              
 **Normative statements:**
 
 - A `!{}` handler's arms SHALL be §18.2 `match-arm`s. Every §18 rule on an arm — its patterns, its
-  separators and their deprecation, juxtaposition (one arm per line), alternation and
+  separators and their deprecation, ~~juxtaposition (one arm per line)~~ the comma list (S469 — dpa-073 F2, the §18.2 comma-list amendment), alternation and
   E-MATCH-ALT-BINDING, E-MATCH-BARE-BINDER, the last-position rule for the catch-all (E-SYNTAX-010),
   W-MATCH-001, §18.7 payload binding — SHALL apply to a `!{}` arm unchanged.
 - An engine's `(state × message)` message arms SHALL be §18.2 `match-arm`s on the same terms
