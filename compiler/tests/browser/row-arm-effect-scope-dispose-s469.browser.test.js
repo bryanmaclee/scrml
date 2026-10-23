@@ -289,14 +289,18 @@ describe("arm teardown disposes the effects of everything the arm mounted (face 
     await flush();
     expect(count("#out b.c")).toBe(2);
     const idleSubs = subs("n");
+    let cells = 2;
     for (let i = 0; i < 5; i++) {
       await set("ph", "Active");
       expect(count("#out b.c")).toBe(0);
       expect(subs("n")).toBe(1);
       await set("ph", "Idle");
-      expect(count("#out b.c")).toBe(2);
+      expect(count("#out b.c")).toBe(cells);
+      expect(subs("n")).toBe(cells);
       // A list change while the arm is up creates rows on a LATER reconcile pass.
-      await set("cells", i % 2 === 0 ? [1, 2, 3] : [1, 2]);
+      cells = i % 2 === 0 ? 3 : 2;
+      await set("cells", cells === 3 ? [1, 2, 3] : [1, 2]);
+      expect(subs("n")).toBe(cells);
     }
     await set("cells", [1, 2]);
     expect(subs("n")).toBe(idleSubs);
@@ -313,15 +317,22 @@ describe("arm teardown disposes the effects of everything the arm mounted (face 
     expect(app.errors).toEqual([]);
     await flush();
     expect(count("#out b.c")).toBe(4);
-    const base = subs("n");
     const baseLive = live();
+    // Warm-up cycle: a row built on a reconcile pass carries one more `@n` subscriber
+    // than a row built at boot (its dispatcher effect also tracks the arm's `${@n}`
+    // read — pre-existing, identical on main), so the steady state is measured after it.
+    await set("rows", [{ id: 2 }]);
+    const half = subs("n");
+    await set("rows", [{ id: 1 }, { id: 2 }]);
+    const base = subs("n");
     for (let i = 0; i < 4; i++) {
       await set("rows", [{ id: 2 }]);
-      expect(subs("n")).toBe(base / 2);
+      expect(subs("n")).toBe(half);
       await set("rows", [{ id: 1 }, { id: 2 }]);
+      expect(subs("n")).toBe(base);
+      expect(live()).toBe(baseLive);
     }
-    expect(subs("n")).toBe(base);
-    expect(live()).toBe(baseLive);
+    expect(count("#out b.c")).toBe(4);
     await set("rows", []);
     expect(subs("n")).toBe(0);
   });
@@ -336,16 +347,22 @@ describe("arm teardown disposes the effects of everything the arm mounted (face 
 `);
     expect(app.errors).toEqual([]);
     await flush();
+    expect(count("b.c")).toBe(2);
     const base = subs("n");
-    // Every exit/entry cycle must return to the same subscriber count.
-    const after = [];
+    const baseLive = live();
     for (let i = 0; i < 3; i++) {
-      await set("ph", "Active");
-      after.push(subs("n"));
-      await set("ph", "Idle");
+      // The engine's own cell is the lower-cased type name.
+      await set("phase", "Active");
+      expect(count("i.a")).toBe(1);
+      expect(count("b.c")).toBe(0);
+      // Including the rows rendered into the INITIAL arm's static HTML at boot, which
+      // no arm scope owns (released by the dispatcher before its innerHTML replace).
+      expect(subs("n")).toBe(0);
+      await set("phase", "Idle");
+      expect(count("b.c")).toBe(2);
+      expect(subs("n")).toBe(base);
+      expect(live()).toBe(baseLive);
     }
-    expect(new Set(after).size).toBe(1);
-    expect(subs("n")).toBe(base);
   });
 });
 
