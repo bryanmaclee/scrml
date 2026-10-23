@@ -66,6 +66,9 @@ import { desugarImpliedLiftMarkupArms } from "../implied-lift-desugar.ts";
 import { collectDerivedVarNames } from "./reactive-deps.ts";
 import { sourceHasMdElement } from "../md-lower.ts";
 import { readShorthandBody, readBareArmBody, matchArmKey, walkedArmBodyOrRefuse } from "../arm-body-reader.ts";
+import { CGError } from "./errors.ts";
+import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { ENGINE_IN_ROW_CODE, ENGINE_IN_ROW_REFUSED, ENGINE_HOST_SPAN, engineInEachRowMessage, stampEngineHostSpan } from "../engine-in-each-row.ts";
 
 // Derived-cell name set is file-invariant; memoize per fileAST so resolveOnExpr
 // (called 2–3× per match block) does not re-walk the whole AST each time.
@@ -903,6 +906,9 @@ function buildMatchArms(
       try {
         const synthLabel = `<match:${matchBlock.id}:${tag}>`;
         const read = readBareArmBody(matchBlock as object, armKey, entry.bodyRaw, synthLabel);
+        // The spans of this parse are local to the arm body; an engine-in-row refusal of a
+        // node from it is located at this <match> instead (engine-in-each-row.ts).
+        stampEngineHostSpan(read.nodes, matchBlock.span);
         if (read.viaTab) {
           // Re-stamp each-block ids (and any nested each-block ids) to a
           // globally-unique namespace derived from the match-block id + arm
@@ -1365,6 +1371,41 @@ function preparePayloadScopedArmEaches(
   }
 }
 
+/**
+ * §51.0.K (S439 ruling #10) — an `<engine>` in a `<match>` arm of a match that sits in an
+ * `<each>` row is inside that row, and is refused (gap g-engine-inside-each-row-renders-nothing).
+ * The arm bodies here are codegen's own parse (arm-body-reader), which SYM PASS 13.B never
+ * sees when the TAB left the arm unparsed (an arm holding an `<each>`); an engine there was
+ * dropped at exit 0. An engine SYM already refused (same TAB node) carries the marker.
+ * Only the outermost engine is reported; `<each>` rows inside the arm are walked too (the
+ * row renderer's backstop also covers them — CG de-duplicates on the span).
+ */
+function refuseEnginesInRowScopedArms(arms: import("./emit-variant-guard.ts").VariantArm[]): void {
+  const seen = new WeakSet<object>();
+  const visit = (n: any): void => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const x of n) visit(x); return; }
+    if (n.kind === "engine-decl") {
+      if (n[ENGINE_IN_ROW_REFUSED] !== true) {
+        recordRefusedLowering(new CGError(
+          ENGINE_IN_ROW_CODE,
+          engineInEachRowMessage(n.governedType),
+          n[ENGINE_HOST_SPAN] ?? n.span ?? { start: 0, end: 0 },
+        ), n);
+        n[ENGINE_IN_ROW_REFUSED] = true;
+      }
+      return;
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k === "parent" || k.startsWith("_")) continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v);
+    }
+  };
+  for (const arm of arms) visit(arm.body);
+}
+
 function prepareRowScopedArms(
   matchBlock: MatchBlockAstNode,
   arms: import("./emit-variant-guard.ts").VariantArm[],
@@ -1377,6 +1418,7 @@ function prepareRowScopedArms(
     referencesFreeIdent: (blanked: string, name: string) => boolean;
   };
   for (const arm of arms) rewriteEachSigilInArmBody(arm.body, iterVar);
+  refuseEnginesInRowScopedArms(arms);
 
   const scopeNames = Array.isArray(matchBlock.enclosingEachScopeNames) && matchBlock.enclosingEachScopeNames.length > 0
     ? matchBlock.enclosingEachScopeNames
