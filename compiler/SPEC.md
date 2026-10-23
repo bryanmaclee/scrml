@@ -8907,6 +8907,9 @@ the driver and names the database the `?{}` runs on. `<db>`'s other
 attributes — `tables=`, `protect=` — cover the queries of the scope the `<db>` defines, and of
 the program it supplies (§14.8.4, §14.8.9).
 
+*(S469, O61 — §66.2.5: a §66 declaration, `let <x/>` / `<x/>`, MAY stand in a `<db>` body, scoped to that block; its
+state is server-side. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — O61: `let <x/>` allowed inside `<db>` / `<channel>` bodies, scoped to the block" — *"Allowed, scoped to the block (Rec)"* (*"A channel's state is shared across its clients; a db block's state is server-side. Declarations nest as they do elsewhere."*))*
+
 The codegen target is **Bun.SQL** for all SQL drivers (SPEC §44). MongoDB uses `^{}` meta
 contexts, not `?{}`. The driver-prefix table below is the source-language view; for the
 compiler's codegen target shape (tagged-template, async, `.unsafe()`), see §44.2.
@@ -29601,6 +29604,9 @@ The auto-reconnect delay emitted into every channel's client-side `onclose` setT
 
 ### 38.4 Reactive Sync — V5-strict channel body (auto-sync from placement)
 
+*(S469, O61 — §66.2.5: a §66 declaration, `let <x/>` / `<x/>`, MAY stand in a `<channel>` body, scoped to the channel;
+its state is shared across the channel's clients, as below. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — O61: `let <x/>` allowed inside `<db>` / `<channel>` bodies, scoped to the block" — *"Allowed, scoped to the block (Rec)"* (*"A channel's state is shared across its clients; a db block's state is server-side. Declarations nest as they do elsewhere."*))*
+
 Reactive variables declared inside a `<channel>` body are **automatically synchronized across all connected clients** by virtue of being declared inside the channel body. There is no `@shared` modifier in v0.next — the synchronization comes from placement, not from a marker.
 
 ```scrml
@@ -47851,7 +47857,7 @@ the follow-up *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*).** Each is ma
 |---|---|---|
 | §66.2.5 (new), §66.9 rule 2, Notation | Words that say what kind of thing a declaration is — `export`, `let` — go BEFORE the `<`, in JS order: `let <x:T=v/>`, `export let <x:T=v/>`, `export <x …/>`. Inside the opener: only the name, `:Type`, `=value`, typed attributes, and flags true by presence. After the closer: `renders` (unchanged) | supersedes ruling S435 "writable cells spelled `let`" — POSITION ONLY (the word `let`, `const` retiring, derived / seeded all stand) |
 | §66.5.1, §66.20 | `renders` inside an opener is its own error (sub-ruling 2) | new code `E-DECL-RENDERS-IN-OPENER` |
-| §66.2.5, §66.20 | `let <x/>` / `export <x/>` only where declarations are ITEMS (program body, declaration body); an error elsewhere, never text (sub-ruling 3) — **narrowed S449:** in a FREE-TEXT body (§4.18.1) the words are text, except before a tag that is a declaration by its opener (§66.2.2), where the error fires and names the `${"let"}` escape (PA reading S449, for veto); in a code-default body that is not an item position the error always fires | new code `E-DECL-KEYWORD-NOT-ITEM` |
+| §66.2.5, §66.20 | `let <x/>` / `export <x/>` only where declarations are ITEMS (program body, declaration body; *S469 O61:* a `<db>` / `<channel>` body, scoped to the block); an error elsewhere, never text (sub-ruling 3) — **narrowed S449:** in a FREE-TEXT body (§4.18.1) the words are text, except before a tag that is a declaration by its opener (§66.2.2), where the error fires and names the `${"let"}` escape (PA reading S449, for veto); in a code-default body that is not an item position the error always fires | new code `E-DECL-KEYWORD-NOT-ITEM` |
 | §66.4 rule 6, §66.14 rule 3 | Writable / exported attributes become CHILD declarations; attributes are always locked data (sub-ruling 4); a use-site attribute still sets a child (O43) | §66.4 rule 6 (former O53) RETIRES |
 
 > **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs"* (item 2: *"Words that say what kind of thing it
@@ -48055,7 +48061,8 @@ export let <mode:Mode=.Light/>                 // exported and writable: JS orde
 ```
 
 **Where `let <x/>` and `export <x/>` are recognized (sub-ruling 3, narrowed S449).** `let` or `export` before a tag
-is a declaration keyword ONLY where declarations are ITEMS: a program body and a declaration body. In a
+is a declaration keyword ONLY where declarations are ITEMS: a program body ~~and a declaration body~~, a declaration
+body, and *(S469, O61)* a `<db>` body and a `<channel>` body. In a
 **code-default** body that is not an item position — an engine state-child body, a match arm, a `:`-shorthand body
 (§4.18.1) — `let` or `export` followed by a tag is an error, `E-DECL-KEYWORD-NOT-ITEM` (§66.20): there a bare run is
 code, so the keyword is meaningful but misplaced. In a **free-text** body (§4.18.1 — plain-markup element bodies such
@@ -48092,8 +48099,22 @@ attribute (`<x let a:T/>`, `export let a:T`) — is `E-DECL-LET-IN-OPENER` (§66
 `let <count:int=0/>`, or a child declaration for an attribute, §66.4 rule 6). `renders` inside an opener is
 `E-DECL-RENDERS-IN-OPENER` (§66.5.1).
 
-> ⚑ **OPEN (not ruled) — O61: which bodies other than a program body and a declaration body are item
-> positions.** Sub-ruling 3 names the program body and a declaration body. Not ruled: whether a `<page>` body
+> **Amendment (S469) — O61 RULED for `<db>` and `<channel>`: their bodies are item positions, scoped to the
+> block.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — O61: `let <x/>` allowed inside `<db>` / `<channel>` bodies, scoped to the block" — *"Allowed, scoped to the block (Rec)"* (*"A channel's state is shared across its clients; a db block's state is server-side. Declarations nest as they do elsewhere."*)
+> `let <x/>` / `export <x/>` (and a locked `<x/>` declaration) MAY stand directly in a `<db>` body or a `<channel>`
+> body. A declaration there is scoped to that block: its name is visible inside the block (and nested blocks, which
+> nest as everywhere else) and not outside it. A `<channel>` body's state is shared across the channel's clients
+> (§38.4); a `<db>` body's state is server-side (§8.1.1). **supersedes:** the open question below, for those two
+> bodies. **Direction of change:** newly-accepting. **Status:** Nominal on both compilers — impl#1 carries it
+> (§34.0); the bootstrap reads those bodies as free text and refuses `let <x/>` there
+> (`g-bootstrap-let-decl-in-db-channel-body-refused-s469`). *(PA readings: "scoped to the block" means the
+> declaration is not visible to the enclosing program body; `export` from inside the block is not addressed by the
+> ruling and stays under §66.14.)*
+> ⚑ **Still OPEN (not addressed by the ruling) — the rest of O61:** whether a `<page>` body and a `<theme>` body
+> are item positions (the original question, below).
+
+> ⚑ ~~**OPEN (not ruled) — O61: which bodies other than a program body and a declaration body are item
+> positions.**~~ *(S469: answered above for `<db>` / `<channel>`; the `<page>` / `<theme>` part stays open.)* Sub-ruling 3 names the program body and a declaration body. Not ruled: whether a `<page>` body
 > (which parses in the same §40.8 default-logic mode as `<program>`) and a `<theme>` body (which holds only token
 > declarations, §66.17) are item positions — §66.19.4 writes `export` on `<theme>` tokens, as it did before S447,
 > and marks those lines `⚑ O61`.
@@ -50657,7 +50678,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | ~~O55~~ RULED S442 = error | §66.13.3 | Whether a plain use of a `single` declaration is an error (DD §5.a) or renders the one instance. RULED: a plain use is `E-DECL-SINGLE-INSTANTIATED`; `<*x/>` is the only way to render it. Provenance: ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"*. |
 | ~~O56~~ RULED narrow (S437: confirmed not re-widened by "identities yes") | §66.7.5 | Scope of the `given` carve-out: instance handles only, or named shared instances / plain `T \| not` cells too; live reads through `c`; `let d = c`; direct `@handle.f = …` inside the block. |
 | O47 | §66.17 | (narrowed) A reactive token in a shape other than match-over-enum (e.g. `<ink:string=(@userColor)/>`). |
-| O61 (S447) | §66.2.5 | Which bodies besides a program body and a declaration body are ITEM positions for `let <x/>` / `export <x/>` — a `<page>` body (same §40.8 default-logic mode as `<program>`), a `<theme>` body (token declarations only, §66.17). |
+| O61 (S447) — **RULED S469 for `<db>` / `<channel>`** (item positions, scoped to the block); `<page>` / `<theme>` still open | §66.2.5 | Which bodies besides a program body and a declaration body are ITEM positions for `let <x/>` / `export <x/>` — a `<page>` body (same §40.8 default-logic mode as `<program>`), a `<theme>` body (token declarations only, §66.17). RULED for `<db>` and `<channel>` bodies: allowed, scoped to the block. Provenance: ruling:user-voice-scrml.md S469 — *"Allowed, scoped to the block (Rec)"*. |
 | ~~O62~~ RULED S469 = yes, eventually | §66.12.4, §66.21 | Whether S469's "not allowed at all" also retires the writable Stage-1 treatment of a legacy right-hand-side STRUCT cell (its fields writable without contracts), or reaches tapes only. RULED: yes, eventually — it lands with the struct-contract work; until then legacy struct and scalar cells keep `W-DECL-LEGACY-RHS`. Provenance: ruling:user-voice-scrml.md S469 — *"Yes, eventually (Recommended)"*. |
 | ~~O63~~ RULED S469 = no | §66.12.6 | Whether a local `let` gives a tape `replace`. RULED no: a local tape needs a typed grant (`let out: Item[free, append] = [];`); `let` makes only the name rebindable, and is not an error on a local (unlike O3's cell rule). Provenance: ruling:user-voice-scrml.md S469 — *"No, locals need grants (Recommended)"*. |
 | ~~O64~~ RULED S469 = copy or freeze | §66.12.6, §66.12.7 | A tape handed OUT to host code (a host call, a callback argument, a `_{ }` slice): copy or freeze at the boundary, or refuse the call. RULED: it crosses as a frozen view or a copy (§66.12.7 rule 1). Provenance: ruling:user-voice-scrml.md S469 — *"Copy or freeze (Recommended)"*. |

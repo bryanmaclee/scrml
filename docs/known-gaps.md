@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 265 | 4 |
-| MED | 674 | 7 |
+| MED | 675 | 7 |
 | LOW | 457 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -111,6 +111,12 @@ RESOLVED S469: ruled — ruling:user-voice-scrml.md S469 "⭐ RULED — `class=`
 RESOLVED S469 (s469-spec-catchup). The r2 counts (14 `Math.` / 15 `String(` / 14 `toEnum(` / 3 `parseInt(`) were whole-file greps; inside code examples only three `toEnum(` lines remained, and they now use `E.parse` (§14.4.1's row-mapping idiom). Rewritten in place: 5 tail values → `return` (§19 examples), 5 value-position block arms → `lift` (§18 ×2, §19 ×1, §51.0.S engine message arms ×2 — a PA application of §18.5 to message arms), 7 `+` with a number → a template or a display-text literal with `${}`, and the §7.4.2 `${Math.random()}` illustration → `scrml:random`; §48's "Reading the rest of this SPEC" note updated. **Left on purpose:** every remaining `Math.` / `String(` / `parseInt(` / `parseFloat(` line is prose, host code (`_{ }`, JS-boundary security text), compiler internals, the `scrml:math` API rows, or a §34 / supersedes quote; §14.4.1's own `toEnum` syntax line and normative statements (the example is ABOUT `toEnum`, kept until its §63 window). Arm commas in examples (dpa-073 F2) are the F5 codemod's job, not this sweep. A normative contradiction the sweep surfaced is filed separately: [[g-spec-class-attr-string-coercion-vs-s469-s469]]. Original entry:
 
 The S469 follow-up fixed the examples the fidelity review named (§18.8.1 / §53.15 `return match`, §17.6.9 Example 7 and the §13 listing's templates, §20.4 `int.parse`, the §6.5 / §6.7 / §51 `scrml:math` min/max) and added reading notes (§48 "Reading the rest of this SPEC"; §14.4.1 keeps `toEnum` until its window opens). The rest is a sweep, not a ruling: rewrite each remaining example to `return`, `lift` in a value-position block arm, a template, `scrml:math`, `int.parse` / `T.parse`, and (once the §63 window opens) `E.parse`. Some `Math.` / `String(` lines are host-code (`_{ }`) or compiler-internal and stay.
+
+### g-bootstrap-let-decl-in-db-channel-body-refused-s469 — the BOOTSTRAP reads a `<db>` / `<channel>` body as free text and refuses a `let <x/>` declaration there, which the S469 O61 ruling allows (scoped to the block) — `NEW S469; MED; open (owed bootstrap change)`
+
+<!-- @gap id=g-bootstrap-let-decl-in-db-channel-body-refused-s469 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(body mode of `<db>` / `<channel>` — free text, not an item position) prov=ruling:user-voice-scrml.md(S469 "⭐ RULED — O61: `let <x/>` allowed inside `<db>` / `<channel>` bodies, scoped to the block" — "Allowed, scoped to the block (Rec)");spec:§66.2.5,§38.4,§8.1.1 -->
+
+Owed: the bootstrap parses a `<db>` body and a `<channel>` body as item positions (§66.2.5 amendment): a §66 declaration there is a declaration scoped to that block — channel state shared across the channel's clients (§38.4), db-block state server-side. Today it reads those bodies as free text, so `let <x/>` there is refused. impl#1 carries the rule (§34.0).
 
 ### g-bootstrap-newline-arm-lists-accepted-s469 — the BOOTSTRAP still reads a wholly newline-separated arm list (`match` / `!{}` / engine message arms), but dpa-073 F5(4) ruled that the bootstrap enforces arm commas by construction (`E-MATCH-ARM-SEPARATOR` on every missing `,`) — `NEW S469; MED; open (owed bootstrap change)`
 
