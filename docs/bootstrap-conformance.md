@@ -13,20 +13,20 @@ Scope: **1812 of 1812 cases attempted** — every attempted case reached the pur
 |---|---:|---:|
 | PASS | 250 | 13.8% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 62 | 3.4% |
+| FAIL | 63 | 3.5% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 684 | 37.7% |
-| UNSUPPORTED | 816 | 45.0% |
+| UNSUPPORTED | 815 | 45.0% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 312; of those, 250 hold (80.1%). Runtime half executed on the bootstrap for 99 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 313; of those, 250 hold (79.9%). Runtime half executed on the bootstrap for 99 case(s).
 
 - **Vacuous** passes: 20 of 250 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **230**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 30 of 62; the other 32 are implemented checks that answered wrong.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 31 of 63; the other 32 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 504 · parse-reject 312.
+UNSUPPORTED by reason: bootstrap-unsupported 502 · parse-reject 313.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
@@ -158,12 +158,12 @@ NOT-TWINNED by reason (684 cases; a case counts once per distinct reason):
 | server-fn | 26 | · | · | 7 | · | 9 | 10 | · | · |
 | sql | 20 | 2 | · | · | · | 9 | 9 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
-| style | 27 | 1 | · | · | · | 24 | 2 | · | · |
+| style | 27 | 1 | · | 1 | · | 24 | 1 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 32 | 3 | · | 1 | · | 3 | 25 | · | · |
 
-### FAIL (62)
+### FAIL (63)
 
 - `components/post-ce-residual-component-reject` (codes; not in the bootstrap: E-COMPONENT-035)
   - missing E-COMPONENT-035
@@ -325,6 +325,9 @@ NOT-TWINNED by reason (684 cases; a case counts once per distinct reason):
   - twin emitted unasserted error(s): E-ERROR-002, E-SCOPE-001, E-SQL-004
 - `server-fn/e-route-005-pos` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-ERROR-002, E-SQL-004
+- `style/program-scope-overlap-soft` (codes; not in the bootstrap: W-STYLE-CONFLICT-POSSIBLE)
+  - missing W-STYLE-CONFLICT-POSSIBLE
+  - severity: W-STYLE-CONFLICT-POSSIBLE did not fire (expected info)
 - `type-state-codes/e-type-any-forbidden-pos` (twin · codes; not in the bootstrap: E-TYPE-ANY-FORBIDDEN)
   - missing E-TYPE-ANY-FORBIDDEN
   - severity: E-TYPE-ANY-FORBIDDEN did not fire (expected error)
@@ -590,7 +593,7 @@ none
 - `type-state-codes/e-type-081-partial-match-render-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (816)
+### UNSUPPORTED (815)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -602,13 +605,13 @@ none
 - `api/api-response-not-variant-info` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-response-type-undeclared-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-unknown-type-ref-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `apply/apply-arbitrary-value-pos` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
-- `apply/apply-author-class-no-lint-pos` — twin · bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
-- `apply/apply-bare-clean-pos` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
-- `apply/apply-composing-family-pos` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
-- `apply/apply-non-inlinable-neg` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
-- `apply/apply-unknown-utility-neg` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
-- `apply/apply-variant-unsupported-neg` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
+- `apply/apply-arbitrary-value-pos` — bootstrap-unsupported: `@apply` (§26.8) is not in the bootstrap — the Tailwind utility table is not; write the declarations
+- `apply/apply-author-class-no-lint-pos` — twin · bootstrap-unsupported: `@apply` (§26.8) is not in the bootstrap — the Tailwind utility table is not; write the declarations
+- `apply/apply-bare-clean-pos` — bootstrap-unsupported: `@apply` (§26.8) is not in the bootstrap — the Tailwind utility table is not; write the declarations
+- `apply/apply-composing-family-pos` — bootstrap-unsupported: `@apply` (§26.8) is not in the bootstrap — the Tailwind utility table is not; write the declarations
+- `apply/apply-non-inlinable-neg` — bootstrap-unsupported: `@apply` (§26.8) is not in the bootstrap — the Tailwind utility table is not; write the declarations
+- `apply/apply-unknown-utility-neg` — bootstrap-unsupported: `@apply` (§26.8) is not in the bootstrap — the Tailwind utility table is not; write the declarations
+- `apply/apply-variant-unsupported-neg` — bootstrap-unsupported: `@apply` (§26.8) is not in the bootstrap — the Tailwind utility table is not; write the declarations
 - `attr-executable-sink/event-attr-data-text-neg` — twin · bootstrap-unsupported: `ONCLICK` on `<button>` is a case variant of the scrml attribute `onclick` — the bootstrap reads scrml attribute names exactly, so it would be a plain HTML attribute that does nothing; write `onclick`
 - `attr-executable-sink/meta-emit-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `attr-executable-sink/non-handler-and-raster-data-pos` — twin · bootstrap-unsupported: `online="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expres
@@ -799,7 +802,7 @@ none
 - `element-refusal/match-arm-script-pos` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `element-refusal/meta-emit-raw-body-pos` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `element-refusal/near-names-neg` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lift` (statements at logic-block level are not in bootstrap slice M2)
-- `element-refusal/style-attr-and-css-neg` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
+- `element-refusal/style-attr-and-css-neg` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lift` (statements at logic-block level are not in bootstrap slice M2)
 - `element-refusal/text-string-attr-comment-neg` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
 - `endpoint/accepts-missing` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `endpoint/accepts-not-enum-primitive` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1355,7 +1358,6 @@ none
 - `sql/query-not-readable-neg` — twin · parse-reject: E-SQL-003: the content of `?{ … }` must be a backtick SQL template (`?{`SELECT …`}`) — found `SELECT` (§8.1). The SQL text is fixed at compile time; a runtime value is bound with `${…}` inside the tem
 - `sql/transactions-concurrent-postgres-pos` — twin · bootstrap-unsupported: `<program transactions=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `sql/transactions-concurrent-sqlite-e-sql-010-neg` — twin · bootstrap-unsupported: `<program transactions=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
-- `style/program-scope-overlap-soft` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
 - `style/theme-name-collision` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
 - `table-for/tablefor-rows-missing` — twin · bootstrap-unsupported: `<tableFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `table-for/tablefor-rows-wrong-type` — twin · bootstrap-unsupported: `<tableFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap

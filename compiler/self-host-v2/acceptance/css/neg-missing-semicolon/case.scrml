@@ -1,0 +1,5 @@
+// `color: red background: blue` — the `;` between the declarations is missing.
+<program>
+    #{ p { color: red background: blue; } }
+    <main><p>x</p></main>
+</program>

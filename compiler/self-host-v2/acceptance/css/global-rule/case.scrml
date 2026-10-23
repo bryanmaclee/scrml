@@ -1,0 +1,10 @@
+// A program-level `#{}` is program-global (§9.1 DQ-6): `@layer global`.
+<program>
+    #{
+        p { color: red; }
+        .note { margin: 0 auto; }
+    }
+    <main>
+        <p class="note" id="n">hello</p>
+    </main>
+</program>

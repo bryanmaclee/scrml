@@ -30,7 +30,7 @@ ${
              HostCall, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldRole, Field,
              Decl, Fn, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
-             Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, RangeHead,
+             Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, RangeHead, CssUnit, CoreCss, CssVar,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn } from "./core.scrml"
     import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
@@ -2283,6 +2283,30 @@ ${
         return out
     }
 
+    // s469 — the stylesheet Core this program prints: its author sheet, or the
+    // reset alone; `reset` is the program's own flag (§65.3.4).
+    fn sheetOf(p: CoreProgram) -> CssUnit {
+        const c: CoreCss | not = p.css
+        if (c is given) {
+            const u: CssUnit = c.sheet
+            return { charsets: u.charsets, imports: u.imports, reset: p.reset, tokens: u.tokens, global: u.global, scopes: u.scopes }
+        }
+        return { charsets: [], imports: [], reset: p.reset, tokens: [], global: [], scopes: [] }
+    }
+
+    // s469 — §25.7: one `cssVar` per program cell a `#{}` value reads —
+    // `--scrml-<name>` on `:root`, from the cell, now and on every change; the
+    // runtime writes only a value its guard admits (the injection boundary).
+    fn cssVarStmts(ctx: Ctx, p: CoreProgram, scope: JsExpr) -> JsStmt[] {
+        const c: CoreCss | not = p.css
+        if (c is not) return []
+        let out: JsStmt[] = []
+        for (const v of c.vars) {
+            out = out.concat([sexpr(rtCall(ctx, "cssVar", [scope, jstr("--scrml-" + v.cell.hint), JsExpr.JArrowE([], exprJs(ctx, v.read))]))])
+        }
+        return out
+    }
+
     export fn printProgram(p: CoreProgram, jsFile: string, runtimeFile: string) -> Output {
         const ill: string[] = coreRefusal(p)
         if (ill.length > 0) return { js: "", html: "", refused: ill, routes: [] }
@@ -2325,6 +2349,9 @@ ${
             JsStmt.SBlank,
             JsStmt.SComment("boot"),
             JsStmt.SConst(progLocal, jcall(jid(nameOf(names, NameKey.SharedGet(p.program.id))), [])),
+        ])
+        body = body.concat(cssVarStmts(ctx, p, jmember(jid(progLocal), "scope")))
+        body = body.concat([
             sexpr(jcall(jid(nameOf(names, NameKey.Render(p.program.id))), [
                 jid(progLocal), jmember(jid(progLocal), "scope"),
                 rtCall(ctx, "mount", [jmember(jid("document"), "body")]), JsExpr.JNull,
@@ -2332,12 +2359,15 @@ ${
         ])
         let head: HNode[] = [HNode.HElem("script", [{ name: "type", value: "module" }, { name: "src", value: jsFile }], [])]
         // s451 — §65.3.4: the built-in reset, its own bottom `@layer`, unless
-        // `<program reset="none">`. The fixed reset text holds no `<` / `&`, so
-        // the escaping text node prints it verbatim inside `<style>`.
-        if (p.reset) {
-            const css: string = emitCss({ charsets: [], imports: [], reset: true, tokens: [], global: [], scopes: [] })
-            head = [HNode.HElem("style", [], [HNode.HText(css)])].concat(head)
-        }
+        // `<program reset="none">`.
+        // s469 (s469-boot-css): with the program's author sheet (§9.1, §65) —
+        // the reset, `@layer global`, the components' `@scope` donuts — in one
+        // `<style>`, printed as a STYLE text node (html.scrml HStyle: verbatim,
+        // so `>` stays a combinator; the reader refused every `<`, and the node
+        // re-encodes any `<` as the CSS escape `\3c `, so nothing in it can
+        // close the element).
+        const css: string = emitCss(sheetOf(p))
+        if (css != "") head = [HNode.HElem("style", [], [HNode.HStyle(css)])].concat(head)
         for (const t of templates) {
             head = head.concat([HNode.HElem("template", [{ name: "id", value: t.id }], t.nodes)])
         }
