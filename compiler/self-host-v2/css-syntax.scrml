@@ -178,7 +178,28 @@ ${
         return k + 2
     }
 
-    fn atComment(s: string, i: int) -> boolean { return s.substring(i, i + 2) == openComment() }
+    // `/*` opens a comment — unless the `/` is escaped (`\/*` is an escaped slash, CSS Syntax §4.3.7).
+    fn atComment(s: string, i: int) -> boolean {
+        if (s.substring(i, i + 2) != openComment()) return false
+        return i == 0 || charAt(s, i - 1) != "\\"
+    }
+
+    // An unquoted-or-quoted `url(` at `i` (not the tail of a longer name, `myurl(`).
+    // Its contents are VERBATIM — a URL has no comments (`url(a/*x*/.css)` keeps
+    // its `/*x*/`; `url( //cdn/x.png)` is not a `//` comment) — so every scanner
+    // steps over it whole. The index just past its `)`, or -1 when it is unclosed
+    // (then it is scanned as text, and the value scan names the unclosed `url(`).
+    fn urlEnd(s: string, i: int) -> int {
+        if (s.substring(i, i + 4).toLowerCase() != "url(") return 0 - 1
+        if (i > 0 && isNameChar(charAt(s, i - 1))) return 0 - 1
+        const k: int = closeOf(s, i + 3, "(", ")")
+        if (k < 0) return 0 - 1
+        // bounded: a `url(` never spans a line break or a brace — an unclosed one must
+        // not swallow the block's `}` by matching a `)` further on in the page
+        const body: string = s.substring(i, k)
+        if (body.indexOf("\n") >= 0 || body.indexOf(LB()) >= 0 || body.indexOf(RB()) >= 0) return 0 - 1
+        return k + 1
+    }
 
     // §4.7 / §27: `//` is scrml's line comment, in CSS too (review F3). It opens a
     // comment at a line start or after whitespace — so `url(http://x)` and a
@@ -200,6 +221,10 @@ ${
             if (isQuote(c)) {
                 const k: int = skipString(s, j, to)
                 const e: int = k < 0 ? to : k
+                out = out + s.substring(j, e)
+                j = e
+            } else if (urlEnd(s, j) >= 0) {
+                const e: int = urlEnd(s, j)
                 out = out + s.substring(j, e)
                 j = e
             } else if (atComment(s, j)) {
@@ -239,6 +264,8 @@ ${
                 } else {
                     j = k
                 }
+            } else if (urlEnd(s, j) >= 0) {
+                j = urlEnd(s, j)
             } else if (atComment(s, j)) {
                 const k: int = skipComment(s, j, s.length)
                 if (k < 0) return 0 - 1
@@ -277,6 +304,8 @@ ${
                 } else {
                     j = k
                 }
+            } else if (urlEnd(s, j) >= 0) {
+                j = urlEnd(s, j)
             } else if (atComment(s, j)) {
                 // an unclosed comment is itself a finding; the scan for the `<` goes on through it
                 const k: int = skipComment(s, j, s.length)
@@ -365,6 +394,8 @@ ${
                 } else {
                     j = k
                 }
+            } else if (urlEnd(s, j) >= 0) {
+                j = urlEnd(s, j)
             } else if (atComment(s, j)) {
                 const k: int = skipComment(s, j, stop)
                 if (k < 0) return { pos: stop, ch: "" }
@@ -396,6 +427,8 @@ ${
                 } else {
                     j = k
                 }
+            } else if (urlEnd(s, j) >= 0) {
+                j = urlEnd(s, j)
             } else if (atComment(s, j)) {
                 const k: int = skipComment(s, j, stop)
                 if (k < 0) return 0 - 1
@@ -423,6 +456,10 @@ ${
                 const e: int = k < 0 ? s.length : k
                 out = out + s.substring(j, e)
                 j = e
+            } else if (urlEnd(s, j) >= 0) {
+                const e: int = urlEnd(s, j)
+                out = out + s.substring(j, e)
+                j = e
             } else if (atComment(s, j)) {
                 const k: int = skipComment(s, j, s.length)
                 out = out + " "
@@ -435,31 +472,16 @@ ${
         return out
     }
 
-    // The offset of the first `<` in [i, stop) — in a string too — or -1. A
-    // comment is skipped: it never reaches the sheet.
-    fn ltAt(s: string, i: int, stop: int) -> int {
-        // Strings FIRST (review F1): a `/*` inside a string is string text, not a
-        // comment, so a `<` behind it is found; then comments (an unclosed one is
-        // scanned through — it is reported where it stands, never a hiding place).
-        let j = i
-        while (j < stop) {
-            const c: string = charAt(s, j)
-            if (isQuote(c)) {
-                const k: int = skipString(s, j, stop)
-                const e: int = k < 0 ? stop : k
-                const lt: int = s.indexOf("<", j)
-                if (lt >= 0 && lt < e) return lt
-                j = e
-            } else if (atComment(s, j)) {
-                const k: int = skipComment(s, j, stop)
-                j = k < 0 ? stop : k
-            } else if (c == "<") {
-                return j
-            } else {
-                j = j + 1
-            }
-        }
-        return 0 - 1
+    // WALL 1 (round 3, review: "make it structural"). Once the block's extent is
+    // known, its RAW source slice is scanned for `<` skipping NOTHING — not a
+    // string, a comment, a `url(`, an escape. Ruling S469 item 1 read literally:
+    // "any `<`". (Two rounds found a skip rule hiding a `<` — a `/*` in a string,
+    // then a `/*` in an unquoted `url(`; a scan with no skip rule has none to get
+    // wrong.) A `<` in a comment is refused too: comments are not printed anyway.
+    fn firstLt(s: string, from: int, to: int) -> int {
+        const k: int = s.indexOf("<", from)
+        if (k < 0 || k >= to) return 0 - 1
+        return k
     }
 
     fn ltErr(at: int) -> CssErr {
@@ -732,17 +754,18 @@ ${
                 buf = buf + s.substring(j, k)
                 j = k
                 any = true
-            } else if (atComment(s, j)) {
-                const k: int = skipComment(s, j, stop)
-                if (k < 0) return { parts: [], cs: withErr(cs, syntax("this CSS comment is never closed — end it with `" + closeComment() + "`", j, j + 2)), ok: false }
-                buf = buf + " "
-                j = k
-            } else if (s.substring(j, j + 4).toLowerCase() == "url(") {
+            } else if (s.substring(j, j + 4).toLowerCase() == "url(" && !(j > 0 && isNameChar(charAt(s, j - 1)))) {
+                // verbatim, BEFORE comments: a URL has none (`url(a/*x*/.css)`, `url( //cdn/x.png)`)
                 const k: int = closeOf(s, j + 3, "(", ")")
                 if (k < 0 || k >= stop) return { parts: [], cs: withErr(cs, syntax("this `url(` is never closed — add `)`", j, j + 4)), ok: false }
                 buf = buf + s.substring(j, k + 1)
                 j = k + 1
                 any = true
+            } else if (atComment(s, j)) {
+                const k: int = skipComment(s, j, stop)
+                if (k < 0) return { parts: [], cs: withErr(cs, syntax("this CSS comment is never closed — end it with `" + closeComment() + "`", j, j + 2)), ok: false }
+                buf = buf + " "
+                j = k
             } else if (c == "!") {
                 return { parts: [], cs: withErr(cs, unsupported("`!important` in a `#" + LB() + RB() + "` block is not in the bootstrap — §65.7 makes internal `!important` an error and allows only an interop escape, and the bootstrap does not classify which this is; drop it (scrml's fixed precedence already decides the rule)", j, stop)), ok: false }
             } else if (c == "$" && charAt(s, j + 1) == LB()) {
@@ -834,6 +857,8 @@ ${
                 const k: int = skipString(s, j, stop)
                 if (k < 0) return 0 - 1
                 j = k
+            } else if (urlEnd(s, j) >= 0) {
+                j = urlEnd(s, j)
             } else if (atComment(s, j)) {
                 const k: int = skipComment(s, j, stop)
                 if (k < 0) return 0 - 1
@@ -853,8 +878,6 @@ ${
     fn parseDecl(cs0: CS, i: int, stop: int, inRule: boolean) -> DeclR {
         const s: string = cs0.src
         let cs: CS = cs0
-        const lt: int = ltAt(s, i, stop)
-        if (lt >= 0) return { d: not, cs: withErr(cs, ltErr(lt)) }
         const colon: int = sepAt(s, i, stop, ":")
         let prop = ""
         let valueAt = 0
@@ -904,14 +927,10 @@ ${
         let cs: CS = cs0
         let ok = true
         let arms: ComplexSel[] = []
-        const lt: int = ltAt(s, start, open)
         const prelude: string = stripComments(s.substring(start, open))
         let pEnd: int = open
         while (pEnd > start && isSpace(charAt(s, pEnd - 1))) { pEnd = pEnd - 1 }
-        if (lt >= 0) {
-            cs = withErr(cs, ltErr(lt))
-            ok = false
-        } else if (prelude.indexOf("&") >= 0) {
+        if (prelude.indexOf("&") >= 0) {
             cs = withErr(cs, unsupported("`&` (CSS nesting) is not in the bootstrap — write the full selector", start, pEnd))
             ok = false
         } else if (prelude.indexOf("$" + LB()) >= 0) {
@@ -1057,6 +1076,12 @@ ${
         let items: ACssItem[] = []
         let j: int = open + 2
         let going = true
+        const lt: int = firstLt(src0, open + 2, close)
+        if (lt >= 0) {
+            // the block is refused whole at its first `<` (one report; nothing of it is read or printed)
+            cs = withErr(cs, ltErr(lt))
+            going = false
+        }
         while (going) {
             const t: At = skipTrivia(cs, j, close)
             cs = t.cs
@@ -1068,11 +1093,7 @@ ${
             } else if (charAt(src, j) == "@") {
                 const low: string = src.substring(j, j + 9).toLowerCase()
                 const st: Stop = nextStop(src, j, close)
-                const lt: int = ltAt(src, j, st.pos)
-                if (lt >= 0 && st.ch == ";") {
-                    cs = withErr(cs, ltErr(lt))
-                    j = st.pos + 1
-                } else if (low == "@charset " && st.ch == ";") {
+                if (low == "@charset " && st.ch == ";") {
                     const r: ItemR = charsetOf(cs, j, st.pos)
                     cs = r.cs
                     items = items.concat(r.items)

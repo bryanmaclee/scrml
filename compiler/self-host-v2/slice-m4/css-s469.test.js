@@ -337,9 +337,9 @@ describe("§65.2.5 — a selector the browser would DROP is refused (fail loud),
     const core = clean(G(`        :is(h1, h2) > a:not(.x):hover, li:has(> img), p:first-line, input::-webkit-inner-spin-button, .café { color: red; }`));
     expect(author(sheetOf(core))).toContain(":is(h1, h2) > a:not(.x):hover, li:has(> img), p:first-line, input::-webkit-inner-spin-button, .café { color: red; }");
   });
-  test("a `<` inside a CSS comment is harmless (comments never reach the sheet)", () => {
-    const core = clean(G(`        /* <b> is bold */ p { color: red; /* <i> */ }`));
-    expect(sheetOf(core)).not.toContain("<");
+  test("round 3: a `<` inside a CSS comment is refused too — wall 1 scans the raw block, skipping nothing", () => {
+    const d = only(G(`        /* <b> is bold */ p { color: red; }`));
+    expect([d.code, d.at]).toEqual(["E-CSS-SYNTAX", "<"]);
   });
 });
 
@@ -365,9 +365,20 @@ describe("round 2 (review F3 / F5 / F6) — `//` comments, escapes, stray braces
     expect(css).not.toContain("heading");
     expect(css).not.toContain("trailing");
   });
-  test("a `}` or `<` inside a `//` comment is comment text (it neither closes the block nor is refused)", () => {
-    const core = clean(G(`        p { color: red; } // } <b> }\n        a { color: blue; }`));
+  test("a `}` inside a `//` comment is comment text (it does not close the block); a `<` there is still refused (round 3)", () => {
+    const core = clean(G(`        p { color: red; } // } }\n        a { color: blue; }`));
     expect(author(sheetOf(core))).toContain("a { color: blue; }");
+    expect(only(G(`        p { color: red; } // <b>`)).code).toBe("E-CSS-SYNTAX");
+  });
+  test("round 3: `url(…)` is verbatim — no comment inside it (`@import url(a/*x*/.css)` keeps its URL), and `url( //cdn/x.png)` is a URL", () => {
+    const core = clean(G(`        @import url(a/*x*/.css);\n        p { background: url( //cdn.example/x.png); }`));
+    const css = sheetOf(core);
+    expect(css).toContain('@import url("a/*x*/.css");');
+    expect(css).toContain("p { background: url( //cdn.example/x.png); }");
+  });
+  test("round 3: `\\/*` is an escaped slash, not a comment start", () => {
+    const core = clean(G(`        .a\\/b { color: red; } p { color: blue; }`));
+    expect(author(sheetOf(core))).toContain("p { color: blue; }");
   });
   test("CSS escapes in class / id names are accepted and printed as written (`.\\31 0`, `.a\\:b`)", () => {
     const core = clean(G(`        .\\31 0, .a\\:b, #\\31 x { color: red; }`));

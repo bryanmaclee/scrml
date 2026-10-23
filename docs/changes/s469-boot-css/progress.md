@@ -175,3 +175,24 @@ click. **Bite:** with the root-anchored arms removed, the root test FAILS (3 pas
   `style/program-scope-overlap-soft`, now graded, wanting the conflict checker) · UNSUPPORTED 858 (main 859) · CRASH 0.
 - snippet-gate --strict 0 · claim-gate --strict 0 · SPEC-INDEX regenerated · known-gaps counts regenerated
   (`bun scripts/state.ts --write`, only the count hunk moved).
+
+## Round 3 (final review of e8cf42653: FIX — `url(/*</style>…*/)` hid a `<` from wall 1)
+
+- **Wall 1 is structural.** `ltAt` and its skip rules are deleted. Once the block's extent (`#{` to its matching `}`,
+  or to the recovery point of an unclosed one) is found, `firstLt` scans the RAW source slice for `<` skipping nothing
+  — no string, comment, `url(` or escape is special. The block is refused whole at its first `<` (E-CSS-SYNTAX, span on
+  that `<`; nothing of it is read or printed). Ruling S469 item 1 read literally; the §34 row ("any `<` anywhere in the
+  block") is now true as written. A `<` in a CSS comment is refused too (comments are not printed). SOURCE shapes added:
+  `url(/*</style>*/)`, `URL(/*<!--*/)`, `/* < */`, `// <`.
+- **SPEC:** §65.2.5 drops the "a block an inline `<style>` prints" qualifier (any `<`, nothing skipped); DQ-7 says the
+  `<` refusal holds whatever the output shape; the ruling-3 bullet names `E-PARSE-DECL-BODY` for a `#{}` in a §66
+  declaration body; the §34 E-CSS-SYNTAX row rewritten to the exact behaviour.
+- **Comment model:** `url(…)` contents are verbatim in every scanner (`urlEnd`, bounded — never across a line break or
+  a brace, so an unclosed `url(` cannot swallow the block's `}`): `@import url(a/*x*/.css)` keeps its URL, and
+  `url( //cdn/x.png)` is a URL (it compiles — the accurate message is none). `\/*` is an escaped slash, not a comment.
+  CR-only line endings filed under `g-bootstrap-css-residuals-s469` (item 6).
+- **Docs:** `docs/PA-SCRML-PRIMER.md` no longer teaches §25.3; it points to §25.2 / §25.7 / §65.3.2.
+- **Runs:** slices 3161 pass / 4 skip / 0 fail; injection pack green; Chromium (opt-in, `/usr/bin/chromium`) 4/4;
+  bootstrap-conformance regenerated and `--check` 0 (PASS 218 = main · FAIL 52 · UNSUPPORTED 858 · CRASH 0);
+  snippet-gate / claim-gate `--strict` 0; SPEC-INDEX `--check` OK; `state.ts --check` 0. origin/main had not moved
+  since the round-2 merge (`dba986eb9`).

@@ -158,6 +158,11 @@ const SOURCE = [
   ["`/*` in a custom property's string", `p { --x: "/*</style>*/"; }`, "E-CSS-SYNTAX"],
   ["`/*` in a §25.2 definition's string", `p { x = "/*</style>*/"; }`, "E-CSS-SYNTAX"],
   ["`</style>` after an unclosed comment", `p { color: red; } /* </style>`, "E-CSS-SYNTAX"],
+  // round 3: wall 1 scans the RAW block — no skip rule (string, comment, url) can hide a `<`
+  ["`/*` inside an unquoted url( hiding `</style>`", `p { background: url(/*</style>*/); }`, "E-CSS-SYNTAX"],
+  ["`URL(` upper-case, `/*` hiding `<!--`", `p { background: URL(/*<!--*/); }`, "E-CSS-SYNTAX"],
+  ["a `<` in a block comment", `/* < */ p { color: red; }`, "E-CSS-SYNTAX"],
+  ["a `<` in a `//` comment", `p { color: red; }\n // <`, "E-CSS-SYNTAX"],
   ["`/*` in a flat block's string", `content: "/*</style>*/";`, "E-CSS-SYNTAX"],
   ["`<` in a `//` comment's neighbour line", `p { color: red; } // ok\n p::after { content: "</style>"; }`, "E-CSS-SYNTAX"],
   ["`!important`", `p { color: red !important; }`, "E-BOOTSTRAP-UNSUPPORTED"],
