@@ -1,4 +1,4 @@
-> **Written 2026-08-31, before the S469 language rulings (October 2026).** The code in this piece is in the older dialect (impl#1) and is not checked by the docs gate. For current syntax see [docs/DIALECT.md](../DIALECT.md) and the [tutorial](../tutorial.md).
+> **Written 2026-08-31, before the S469 language rulings (October 2026).** The code in this piece is in the older dialect; not all of it compiles on either compiler, and it is not checked by the docs gate. For current syntax see [docs/DIALECT.md](../DIALECT.md) and the [tutorial](../tutorial.md).
 
 # If You Give a Dev an Enum
 

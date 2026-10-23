@@ -76,7 +76,7 @@
 
 import { readFileSync, existsSync, statSync, readdirSync, writeFileSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
-import { join, extname, resolve, relative, sep } from "path";
+import { join, extname, resolve, relative, sep, isAbsolute } from "path";
 import { execFileSync } from "child_process";
 import { lintGhostPatterns } from "../compiler/src/lint-ghost-patterns.js";
 import { parseDocMarkers } from "./doc-gate-markers.js";
@@ -89,11 +89,21 @@ import { PUBLIC_SURFACE, SURFACE_EXCLUDE, SURFACE_UNGATED, uncoveredDocs } from 
 const args = process.argv.slice(2);
 const reportMode = args.includes("--report");
 const strictMode = args.includes("--strict");
-const explicitPaths = args.filter((a) => !a.startsWith("--"));
+// Run from the REPO ROOT, whatever the caller's cwd (S469 round 3): the surface rows
+// (PUBLIC_SURFACE) and the excludes (SURFACE_UNGATED) are repo-relative paths, and the printed
+// paths are too. An explicit path argument is resolved against the caller's cwd FIRST, then
+// re-expressed repo-relative (or kept absolute when it lies outside the repo, e.g. a test's tmp dir).
+const GATE_REPO_ROOT = resolve(import.meta.dir, "..");
+const explicitPaths = args.filter((a) => !a.startsWith("--")).map((a) => {
+  const abs = resolve(a);
+  const rel = relative(GATE_REPO_ROOT, abs);
+  return rel === "" ? "." : rel.startsWith("..") || isAbsolute(rel) ? abs : rel.split(sep).join("/");
+});
+process.chdir(GATE_REPO_ROOT);
 const surface = explicitPaths.length > 0 ? explicitPaths : PUBLIC_SURFACE;
 
-// Repo-relative (not cwd-relative), so the excludes hold wherever the gate is run from.
-const toRel = (p) => relative(resolve(import.meta.dir, ".."), resolve(p)).split(sep).join("/");
+// Repo-relative, `/`-separated: the form SURFACE_EXCLUDE's rows are written in.
+const toRel = (p) => relative(GATE_REPO_ROOT, resolve(p)).split(sep).join("/");
 
 /** Expand the surface into a concrete .md file list (tolerates absent rows). */
 function collectMarkdown(paths) {

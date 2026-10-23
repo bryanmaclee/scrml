@@ -223,6 +223,13 @@ describe("claim-gate end to end", () => {
     expect(r.stdout).not.toContain("v0.3.0-announce");
     expect(r.stdout).not.toContain("\\");
   }, 120_000);
+  test("A7: run from another directory, the surface and its excludes are the same (the gate chdirs to the repo root)", () => {
+    const fromRoot = claim("--list");
+    const elsewhere = spawnSync("bun", [join(ROOT, "scripts/claim-gate.js"), "--list"], { cwd: tmpdir(), encoding: "utf8" });
+    expect(elsewhere.status).toBe(0);
+    expect(elsewhere.stdout).toBe(fromRoot.stdout);
+    expect(elsewhere.stdout).not.toContain("i-am-jacks-");
+  }, 120_000);
   test("A7: an explicit path still lists what is under it, POSIX-style", () => {
     const r = claim("--list", "docs/articles");
     expect(r.stdout).toContain("docs/articles/llm-kickstarter-v2-2026-05-04.md");
