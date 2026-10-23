@@ -9,7 +9,7 @@ ${
                 defer D("a;");
                 let t = 7;
                 t;
-            }
+            },
             .B :> 2
         };
         return k;

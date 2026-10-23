@@ -4,7 +4,7 @@ ${
     <w> : string = ""
     function go() {
         let n: string | not = "z";
-        @w = ["p"].map((q) => match @k { given n :> q + n  .A :> q + "a"  else :> "e" }).join("")
+        @w = ["p"].map((q) => match @k { given n :> q + n,  .A :> q + "a",  else :> "e" }).join("")
     }
 }
 <button id="go" onclick=go()>go</>
