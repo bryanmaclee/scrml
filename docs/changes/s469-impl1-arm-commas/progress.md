@@ -61,3 +61,22 @@ already ending in `,` is skipped); an arm ending in `;` is NOT rewritten and is 
 - [x] Gap resolved; state.ts --write.
 - Note: a `number` / `string` / `int`-typed cell as a match subject is E-TYPE-025 ("asIs") in the const / derived /
   markup positions (a separate typer limitation; the matrix uses `number | string`).
+
+## Round 4 (final review of 6f35fa4bb — FIX)
+- [x] F1 HIGH: `splitMultiArmString` skips a whole standalone number literal that is not an arm start (a spaced
+      negative later alternate no longer becomes a head of its own); a literal right after an arm arrow is a body,
+      never a head (`1 :> "one" | 2 :> "two"` stays one arm and is refused). (6e42660bf)
+- [x] F2 MED: `armTokens` reads the token-joined `- >` as `:>` (length kept) — `->` comma lists split.
+- [x] Tests: literal-alternation matrix + negative rows + `->` arrow + exact dispatch sequences (151); `->` comma
+      list (regex file §4); seeded differential `match-arm-list-differential-s469.test.js` (200 lists × 4 spellings,
+      18 fail on 6f35fa4bb); pack n24 +36 negative deny-list shapes (6 FAIL on 6f35fa4bb).
+- [x] Gaps: false E-VALUE-FUNCTION-STORED on `@cell = match` (multi-scrutinee repro at head); legacy `|`-led
+      literal match arms (statement form silently runs the last arm — HIGH); `->` added to the regex-lexing gap.
+- [x] Merged origin/main (#1507/#1508/#1510): pack count reconciled 456 + n22 11 + n24 78 = 545; conflicted
+      conformance cases took main's `;` version; the codemod re-run kept 32 files / 84 commas, flagged 0 arms
+      ending in `;`.
+- [x] Newline-list coverage restored, unmigrated, excluded from the bootstrap (dialect.s66):
+      control-flow/ctrl-switch-forbidden-match-neg-newline-list, match-leave/dpa068-stmt-bare-return-newline-list,
+      error/handler-pipeless-arms-rt-newline-list. impl#1 conformance 1731/1811 + 80 xfail.
+- [x] Bootstrap conformance: PASS 217 (main) → 250 (+33). 7 UNSUPPORTED → FAIL (they now parse and fail later).
+- [x] Corpus emit diff (r4 fix vs the same tree with the two pre-r4 files): 171 diffs, all `_scrml_project_root`.
