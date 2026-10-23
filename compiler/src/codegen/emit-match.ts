@@ -96,6 +96,11 @@ interface MatchBlockAstNode {
    *  the enclosing `<each>` rows (innermost first, shadowed duplicates dropped).
    *  [] when not inside an each. Set by collectMatchBlocks. */
   enclosingEachScopeNames?: string[];
+  /** §17.1.2 (S469) — set by collectMatchBlocks when this match-block sits in an
+   *  `<each>`'s `<empty>` body (no iteration scope). emit-each renders that body
+   *  imperatively, creating the match's mount itself and calling the ITEM-scoped
+   *  dispatch form, so the dispatcher must be item-scoped too (with no row scope). */
+  enclosingEachEmpty?: boolean;
   /** g-match-inside-each-row-cannot-see-the-row-variable — the subset of
    *  `enclosingEachScopeNames` the arm bodies reference: the trailing params of
    *  the item-scoped dispatch fn, and the trailing ARGS emit-each passes at the
@@ -133,12 +138,12 @@ function collectMatchBlocks(fileAST: any): MatchBlockAstNode[] {
   // an `as (k, v)` pair), not just the innermost iter var, so an arm body that
   // reads an OUTER row's alias from inside a nested each is covered too. Reset
   // to [] wherever `eachIterVar` resets to null (an `<empty>` body).
-  function walk(node: any, eachIterVar: string | null, scope: string[] = []): void {
+  function walk(node: any, eachIterVar: string | null, scope: string[] = [], inEmpty = false): void {
     if (!node || typeof node !== "object") return;
     if (seen.has(node)) return;
     seen.add(node);
     if (Array.isArray(node)) {
-      for (const n of node) walk(n, eachIterVar, scope);
+      for (const n of node) walk(n, eachIterVar, scope, inEmpty);
       return;
     }
     if (node.kind === "match-block") {
@@ -147,11 +152,12 @@ function collectMatchBlocks(fileAST: any): MatchBlockAstNode[] {
       // (idempotent across re-walks).
       (node as MatchBlockAstNode).enclosingEachIterVar = eachIterVar;
       (node as MatchBlockAstNode).enclosingEachScopeNames = eachIterVar ? scope : [];
+      if (inEmpty && !eachIterVar) (node as MatchBlockAstNode).enclosingEachEmpty = true;
       found.push(node as MatchBlockAstNode);
       // Recurse into bodyChildren so nested match-blocks inside arm bodies
       // surface too. Arm bodies are NOT a new iteration scope, so the
       // enclosing each iter var carries through unchanged.
-      if (Array.isArray(node.bodyChildren)) walk(node.bodyChildren, eachIterVar, scope);
+      if (Array.isArray(node.bodyChildren)) walk(node.bodyChildren, eachIterVar, scope, inEmpty);
       return;
     }
     // R28-1 — entering an each-block: its per-item template (templateChildren)
@@ -168,7 +174,7 @@ function collectMatchBlocks(fileAST: any): MatchBlockAstNode[] {
         .filter((n: unknown) => typeof n === "string" && (n as string).length > 0) as string[];
       const innerScope = [...rowNames, ...scope.filter((n) => !rowNames.includes(n))];
       if (Array.isArray(node.templateChildren)) walk(node.templateChildren, innerIterVar, innerScope);
-      if (node.emptyChild) walk(node.emptyChild, null, []);
+      if (node.emptyChild) walk(node.emptyChild, null, [], true);
       // Fall through to the generic descent for any other container fields
       // (bodyChildren is now seen-guarded; descend with the OUTER iter var so
       // a match-block reachable only via a non-template field still resolves).
@@ -182,13 +188,13 @@ function collectMatchBlocks(fileAST: any): MatchBlockAstNode[] {
     // Child shape via `ifChainChildNodes` (ast-if-chain.js), shared with the six
     // sibling walks. (g-each-in-if-else-chain-emits-zero-renderers, <match> drop.)
     if (node.kind === "if-chain") {
-      for (const branchBody of ifChainChildNodes(node)) walk(branchBody, eachIterVar, scope);
+      for (const branchBody of ifChainChildNodes(node)) walk(branchBody, eachIterVar, scope, inEmpty);
       return;
     }
     // Recurse into known container fields. Mirror engine-decl + match-block
     // descent shape — children / body / bodyChildren / nodes / arms.
     for (const key of ["children", "body", "bodyChildren", "nodes", "arms"]) {
-      if (Array.isArray(node[key])) walk(node[key], eachIterVar, scope);
+      if (Array.isArray(node[key])) walk(node[key], eachIterVar, scope, inEmpty);
     }
   }
   // The pipeline passes the OUTER file-result object whose AST nodes live
@@ -1177,13 +1183,17 @@ export function emitMatchBodyRenderForFile(
     // factory (where the iter var IS defined). Without this, the module-scope
     // dispatcher fires `_scrml_effect(() => dispatch(article.status))` at top
     // level where `article` is undefined (the R28-1b defect).
-    const isInEach =
+    const isInRow =
       typeof (matchBlock as MatchBlockAstNode).enclosingEachIterVar === "string" &&
       ((matchBlock as MatchBlockAstNode).enclosingEachIterVar as string).length > 0;
+    // §17.1.2 (S469) — a match in an `<empty>` body is mounted per render by
+    // emit-each too (its call site is the item-scoped `dispatch(_mount, _v)` form),
+    // so it is item-scoped as well, with no row scope.
+    const isInEach = isInRow || (matchBlock as MatchBlockAstNode).enclosingEachEmpty === true;
     // g-match-inside-each-row-cannot-see-the-row-variable — an item-scoped match's
     // arm bodies read the ROW (`${g.name}`, `onclick=pick(g.id)`, `@.name`), but
     // its render / wire fns live at FILE scope. Pass the row scope in.
-    const rowScopeParams = isInEach ? prepareRowScopedArms(matchBlock, arms) : [];
+    const rowScopeParams = isInRow ? prepareRowScopedArms(matchBlock, arms) : [];
     if (!isInEach) preparePayloadScopedArmEaches(matchBlock, arms);
     const out = emitVariantGuardedRender(
       () => onResolved.variantExprAccessor,
@@ -1209,6 +1219,9 @@ export function emitMatchBodyRenderForFile(
         ...(hasWildcard ? { defaultArmTag: "_" } : {}),
         ...(isInEach ? { itemScopedDispatch: true } : {}),
         ...(rowScopeParams.length > 0 ? { rowScopeParams } : {}),
+        // §17.1.2 (S469) — a row-scoped `<match if=…>`: emit-each gates the per-row
+        // dispatch and calls the dispatcher's teardown when the condition is false.
+        ...(isInEach && (matchBlock as any).ifCond ? { itemScopedTeardown: true } : {}),
       },
     );
     if (out.renderFunctionsJs) renderFunctions.push(out.renderFunctionsJs);
