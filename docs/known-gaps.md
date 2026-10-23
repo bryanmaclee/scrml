@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 262 | 4 |
-| MED | 679 | 8 |
+| HIGH | 263 | 4 |
+| MED | 678 | 8 |
 | LOW | 475 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -26381,6 +26381,20 @@ element's direct listener returns early (`isConnected === false`). The narrowing
   `show=`. The gate's effect (and a row's value-bucket updater) now runs in a scope whose parameters snapshot the
   condition's free locals at render time; outside a row the condition is also read inline, so the enclosing group
   keeps the read as on main. Pack `n23` "body local" (13 shapes: 8 FAIL on `060495fe2` → PASS), browser tests.
+**Round 4 (review of `e7c7f7a28`):**
+- **F-A (HIGH, round-3 regression, fail-open; main was correct):** a local CLOSURE escaped the snapshot (callees
+  were skipped, and a closure reads its locals by reference): `let ok = false; const allowed = () => ok || @n > 5;
+  lift <b if=(allowed())>…; ok = true` showed the content at `@n = 2`; a counter closure opened every row at
+  `@n = 3`. Replaced by ONE fail-closed rule (`_liftGateIsSelfContained`): a gate is its own effect only when every
+  name it reads (callees included) is a compiler name, the row item / a replayed item-derived local, a file-level
+  function or a JS global; anything else is read INLINE in the render (main's lowering), and a keyed loop whose
+  gate reads such a name is lowered plain. Pack `n23` +12 (4 FAIL on `e7c7f7a28` → PASS), browser 24.
+- **F-C:** a mutated local array / object (`seen.push`, `o.c = o.c + 1`) is read inline at render — 24 browser
+  cases (if= / show= × group / arm / row × closure flag / closure counter / array / object) pass; on main all 24
+  fail (lifted `if=` was a display toggle, `show=` was ignored), so nothing of this shape remains to file.
+- **F-D (MED, end-user cost):** see the runtime-size ratchet §4 — a lifted `if=` page with no list shipped the
+  reconciler and owner tree (stripped 4,016 → 7,453 B gzip); `_scrml_ifrow_apply` now lives in the `lift` chunk
+  (4,303 B).
 - **F2 (MED, a leak, not fail-open):** [[g-lift-gate-not-released-on-outer-owner-teardown-s469]], resolved on
   the #1508 owner-scope tree (bucket release registered with the row scope; an `if … lift` arm render is an owner
   scope).
@@ -26414,14 +26428,28 @@ helpers (`_scrml_lift_arm_scope_open` / `_run` / `_close`, runtime-template.js),
 ships no owner chunk for its arms (the `scrml fix` given-presence verify compares the runtime too). Measured: buckets 2,2,…,2 over 10 arm toggles (was 2 → 4 → 6 → 8) and over 10
 outer-row removals; the live rows alone swap on `@sel` writes. Pins: browser `lift-if-render-gate-s469` "F2".
 
-### g-while-lift-in-reconciled-row-escapes-the-row-s469 — a `while` loop inside a reconciled `${ for (r of @rows) { … } }` row lifts its markup to the ambient lift target, not into the row — `NEW S469; MED; open`
-<!-- @gap id=g-while-lift-in-reconciled-row-escapes-the-row-s469 sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(the row factory routes lift-expr / if-stmt / for-stmt children to the row fragment; a while-stmt falls to emitLogicNode, whose lift is the global `_scrml_lift(…)`) prov=empirical:S469(s469-lift-if-render-gate round 3, reproduced on main 0a2d747d3) -->
+### g-while-lift-in-reconciled-row-escapes-the-row-s469 — a `while` loop inside a reconciled `${ for (r of @rows) { … } }` row lifts its markup OUTSIDE the list, duplicated, and the `if=` gates in it FREEZE at their render-time value — a revoked guard stays open (fail-open) — `NEW S469; HIGH; open`
+<!-- @gap id=g-while-lift-in-reconciled-row-escapes-the-row-s469 sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts(the row factory routes lift-expr / if-stmt / for-stmt children to the row fragment; a while-stmt falls to emitLogicNode, whose lift is the global `_scrml_lift(…)`) prov=empirical:S469(s469-lift-if-render-gate rounds 3-4, reproduced on main 0a2d747d3 and on the branch);review:s469-lift-if-render-gate-round-3(F-B) -->
 
-Found while writing the round-3 tests. `${ for (row of @rows) { let i = 0  while (i < 3) { lift <span>…</span>
-i = i + 1 } } }` emits the while body's lift as `_scrml_lift(() => …)` — the ambient target (null during a
-reconcile, so the `[data-scrml-lift-target]` / body fallback) — and the factory returns `tmp.firstChild` = null.
-The markup lands outside the list. Same on main. Its text interpolation in the row also reads the loop local's
-final value. Fix direction: route a while-stmt child like the for-stmt one (LIFT-5), into the row fragment.
+Found while writing the round-3 tests; raised MED → HIGH by the review of `e7c7f7a28` (F-B). Measured S469 in
+happy-dom with the pruned runtime: `<pw> = "secret"`, `<rows> = [{ id: 1 }]`,
+`<div id="out">${ for (row of @rows) { let i = 0  while (i < 2) { lift <b if=(@pw == "secret")>LOGGED IN</b>
+i = i + 1 } } }</div>`:
+
+| tree | granted: in `#out` / anywhere | after `@pw = "wrong"` | after a 2nd row |
+|---|---|---|---|
+| main `0a2d747d3` | 0 / 4 | 0 / 4 (text still in the page) | 0 / 8 |
+| branch (round 4) | 0 / 4 | 0 / **4 — still mounted** | 0 / 4 |
+
+The while body's lift is emitted as the global `_scrml_lift(() => …)` — the ambient target, which is null during a
+reconcile, so the `[data-scrml-lift-target]` / `document.body` fallback — and the row factory returns
+`tmp.firstChild` = null. So the markup lands OUTSIDE `#out`, is DUPLICATED (2 iterations × 2 renders), and is never
+reached by the row's reconcile or its gates' row scope: a guard revoked after render keeps the content in the DOM
+(**fail-open**), on main as well as here. Text interpolations in it also read the loop local's final value. Not
+fixed in the lift-if lane (a lowering of `while` inside a row, not of `if=`). Fix direction: route a while-stmt
+child like the for-stmt one (LIFT-5) into the row fragment — and, since its body writes a binding outside it, let
+forLiftTreeHasImpureLoop lower the row plain (the counter case already does); pin with an executed test asserting
+the content is inside `#out` and leaves on revoke.
 
 ### g-toplevel-bare-show-renders-ungated-s469 — a top-level bare `<b show>` (no condition) is written as a plain attribute: always visible, no diagnostic — `NEW S469; LOW; open`
 <!-- @gap id=g-toplevel-bare-show-renders-ungated-s469 sev=LOW status=open locus=compiler/src/codegen/emit-html.ts(show= handled only for variable-ref / expr values) prov=review:s469-lift-if-render-gate-round-2;empirical:S469(main + branch: `<b show>A</b>` in the HTML) -->
@@ -27257,6 +27285,10 @@ Still as described on main (S464). The test scans whole outputs that include the
 
 ### g-lift-group-non-single-if-rerender-loses-input-state-s462 — a reactive markup lift group that is NOT a single `if` / if-chain (a bare `${ lift … }` group, a `for` group with mixed reads, …) still re-renders its whole body on every read change, so an `<input>` inside loses focus and typed text — `NEW S462; LOW; open (pre-existing, not a regression)`
 <!-- @gap id=g-lift-group-non-single-if-rerender-loses-input-state-s462 sev=LOW status=open locus=compiler/src/codegen/emit-reactive-wiring.ts:907(emitLiftGroup — the plain group's `_scrml_effect` clears the placeholder and re-runs the block; only emitLiftIfChainGroup :1015 gets the arm-selector + LIVE per-binding effects) prov=review:s462-markup-if-stale-render -->
+> **S469 round 4:** a gate whose condition reads a body local or a local closure is read inline again (fail-closed
+> rule, [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]] round 4) — its flip re-renders the group as on
+> main; only a self-contained gate (cells, row item, file functions, globals) flips in place.
+>
 > **S469 — narrowed for `if=`, still open otherwise** (`s469-lift-if-render-gate` round 2). A lifted `if=` is now
 > its own tracking effect, so a gate FLIP no longer re-renders a plain group (pinned: a bare `${ lift … }` keeps a
 > sibling input's node and value across flips, and a deep write `@u.ok = false` still closes the gate). Any other

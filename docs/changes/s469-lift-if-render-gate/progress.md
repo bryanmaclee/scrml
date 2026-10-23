@@ -55,3 +55,13 @@ the one mechanism `<each>` rows use) instead of a `style.display` toggle. Primar
       owner-scope teardown; measured 2->4->6->8 buckets over arm toggles).
 - [x] filed LOW: top-level bare show, top-level quoted show, lifted disabled=@ok set once, test-isolation
       TypeError leak; and MED g-while-lift-in-reconciled-row-escapes-the-row-s469 (found writing the tests).
+
+## Round 4 (review of e7c7f7a28 — FIX)
+
+- [x] F-A HIGH: one fail-closed rule — a gate is its own effect only when every name it reads is a compiler name,
+      the row item / item-derived local, a file function or a JS global; else inline (and a keyed loop lowered plain).
+      Snapshot machinery removed. Browser 24 + pack n23 +12 (591 shapes).
+- [x] F-B: g-while-lift-in-reconciled-row-escapes-the-row-s469 rewritten and raised to HIGH (measured, main too).
+- [x] F-C: mutated local array/object behave inline; 24 browser cases pass (all fail on main); nothing to file.
+- [x] F-D: _scrml_ifrow_apply in the lift chunk — lifted-if page stripped gzip 7,453 -> 4,303 B (main 4,016);
+      runtime-size-ratchet §4.
