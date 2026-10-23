@@ -23072,8 +23072,10 @@ route.query         // object — query string parameters (e.g., ?tab=settings -
 route.path          // string — the current URL path (e.g., "/users/42")
 ```
 
-Parameter values accessed via `route.params` and `route.query` are always typed
-`string` (URL parameters are strings by nature). The developer is responsible for
+~~Parameter values accessed via `route.params` and `route.query` are always typed
+`string` (URL parameters are strings by nature).~~ *(S469)* Path parameters on `route.params` are typed
+`string` (URL parameters are strings by nature). A query key on `route.query` is typed `string | not`: the
+query string is not known until the request arrives, so a key may be absent. The developer is responsible for
 parsing numeric IDs (e.g., `let id = int.parse(route.params.id)`, an `int | not` — §14.13.4; S469 replaces the
 ambient `parseInt`, Appendix D).
 
@@ -23087,7 +23089,37 @@ ambient `parseInt`, Appendix D).
   the Route Inference pass (§12).
 - `route.query` SHALL expose all query string key-value pairs present in the
   request URL.
-- All values on `route.params` and `route.query` SHALL have type `string`.
+- ~~All values on `route.params` and `route.query` SHALL have type `string`.~~
+- *(S469)* All values on `route.params` SHALL have type `string`.
+- *(S469)* A read of a key on `route.query` (`route.query.k`) SHALL have type `string | not`. It SHALL be
+  `not` when the request URL has no such key; `""` when the key is present with no value (a bare `?k`, or
+  `?k=`); and the key's FIRST value when the key appears more than once (`?k=a&k=b` reads `"a"`).
+
+> **Amendment S469 — `route.query` missing / empty / repeated keys.** **Provenance:** ruling:user-voice-scrml.md
+> S469 "⭐ RULED — `route.query` missing / empty / repeated keys" — *"that'll work for the query key"* (the
+> ratified PA rec: *"`route.query.k` is typed `string | not`. A missing key is `not`. A bare `?k` with no value is
+> `""`. A repeated key yields its first value."*) · closes `g-spec-route-query-missing-key-s469` ·
+> **supersedes:** *"All values on `route.params` and `route.query` SHALL have type `string`."* and *"Parameter
+> values accessed via `route.params` and `route.query` are always typed `string`"* for the `route.query` half
+> (both struck above; the `route.params` half stands).
+>
+> A `route.query` value must be narrowed before it is used as a `string`. An absent key and a present-but-empty
+> one stay distinct (`not` vs `""`).
+>
+> ```scrml
+> function tabLabel() -> string {
+>     const tab = route.query.tab;          // string | not
+>     if (tab is not) {
+>         return "overview";                // ?tab absent
+>     }
+>     return tab;                           // narrowed to string; "" for a bare ?tab
+> }
+> ```
+>
+> **Implementation status: Nominal / spec-ahead.** Neither compiler implements it yet: measured S469, impl#1
+> reports `route` as undeclared (E-SCOPE-001) in a non-routed page, and the bootstrap has no `route` binding
+> (`g-route-query-string-or-not-unimplemented-s469`). The §64 SSE example's `route.query.since` is a separate
+> synthetic `route` object (`g-sse-route-object-typer-scope`).
 - A top-level declaration `let route = ...` or `const route = ...` or
   `@route = ...` in a scrml page SHALL be a compile error (E-SCOPE-010).
 - Accessing a path parameter that is not defined by the route pattern SHALL be a

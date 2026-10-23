@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 265 | 4 |
-| MED | 677 | 7 |
-| LOW | 467 | 0 |
+| MED | 678 | 7 |
+| LOW | 466 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -48,9 +48,17 @@ Found by the S469 templates lane. Reproduced S469 (s469-spec-lin-request) both i
 
 Reproduced S469 (s469-spec-lin-request) on the bootstrap (`bun scripts/scrml-boot.ts compile`): `function useToken(lin token: string) -> string { return token; }` fails with *"an unannotated parameter `lin` — bootstrap slice M2 needs `lin: Type` (Core parameters are typed)"*, and `lin token = "a";` in a function body fails with *"`lin` is not declared"* (E-SCOPE-001). Both fail closed, but the messages point the author at the wrong fix: the parameter is annotated, and `lin` is a keyword, not an undeclared name. Owed: the bootstrap parses `lin` declarations (§35.2) and `lin` parameters (§35.2.1) and runs the §35 linear pass (E-LIN-001 / -002 / -003 / -005 / -006, and the S469 `<request>`-body form, §6.7.7). Until then it should refuse `lin` with one honest E-BOOTSTRAP-UNSUPPORTED ("`lin` is not yet supported by the bootstrap") at both sites. impl#1 implements §35 (`compiler/src/type-system.ts`).
 
-### g-spec-route-query-missing-key-s469 — SPEC §20.4 types every `route.query` value `string` but does not say what reading a query key that is ABSENT from the URL yields (`""`, `not`, or an error) — `NEW S469; LOW; open (SPEC editorial)`
+### g-route-query-string-or-not-unimplemented-s469 — neither compiler implements the S469 `route.query` rule (§20.4: `route.query.k` is `string | not`; missing → `not`, bare `?k` → `""`, repeated → first value) — `NEW S469; MED; open (owed: bootstrap; impl#1 carried)`
 
-<!-- @gap id=g-spec-route-query-missing-key-s469 sev=LOW status=open locus=compiler/SPEC.md(§20.4 Route Parameters: "All values on `route.params` and `route.query` SHALL have type `string`.") prov=review:s469-docs-migrate-2(content review of llm-kickstarter-v2 §11.7, round 1);dispatch:s469-spec-lin-request(PA brief item 3b — merged duplicate g-spec-route-query-missing-key-unspecified-s469);spec:§20.4 -->
+<!-- @gap id=g-route-query-string-or-not-unimplemented-s469 sev=MED status=open locus=searched:compiler/self-host-v2/analyze.scrml,compiler/src/type-system.ts(the page-scope `route` binding)—not-traced prov=ruling:user-voice-scrml.md(S469 "⭐ RULED — `route.query` missing / empty / repeated keys" — "that'll work for the query key");dispatch:s469-spec-lin-request;spec:§20.4 -->
+
+Measured S469 (s469-spec-lin-request) with `function tabLabel() -> string { let tab = route.query.tab; if (tab is not) { return "missing"; } return tab; }` in a plain `<program>`: impl#1 fails with E-SCOPE-001 *"Undeclared identifier `route`"*, and the bootstrap fails with *"`route` is not declared"* plus E-BOOTSTRAP-UNSUPPORTED on the `.query` / `.tab` member reads. Not measured: a page inside an impl#1 routes tree, where impl#1 may bind `route`; if it does, what it yields for a missing / bare / repeated key is unverified. Owed: the bootstrap binds `route` in pages (§20.4) with `route.query.k : string | not` and the runtime reads the FIRST value of a repeated key, `""` for a bare key, and `not` for a missing one. impl#1 is frozen (S435): any divergence there is carried, not fixed. Related: `g-sse-route-object-typer-scope` (the SSE `route` object).
+
+### g-spec-route-query-missing-key-s469 — SPEC §20.4 types every `route.query` value `string` but does not say what reading a query key that is ABSENT from the URL yields (`""`, `not`, or an error) — `NEW S469; LOW; RESOLVED S469 (SPEC — ruled; impl owed: g-route-query-string-or-not-unimplemented-s469)`
+
+<!-- @gap id=g-spec-route-query-missing-key-s469 sev=LOW status=resolved locus=compiler/SPEC.md(§20.4 Route Parameters: "All values on `route.params` and `route.query` SHALL have type `string`.") prov=review:s469-docs-migrate-2(content review of llm-kickstarter-v2 §11.7, round 1);dispatch:s469-spec-lin-request(PA brief item 3b — merged duplicate g-spec-route-query-missing-key-unspecified-s469);spec:§20.4;ruling:user-voice-scrml.md(S469 "⭐ RULED — `route.query` missing / empty / repeated keys" — "that'll work for the query key") -->
+
+RESOLVED S469 (SPEC, s469-spec-lin-request): ruled — ruling:user-voice-scrml.md S469 "⭐ RULED — `route.query` missing / empty / repeated keys" — *"that'll work for the query key"*. §20.4 amended: `route.query.k` is `string | not`; a missing key is `not`, a bare `?k` is `""`, a repeated key yields its first value; `route.params` stays `string`. Neither compiler implements it yet — owed as `g-route-query-string-or-not-unimplemented-s469`. The kickstarter §11.7 example now narrows with `is not` and its ⚑ note is gone. (Correction: the "host-JS property miss on impl#1" sentence below was not measured; S469 measurement found impl#1 does not bind `route` in a non-routed page at all.) Original entry:
 
 Owed: a ruling on the missing-key value. If it is `not`, `route.query.k` is `string | not` and must be narrowed before use, which contradicts "always `string`". If it is `""`, the SPEC should say so (an absent key and `?k=` become indistinguishable). `docs/articles/llm-kickstarter-v2-2026-05-04.md` §11.7 assumes `""` and carries a ⚑ note pointing here. Also unspecified: a key with no `=` (`?tab`) and a key given twice (`?tag=a&tag=b`). On impl#1 a missing-key read is a host-JS property miss, typed `string`. **PA recommendation (S469, s469-spec-lin-request; owed to the owner):** `route.query.<key>` has type `string | not` and is `not` when the key is absent, which matches the S469 rule that a failed parse is `T | not`; a bare `?tab` is `""`; a repeated key yields its first value. Reading an absent key as `""` would make "absent" and "present but empty" one value, the same mistake as `g-sse-arg-not-vs-omitted-indistinguishable-s466`. (Merged S469: this entry absorbs the duplicate `g-spec-route-query-missing-key-unspecified-s469`.)
 
