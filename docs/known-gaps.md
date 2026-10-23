@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 264 | 4 |
-| MED | 681 | 8 |
+| HIGH | 265 | 4 |
+| MED | 682 | 8 |
 | LOW | 470 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -231,6 +231,56 @@ const <n> = match @k {
 
 An untyped cell with an inferred primitive (`<k> = "a"`) is refused the same way in markup. A typed LOCAL (`const s: string = "a"; match s { … }`) and a typed PARAMETER (`function go(s: string) { match s { … } }`) are accepted, so the refusal is specific to an `@cell` subject. The two positions that accept the cell (`@n = match`, the call argument) lower through the expression parser's raw-arm path, which does not run this subject check. Fails closed (the build fails), but on valid code. A union-typed cell (`number | string`) is accepted in every position (the round-3 alternation matrix uses it to stay clear of this gap). Owed: resolve a primitive-typed cell subject to its declared or inferred type in `checkMatchDiagnostics`. Not fixed (S435: impl#1 non-security bugs stay gaps).
 
+### g-impl1-false-e-value-function-stored-expr-match-into-cell-s469 — `@cell = match …` (an expression-position value match stored into a cell) is refused with E-VALUE-FUNCTION-STORED ("stores a function a `match` arm yields") when no arm yields a function — `NEW S469; MED; open (valid program refused)`
+
+<!-- @gap id=g-impl1-false-e-value-function-stored-expr-match-into-cell-s469 sev=MED status=open locus=searched:compiler/src/value-function-stored.ts(the raw-arm read of a `match` stored into a cell — `rawArms` text)—not-traced prov=review:s469-impl1-arm-commas(final review of 6f35fa4bb);dispatch:s469-impl1-arm-commas(r4, measured) -->
+
+Reported by the final review of 6f35fa4bb (s469-impl1-arm-commas) in the negative-alternate shape; measured S469 r4. At this branch's head the negative-alternate shape (`@n = match @k {⏎ 1 | -3 :> "neg"⏎ 3 :> "p"⏎ _ :> "z"⏎ }`) compiles correctly — its false positive was a symptom of the raw-arm mis-split fixed in r4. The class is still live for a multi-scrutinee match stored into a cell, which lowers correctly but is refused:
+
+```scrml
+type A:enum = { X, Y }
+<a>:A = .X
+<b>:A = .Y
+<n> = 0
+${
+  function go() {
+    @n = match (@a, @b) {
+      (.X, .X) :> 1
+      (.X, .Y) :> 2
+      (_, _) :> 3
+    }
+  }
+}
+<button onclick=go()>go</>
+<p>${@n}</>
+```
+
+→ E-VALUE-FUNCTION-STORED (both arm spellings, on 6f35fa4bb and at head). It also fires on a mis-lexed arm body (`42 -> /"/.source,` — see g-impl1-regex-after-binary-operator-lexed-as-division-s469). The detector reads arm text that is not a function as one; owed: decide "the arm yields a function" from the lowered arm, not the raw text.
+
+### g-impl1-legacy-pipe-literal-match-arms-s469 — `match` arms written with a leading legacy `|` before a LITERAL pattern (`| 1 :> "one"`) are not read as arms: a statement `match` silently runs the LAST arm's body for every subject, and a value `match` is refused with E-VALUE-FUNCTION-STORED + E-CG-003 — `NEW S469; HIGH; open (silent miscompile, statement form)`
+
+<!-- @gap id=g-impl1-legacy-pipe-literal-match-arms-s469 sev=HIGH status=open locus=compiler/src/ast-builder.js(the match arm level — a `|`-led literal head is no arm form; the `|` skip in _parseRecursiveBodyInner covers only `| _` / `| else` / `| ( … )`) prov=review:s469-impl1-arm-commas(final review of 6f35fa4bb — "refused on head, broken on base");dispatch:s469-impl1-arm-commas(r4, measured);spec:§18.2,§19.4.5 -->
+
+The leading `|` is a legacy spelling of a `!{}` handler arm (§19.4.5); a `match` arm takes no leading `|` (the bootstrap refuses it as E-PARSE-ARM). impl#1 measured S469 r4 on 6f35fa4bb and at this branch's head:
+
+```scrml
+<k>: number | string = 1
+<n> = ""
+${
+  function go() {
+    match @k {
+      | 1 :> { @n = "one" }
+      | 2 :> { @n = "two" }
+      | _ :> { @n = "z" }
+    }
+  }
+}
+<button onclick=go()>go</>
+<p>${@n}</>
+```
+
+compiles with NO diagnostic and emits `{ _scrml_cs_reactive_set("n", "z"); }` unconditionally — the `1` and `2` arms are gone. The value form (`@n = match @k { | 1 :> "one"⏎ | 2 :> "two"⏎ | _ :> "z" }`) is refused (E-VALUE-FUNCTION-STORED, E-CG-003 "match expression had no lowerable arms"). Owed: refuse a `|`-led literal (and variant) arm head in a `match` with a named code — never read past it.
+
 ### g-impl1-nested-inline-value-match-in-raw-arm-invalid-logic-s469 — an expression-position `match` whose arm body is another multi-line value `match` (`@n = match @a { .X :> match @b {⏎ .X :> 1⏎ .Y :> 2⏎ }⏎ .Y :> 3 }`) fails as E-CODEGEN-INVALID-LOGIC (a compiler-defect code), in both arm spellings and on base — `NEW S469; MED; open (fails closed)`
 
 <!-- @gap id=g-impl1-nested-inline-value-match-in-raw-arm-invalid-logic-s469 sev=MED status=open locus=compiler/src/expression-parser.ts(preprocessMatchExprs — a nested `match … { … }` in a raw arm is masked inner-first but the outer arm text keeps the inner match source) prov=dispatch:s469-impl1-arm-commas(round 1 probe);review:s469-impl1-arm-commas(review of 2f9176de0) -->
@@ -259,7 +309,7 @@ The two implementations refuse the same input under different codes. §34 catalo
 
 <!-- @gap id=g-impl1-regex-after-binary-operator-lexed-as-division-s469 sev=HIGH status=open locus=compiler/src/tokenizer.ts(isRegexContext — PUNCT `+` `-` `*` `%` are not in REGEX_PUNCT, so the next `/` is division) prov=dispatch:s469-impl1-arm-commas(r2, review of 2f9176de0 F1 case 3) -->
 
-Found S469 (s469-impl1-arm-commas r2) while fixing review F1. `@s = "x" + /a,b/.source` in a function emits `"x" + / a , b /.source` (exit 0, no diagnostic): the regex now matches `" a , b "`. The same holds for a `match` arm body (`"a" :> "x" + /a.b/.source` emits `/ a . b /`). The lexer comment says `+ - * %` were left out "to avoid false positives like `x * /foo/.test()`", but after a binary operator a `/` cannot be division. In an expression-position match arm the lane's stray-`,` guard now REFUSES the shape when the regex holds a `,` (E-PARSE-001, naming this gap and the parenthesized spelling `(/a,b/)`, which compiles correctly); every other position still miscompiles. Owed: put `+ - * %` (and the other binary operators) in regex context — a lexer-wide change, measured by the corpus emit differential.
+Found S469 (s469-impl1-arm-commas r2) while fixing review F1. `@s = "x" + /a,b/.source` in a function emits `"x" + / a , b /.source` (exit 0, no diagnostic): the regex now matches `" a , b "`. The same holds for a `match` arm body (`"a" :> "x" + /a.b/.source` emits `/ a . b /`). The lexer comment says `+ - * %` were left out "to avoid false positives like `x * /foo/.test()`", but after a binary operator a `/` cannot be division. In an expression-position match arm the lane's stray-`,` guard now REFUSES the shape when the regex holds a `,` (E-PARSE-001, naming this gap and the parenthesized spelling `(/a,b/)`, which compiles correctly); every other position still miscompiles. The deprecated `->` arm arrow is the same class: at the SOURCE it is two PUNCT tokens (`-`, `>`), so `.A -> /"/.source` re-spells the regex (`/ "/.source`), and the arm list's meaning then depends on its layout (measured S469 r4; the seeded differential `match-arm-list-differential-s469.test.js` keeps regex bodies away from `->` for that reason). Owed: put `+ - * %` (and the other binary operators) in regex context — a lexer-wide change, measured by the corpus emit differential.
 
 ### g-spec-class-attr-string-coercion-vs-s469-s469 — SPEC §5.5.4 still says a `class=(expression)` result "SHALL be coerced with `String()`" and writes `[]` as its `String()` form (an array joins as `"a,b"`), which contradicts the S469 conversions rule that a non-primitive never reaches a text sink implicitly (`E-TEXT-NON-PRIMITIVE`, §14.13.2) — `NEW S469; LOW; RESOLVED S469 (s469-spec-catchup r2 — ruled "string or tape of strings")`
 
