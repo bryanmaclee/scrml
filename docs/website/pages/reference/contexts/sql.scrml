@@ -25,7 +25,7 @@
                 layer. The server boundary disappears.
             </p>
             <div class="flex gap-4 mt-4 text-xs">
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§8"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§8"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §8 (normative)
                 </a>
@@ -76,9 +76,9 @@ server function deleteContact(id) &#123;
 
         <p class="text-slate-700 leading-relaxed mt-4">
             The full runnable example lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/examples/03-contact-book.scrml"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/examples/03-contact-book.scrml"
                class="font-mono text-blue-700 hover:text-blue-900 underline">examples/03-contact-book.scrml</a>
-            in the scrmlTS repository. Pre-compiled live demo (Option A
+            in the scrml repository. Pre-compiled live demo (Option A
             per the scrml.dev architecture DD) is queued for day-30 once
             the chunk-splitter dogfood pass settles.
         </p>
@@ -306,7 +306,7 @@ server function deleteContact(id) &#123;
             <strong>§44</strong> (multi-DB adaptation),
             <strong>§57</strong> (wire format). The normative text lives
             at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>.

@@ -314,7 +314,7 @@ function allProbes(): Probe[] {
     // comments, no known-gaps entry, no dpa-queue item. pa-base §10: an obligation and its probe
     // must resolve to the same artifact — issue-debt.ts reads the two HOME artifacts and says OWED.
     runProbe("issue-debt", "Adopter issues (owed a home)", "bun", ["scripts/issue-debt.ts"]),
-    runProbe("issues", "Adopter issues (open)", "gh", ["issue", "list", "--repo", "bryanmaclee/scrml", "--state", "open"], 45_000),
+    runProbe("issues", "Adopter issues (open)", "gh", ["issue", "list", "--repo", "scrml-lang/scrml", "--state", "open"], 45_000),
     runProbe("prs", "Open PRs", "gh", ["pr", "list"], 45_000),
     runProbe("runs", "CI runs (main, last 3)", "gh", ["run", "list", "--branch", "main", "--limit", "3"], 45_000),
   ];

@@ -24,7 +24,7 @@
                 / to / if / once.
             </p>
             <div class="flex gap-4 mt-4 text-xs">
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§51"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§51"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §51.0.H (normative)
                 </a>
@@ -301,11 +301,11 @@
             This page summarizes <strong>SPEC &sect;51.0.H</strong>
             (effect= / onTransition) and <strong>&sect;51.0.O</strong>
             (internal:rule= prefix). The normative text lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>
-            in the scrmlTS repository.
+            in the scrml repository.
         </p>
 
     </article>

@@ -282,8 +282,8 @@
             </li>
             <li>
                 <strong>scrml on GitHub:</strong>
-                <a href="https://github.com/bryanmaclee/scrmlTS" class="text-blue-700 hover:text-blue-900 underline">
-                    github.com/bryanmaclee/scrmlTS
+                <a href="https://github.com/scrml-lang/scrml" class="text-blue-700 hover:text-blue-900 underline">
+                    github.com/scrml-lang/scrml
                 </a>
                 &mdash; The working compiler, examples, spec, benchmarks.
             </li>

@@ -48,7 +48,7 @@ Jack writes this at 2am:
 
 ```scrml
 <Cart rule=.Paying>
-    <button onclick=${ @order = .Shipped }>Check out</>
+    <button onclick=${ @order = .Shipped; }>Check out</>
 </>
 ```
 

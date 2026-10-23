@@ -46,6 +46,7 @@
  * RETIRED in the same landing: its gate role passed to `scripts/snippet-gate.js`
  * (real files), and its fence-extraction capability lives on here as a survey
  * instrument.
+ */
 
 import { readFileSync, existsSync, statSync, readdirSync, writeFileSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";

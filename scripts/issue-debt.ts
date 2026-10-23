@@ -51,7 +51,7 @@
  *   bun scripts/issue-debt.ts --check                    # exit 1 iff any OWED (PA hand-use, never CI)
  *   bun scripts/issue-debt.ts --json                     # {repo, now, open, truncated, homed:[…], owed:[…]}
  *   bun scripts/issue-debt.ts --now=2026-08-15T00:00:00Z # deterministic age
- *   bun scripts/issue-debt.ts --repo=owner/name          # default bryanmaclee/scrml
+ *   bun scripts/issue-debt.ts --repo=owner/name          # default scrml-lang/scrml
  *   bun scripts/issue-debt.ts --gaps=<path> --queue=<path>  # ledger overrides (e.g. another ref's copy)
  *   bun scripts/issue-debt.ts --limit=500                # first-fetch size (auto-widens; default 200)
  */
@@ -62,7 +62,7 @@ import { spawnSync } from "child_process";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url)).replace(/[\\/]$/, ""); // strip trailing sep on BOTH OSes
 
-export const DEFAULT_REPO = "bryanmaclee/scrml";
+export const DEFAULT_REPO = "scrml-lang/scrml";
 export const GAPS_LEDGER = "docs/known-gaps.md";
 export const DPA_QUEUE = "handOffs/dpa-queue.md";
 /** An OWED issue with ZERO comments older than this is ⚠️ SILENT — nobody has said anything, anywhere. */

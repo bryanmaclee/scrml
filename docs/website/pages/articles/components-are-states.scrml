@@ -190,7 +190,7 @@ s&#101;rver f&#110; renameCard(id: number, title: string(.length &gt; 0 &amp;&am
             <li><a href="/articles/mutability-contracts" class="text-blue-700 hover:text-blue-900 underline">Mutability contracts: predicates, lifecycles, machines</a>. The three layers of write-time guarantee the value layer of this piece is one third of.</li>
             <li><a href="/articles/css-without-build-step" class="text-blue-700 hover:text-blue-900 underline">CSS without a build step</a>. Native scope, native variables, no styled-components.</li>
             <li><a href="/articles/realtime-and-workers" class="text-blue-700 hover:text-blue-900 underline">Realtime and workers as syntax</a>. <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;channel&gt;</code> and <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;program&gt;</code> finishing the state-types-as-built-ins story.</li>
-            <li><strong>scrml on GitHub:</strong> <a href="https://github.com/bryanmaclee/scrmlTS" class="text-blue-700 hover:text-blue-900 underline">github.com&#47;bryanmaclee&#47;scrmlTS</a>. The working compiler, examples, spec, benchmarks.</li>
+            <li><strong>scrml on GitHub:</strong> <a href="https://github.com/scrml-lang/scrml" class="text-blue-700 hover:text-blue-900 underline">github.com&#47;bryanmaclee&#47;scrmlTS</a>. The working compiler, examples, spec, benchmarks.</li>
         </ul>
 
     </article>

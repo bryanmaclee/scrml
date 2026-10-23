@@ -25,7 +25,7 @@
                 fails it.
             </p>
             <div class="flex gap-3 mt-4 text-xs">
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§42"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§42"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC &sect;42.2.5
                 </a>
@@ -313,7 +313,7 @@
             and
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">req</code>).
             Spec lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>.
