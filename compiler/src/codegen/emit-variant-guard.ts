@@ -299,6 +299,17 @@ export interface VariantGuardOptions {
    * byte-identical to pre-fix.
    */
   rowScopeParams?: string[];
+  /**
+   * §17.1.2 (S469, g-structural-if-inside-each-row-template-fails-open) — with
+   * `itemScopedDispatch`: the match carries an `if=`, so its per-row gate (emit-each)
+   * needs to UNMOUNT the dispatched arm when the condition turns false. Emit a
+   * `_<prefix>_<idPrefix>_teardown(_mount)` next to the dispatch fn: it disposes the
+   * arm's wiring, empties the mount, and forgets the mount's last value / row scope so
+   * the next dispatch (the condition turning true again) re-renders from scratch. The
+   * dispatcher owns those per-mount keys, so the teardown lives here, not in the row
+   * code. Unset → byte-identical to pre-fix.
+   */
+  itemScopedTeardown?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1718,6 +1729,25 @@ export function emitVariantGuardedRender(
   // consumers that want a fallback either set `opts.defaultArmTag` (match
   // block-form `<_>`) or add an arm with the appropriate tag.
   dispatcherLines.push(`}`);
+
+  // §17.1.2 (S469) — the per-mount teardown a row-scoped `<match if=…>` gate calls
+  // when its condition is false (see VariantGuardOptions.itemScopedTeardown). The
+  // arm is UNMOUNTED, not hidden: its wiring is disposed (the same call an arm switch
+  // makes above), its nodes are removed, and the mount's last value / row scope are
+  // forgotten, so the same-value short-circuit cannot skip the re-render when the
+  // condition turns true again.
+  if (itemScoped && opts.itemScopedTeardown === true) {
+    const teardownFnName = `_${renderFnPrefix}_${idPrefix}_teardown`;
+    dispatcherLines.push(`function ${teardownFnName}(${MT}) {`);
+    dispatcherLines.push(`  if (!${MT}) return;`);
+    dispatcherLines.push(`  if (${disposeVar}) { ${disposeVar}(); ${disposeVar} = null; }`);
+    dispatcherLines.push(`  ${MT}.replaceChildren();`);
+    dispatcherLines.push(`  delete ${MT}[${JSON.stringify(`__scrml_match_lastv_${idPrefix}`)}];`);
+    if (rowScopeParams.length > 0) {
+      dispatcherLines.push(`  delete ${MT}[${JSON.stringify(`__scrml_match_lasts_${idPrefix}`)}];`);
+    }
+    dispatcherLines.push(`}`);
+  }
 
   // R28-1b (S143) — item-scoped mode emits NO module-scope trigger. The each
   // per-item factory calls `<dispatchFnName>(_itemMountEl, <iterVar>.<disc>)`
