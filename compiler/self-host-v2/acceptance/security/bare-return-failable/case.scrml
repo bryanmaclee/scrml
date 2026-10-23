@@ -5,7 +5,7 @@
     type Denied:enum = { Bad }
     function role(pw: string)! Denied {
         if (pw != "hunter2") return;
-        return "user";
+        return "user"
     }
     function attempt(pw: string) -> string {
         return match role(pw) {

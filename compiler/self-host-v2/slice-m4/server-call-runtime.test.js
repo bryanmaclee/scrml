@@ -339,12 +339,12 @@ const NOTES_SRC = `<program db="./notes.db">
 
     function saveNote(id: string, text: string, base: int)! SaveError {
         if (text.length > 10000) fail .TooLong(10000);
-        ${SQ}\`UPDATE notes SET body = \${text}, version = \${base + 1} WHERE id = \${id}\`}.run() !{ _ :> { fail .Storage } }
+        ${SQ}\`UPDATE notes SET body = \${text}, version = \${base + 1} WHERE id = \${id}\`}.run() !{ _ :> { fail .Storage; } };
         return base + 1;
     }
 
     function wordCount(id: string) -> int {
-        const row = ${SQ}\`SELECT body FROM notes WHERE id = \${id}\`}.get() !{ _ :> not }
+        const row = ${SQ}\`SELECT body FROM notes WHERE id = \${id}\`}.get() !{ _ :> not };
         return 0;
     }
 
@@ -364,7 +364,7 @@ const NOTES_SRC = `<program db="./notes.db">
     }
 
     function touch(id: string) {
-        ${SQ}\`UPDATE notes SET seen = 1 WHERE id = \${id}\`}.run() !{ _ :> {} }
+        ${SQ}\`UPDATE notes SET seen = 1 WHERE id = \${id}\`}.run() !{ _ :> {} };
     }
 
     function stamp() {

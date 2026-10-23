@@ -3,7 +3,7 @@
     let <wrong:string=""/>
     let <right:string=""/>
     function find(pw: string) -> string | not {
-        if (pw == "hunter2") return "bryan";
+        if (pw == "hunter2") return "bryan"
     }
     function attempt(pw: string) -> string {
         let m: string = "denied";

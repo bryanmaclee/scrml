@@ -20,7 +20,7 @@ let mods;
 beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
 afterEach(() => expectNoPageErrors());
 
-const prog = (type, body) => `<program>\n    <xs:${type}=([])/>\n    function f() { ${body} }\n    <main><ul><each in=@xs as x><li>\${x}</li></each></ul></main>\n</program>\n`;
+const prog = (type, body) => `<program>\n    <xs:${type}=([])/>\n    function f() { ${body}; }\n    <main><ul><each in=@xs as x><li>\${x}</li></each></ul></main>\n</program>\n`;
 const codes = (type, body) => frontEnd(mods, [{ path: "g.scrml", src: prog(type, body) }]).diags.map((d) => d.code);
 const GRANTED = []; // s444: a granted removal / filter now LOWERS (Core RemoveEnd / RemoveFront / RemoveAnywhere)
 

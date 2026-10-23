@@ -222,7 +222,7 @@ describe("§19.5 `?` — propagation", () => {
 
 describe("§19.7 — `match` on a failable result", () => {
   test("`.Ok(v)` + every error variant; statement arms (mirror: error/match-failable-ok-arm-rt)", async () => {
-    const o = await runProgram(`    type DivErr:enum = { DivByZero }\n    function safeDiv(a: int, b: int)! DivErr {\n        if (b == 0) fail DivErr.DivByZero;\n        return a - b;\n    }\n    function okCase() {\n        match safeDiv(10, 2) {\n            .Ok(v) :> @n = v,\n            .DivByZero :> @n = -1\n        };\n    }\n    function errCase() {\n        match safeDiv(10, 0) {\n            ::Ok(v) :> @log = "ok",\n            ::DivByZero :> @log = "ERR"\n        };\n    }`, ["okCase", "errCase"], ["okCase", "errCase"]);
+    const o = await runProgram(`    type DivErr:enum = { DivByZero }\n    function safeDiv(a: int, b: int)! DivErr {\n        if (b == 0) fail DivErr.DivByZero;\n        return a - b;\n    }\n    function okCase() {\n        match safeDiv(10, 2) {\n            .Ok(v) :> @n = v,\n            .DivByZero :> @n = -1\n        }\n    }\n    function errCase() {\n        match safeDiv(10, 0) {\n            ::Ok(v) :> @log = "ok",\n            ::DivByZero :> @log = "ERR"\n        }\n    }`, ["okCase", "errCase"], ["okCase", "errCase"]);
     expect(o.n).toBe("8");
     expect(o.log).toBe("ERR");
   });
@@ -245,7 +245,7 @@ describe("§19.7 — `match` on a failable result", () => {
   });
 
   test("E-TYPE-020 — a missing `.Ok` (the success value is a variant to cover)", () => {
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("a") {\n            .NotFound(m) :> @n = 1,\n            .Timeout :> @n = 2,\n        };\n    }`))).toEqual(["E-TYPE-020"]);
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("a") {\n            .NotFound(m) :> @n = 1,\n            .Timeout :> @n = 2\n        }\n    }`))).toEqual(["E-TYPE-020"]);
   });
 
   test("a `match` over a value that cannot fail is the §18 plain-value match (s469: admitted, not an Attempt)", () => {
@@ -254,14 +254,14 @@ describe("§19.7 — `match` on a failable result", () => {
   });
 
   test("an error enum with a variant named `Ok` cannot be matched (ambiguous with the success arm) — refused", () => {
-    expect(codes(P(`    type E:enum = { Ok, Bad }\n    function f()! E {\n        fail .Bad;\n    }\n    function go() {\n        match f() {\n            .Ok :> @n = 1,\n            else :> @n = 2\n        };\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`    type E:enum = { Ok, Bad }\n    function f()! E {\n        fail .Bad;\n    }\n    function go() {\n        match f() {\n            .Ok :> @n = 1,\n            else :> @n = 2\n        }\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 });
 
 describe("§19.4.3 item 3 / §34 E-TYPE-080 — `!{}` handlers", () => {
   const H = (arms) => P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n${arms}\n        };\n    }`);
   test("E-TYPE-080 — a handler that leaves a variant uncovered (mirror: error/handler-non-exhaustive)", () => {
-    expect(codes(H(`            .NotFound(m) :> @log = m,`))).toEqual(["E-TYPE-080"]);
+    expect(codes(H(`            .NotFound(m) :> @log = m`))).toEqual(["E-TYPE-080"]);
   });
   test("full enumeration is exhaustive (mirror: error/handler-exhaustive-neg)", () => {
     clean(H(`            .NotFound(m) :> @log = m,\n            .Timeout :> @log = "t"`));
@@ -331,7 +331,7 @@ describe("Ue2 — slice limits, refused (never accepted and ignored)", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | _ e :> @log = "o" };\n    }`))).toEqual(["W-ARM-PIPE-LEGACY"]);
   });
   test("`transaction { … }` names unit U1e", () => {
-    const src = P(`${TYPES}\n    function f()! LoadError {\n        transaction {\n            @n = 1;\n        };\n    }`);
+    const src = P(`${TYPES}\n    function f()! LoadError {\n        transaction {\n            @n = 1;\n        }\n    }`);
     expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(msg(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("U1e");
   });
@@ -340,19 +340,19 @@ describe("Ue2 — slice limits, refused (never accepted and ignored)", () => {
 describe("§19.8 — `SqlError` and the R11 rule (codes + Core; the printer refuses queries, U1c)", () => {
   const Q = `${SQ}\`SELECT a FROM t\`}.get()`;
   test("inside a `!` function a `?{}` propagates implicitly when the enum has every SqlError variant (§19.8.2)", () => {
-    expect(codes(PDB(`    function f()! SqlError {\n        const r = ${Q}\n        return r;\n    }`))).toEqual([]);
-    expect(codes(PDB(`    type DbErr:enum = { QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost, Other }\n    function f()! DbErr {\n        const r = ${Q}\n        return r;\n    }`))).toEqual([]);
+    expect(codes(PDB(`    function f()! SqlError {\n        const r = ${Q};\n        return r;\n    }`))).toEqual([]);
+    expect(codes(PDB(`    type DbErr:enum = { QueryFailed(message: string), ConstraintViolation(field: string), ConnectionLost, Other }\n    function f()! DbErr {\n        const r = ${Q};\n        return r;\n    }`))).toEqual([]);
   });
   test("E-ERROR-010 — inside a `!` function whose enum lacks SqlError's variants (§19.8.4)", () => {
-    const src = PDB(`    type UserError:enum = { NotFound(id: string) }\n    function f()! UserError {\n        const r = ${Q}\n        return r;\n    }`);
+    const src = PDB(`    type UserError:enum = { NotFound(id: string) }\n    function f()! UserError {\n        const r = ${Q};\n        return r;\n    }`);
     expect(codes(src)).toEqual(["E-ERROR-010"]);
     expect(msg(src, "E-ERROR-010")).toContain("QueryFailed");
   });
   test("handled at the site, a query needs no compatible enum", () => {
-    expect(codes(PDB(`    type UserError:enum = { NotFound(id: string) }\n    function f()! UserError {\n        const r = ${Q} !{ _ :> not }\n        if (r is not) fail .NotFound("x");\n        return r;\n    }`))).toEqual([]);
+    expect(codes(PDB(`    type UserError:enum = { NotFound(id: string) }\n    function f()! UserError {\n        const r = ${Q} !{ _ :> not };\n        if (r is not) fail .NotFound("x");\n        return r;\n    }`))).toEqual([]);
   });
   test("the lowered implicit propagation: an Attempt over the query, one re-fail arm per SqlError variant", () => {
-    const r = run(PDB(`    function f()! SqlError {\n        ${SQ}\`DELETE FROM t\`}.run()\n    }`));
+    const r = run(PDB(`    function f()! SqlError {\n        ${SQ}\`DELETE FROM t\`}.run();\n    }`));
     expect(r.diags).toEqual([]);
     // s468 (U1c): the query is a Suspend's `on`; the Attempt inspects its settled outcome
     const sus = r.core.server[0].body.stmts[0];
@@ -371,14 +371,14 @@ describe("§19.8 — `SqlError` and the R11 rule (codes + Core; the printer refu
     expect(codes(PDB(`    function f() -> int {\n        return match ${Q} {\n            .Ok(row) :> 1,\n            .Nope :> 2,\n            _ :> 3\n        };\n    }`))).toEqual(["E-TYPE-VARIANT"]);
   });
   test("a `!{}` on a query that names only some SqlError variants is E-TYPE-080", () => {
-    expect(codes(PDB(`    function f() {\n        const r = ${Q} !{ .ConnectionLost :> not }\n    }`))).toEqual(["E-TYPE-080"]);
+    expect(codes(PDB(`    function f() {\n        const r = ${Q} !{ .ConnectionLost :> not };\n    }`))).toEqual(["E-TYPE-080"]);
   });
   test("`?` on a query: inside a `!` function it is the implicit propagation; outside, E-ERROR-003", () => {
-    expect(codes(PDB(`    function f()! SqlError {\n        const r = ${Q}?\n        return r;\n    }`))).toEqual([]);
-    expect(codes(PDB(`    function f() {\n        const r = ${Q}?\n    }`))).toEqual(["E-ERROR-003"]);
+    expect(codes(PDB(`    function f()! SqlError {\n        const r = ${Q}?;\n        return r;\n    }`))).toEqual([]);
+    expect(codes(PDB(`    function f() {\n        const r = ${Q}?;\n    }`))).toEqual(["E-ERROR-003"]);
   });
   test("a query a `!` function would propagate from inside a larger expression — refused (Ue2)", () => {
-    expect(codes(PDB(`    fn id(s: int) -> int { return s; }\n    function f()! SqlError {\n        const r = id(${Q})\n        return r;\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(PDB(`    fn id(s: int) -> int { return s; }\n    function f()! SqlError {\n        const r = id(${Q});\n        return r;\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("`SqlError` is built in: a user `type SqlError` is refused (§19.8.4 \"SHALL NOT redefine it\")", () => {
     expect(codes(P(`    type SqlError:enum = { A }`))).toEqual(["E-BOOTSTRAP-REDECLARE"]);
@@ -406,7 +406,7 @@ describe("§19.16 — `defer` on the `fail` / `?` exits", () => {
 
   test("E-DEFER-CONTROL-FLOW — `fail` / `?` / an arm's `return` inside a deferred body (§19.16.3 rule 1)", () => {
     expect(codes(P(`${TYPES}\n    function a()! LoadError {\n        defer fail .Timeout;\n    }`))).toEqual(["E-DEFER-CONTROL-FLOW"]);
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function a()! LoadError {\n        defer {\n            const v = load("x")?;\n        };\n    }`))).toEqual(["E-DEFER-CONTROL-FLOW"]);
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function a()! LoadError {\n        defer {\n            const v = load("x")?;\n        }\n    }`))).toEqual(["E-DEFER-CONTROL-FLOW"]);
     expect(codes(P(`${TYPES}\n${LOAD}\n    function a() {\n        defer load("x") !{ _ :> { return; } };\n    }`))).toEqual(["E-DEFER-CONTROL-FLOW"]);
   });
 
@@ -425,7 +425,7 @@ describe("§19.16 — `defer` on the `fail` / `?` exits", () => {
   });
 
   test("E-DEFER-LATER-SHADOW reaches a deferred body inside an arm block", () => {
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        let w = 1;\n        load("x") !{\n            _ :> {\n                defer @n = w;\n                const w = 2;\n            },\n        };\n    }`))).toContain("E-DEFER-LATER-SHADOW");
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        let w = 1;\n        load("x") !{\n            _ :> {\n                defer @n = w;\n                const w = 2;\n            }\n        };\n    }`))).toContain("E-DEFER-LATER-SHADOW");
   });
 });
 
@@ -470,7 +470,7 @@ describe("S239 review fix round (114e6ef80)", () => {
   // HIGH-2: a function named without a call was lowered as `null`
   test("HIGH-2 — a function value (alias, return, argument) is refused, never lowered as `null`", () => {
     const ok = `    function ok() -> int {\n        return 3;\n    }`;
-    expect(codes(P(`${ok}\n    function go() {\n        const g = ok;\n        @n = g();\n    }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(P(`${ok}\n    function go() {\n        const g = ok;\n        @n = g()\n    }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
     expect(codes(P(`${ok}\n    function go() -> int {\n        return ok;\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(P(`${ok}\n    fn id(x: int) -> int { return x; }\n    function go() {\n        @n = id(ok);\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
@@ -493,12 +493,12 @@ describe("S239 review fix round (114e6ef80)", () => {
 
   test("MED-1 — E-TYPE-023: two `!{}` arms for one variant; two `.Ok` arms in a `match` (§18.8.1)", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            .Timeout :> @n = 1,\n            .Timeout :> @n = 2,\n            _ :> @n = 3\n        };\n    }`))).toEqual(["E-TYPE-023"]);
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @n = 1,\n            .Ok(w) :> @n = 2,\n            else :> @n = 3\n        };\n    }`))).toEqual(["E-TYPE-023"]);
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @n = 1,\n            .Ok(w) :> @n = 2,\n            else :> @n = 3\n        }\n    }`))).toEqual(["E-TYPE-023"]);
   });
 
   // s452 r2: §18.6 names the code — "An `else` arm that is not the last arm SHALL be … E-SYNTAX-010"
   test("LOW-1 — an arm after the wildcard is E-SYNTAX-010 (the wildcard is last, §18.6)", () => {
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            _ :> @n = 1,\n            .Timeout :> @n = 2,\n        };\n    }`))).toEqual(["E-SYNTAX-010"]);
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            _ :> @n = 1,\n            .Timeout :> @n = 2\n        };\n    }`))).toEqual(["E-SYNTAX-010"]);
   });
 
   test("LOW-2 — `.V(args) :> fail E.V(args)` (§19.5.2's spelling) is a `fail` arm (runtime)", async () => {

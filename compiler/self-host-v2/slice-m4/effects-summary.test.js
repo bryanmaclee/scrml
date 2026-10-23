@@ -97,7 +97,7 @@ describe("dpa-066 G7 — a value-position arm calling a wrapper of a no-value ca
     "            return k;",
     "        }",
     "        function go() {",
-    `            const r = load("x") !{ _ :> ${armCall} }`,
+    `            const r = load("x") !{ _ :> ${armCall} };`,
     "            @log = r;",
     "        }",
     "    }",
@@ -106,11 +106,11 @@ describe("dpa-066 G7 — a value-position arm calling a wrapper of a no-value ca
   ].join("\n");
 
   test("the direct call is E-ERROR-012 (unchanged)", () => {
-    expect(codes(prog("function g() { return \"x\" }", "nothing()"))).toEqual(["E-ERROR-012"]);
+    expect(codes(prog("function g() { return \"x\"; }", "nothing()"))).toEqual(["E-ERROR-012"]);
   });
 
   test("`function g() { return nothing() }` — E-ERROR-012, the arm's message as for the direct call", () => {
-    const r = run(prog("function g() { return nothing() }"));
+    const r = run(prog("function g() { return nothing(); }"));
     expect(r.diags.map((d) => d.code)).toEqual(["E-ERROR-012"]);
     expect(r.diags[0].message).toContain("Arm '_' of the");
     expect(r.diags[0].message).toContain("on 'load(…)' produces no value");
@@ -119,12 +119,12 @@ describe("dpa-066 G7 — a value-position arm calling a wrapper of a no-value ca
 
   test("`function g() -> string { return nothing() }` — a declared type does not launder it either", () => {
     // s469 (#1471 r3): and `return nothing()` in a `-> string` function returns a `void` — E-TYPE-001 where it stands
-    expect(codes(prog("function g() -> string { return nothing() }")).slice().sort()).toEqual(["E-ERROR-012", "E-TYPE-001"]);
+    expect(codes(prog("function g() -> string { return nothing(); }")).slice().sort()).toEqual(["E-ERROR-012", "E-TYPE-001"]);
   });
 
   test("two wrappers deep, and through recursion", () => {
-    expect(codes(prog("function h() { return nothing() }\n        function g() { return h(); }"))).toEqual(["E-ERROR-012"]);
-    expect(codes(prog("function g() {\n            if (@n == 1) { return g() }\n            return nothing();\n        }"))).toEqual(["E-ERROR-012"]);
+    expect(codes(prog("function h() { return nothing(); }\n        function g() { return h(); }"))).toEqual(["E-ERROR-012"]);
+    expect(codes(prog("function g() {\n            if (@n == 1) { return g(); }\n            return nothing();\n        }"))).toEqual(["E-ERROR-012"]);
   });
 
   // r2 LOW-1: the s452 r3 rule — an earlier unconditional return decides; a
@@ -133,14 +133,14 @@ describe("dpa-066 G7 — a value-position arm calling a wrapper of a no-value ca
     // s469 (#1471 r3): the dead `return nothing()` is still type-checked — `g` returns values, so
     // returning a `void` there is E-TYPE-001 (the arm rule stays clean: the live return decides)
     expect(codes(prog("function g() {\n            return \"x\";\n            return nothing();\n        }"))).toEqual(["E-TYPE-001"]);
-    expect(codes(prog("function g() {\n            if (@n == 1) { return \"a\" } else { return \"b\" }\n            return nothing();\n        }"))).toEqual(["E-TYPE-001"]);
+    expect(codes(prog("function g() {\n            if (@n == 1) { return \"a\"; } else { return \"b\"; }\n            return nothing();\n        }"))).toEqual(["E-TYPE-001"]);
     // twin: reachable, it still counts
-    expect(codes(prog("function g() {\n            if (@n == 1) { return \"a\" }\n            return nothing();\n        }")).slice().sort()).toEqual(["E-ERROR-012", "E-TYPE-001"]);
+    expect(codes(prog("function g() {\n            if (@n == 1) { return \"a\"; }\n            return nothing();\n        }")).slice().sort()).toEqual(["E-ERROR-012", "E-TYPE-001"]);
   });
 
   test("negative twins: a wrapper that returns a value is clean", () => {
-    expect(codes(prog("function v() -> string { return \"v\" }\n        function g() { return v(); }"))).toEqual([]);
-    expect(codes(prog("function g() { return \"x\" }"))).toEqual([]);
+    expect(codes(prog("function v() -> string { return \"v\"; }\n        function g() { return v(); }"))).toEqual([]);
+    expect(codes(prog("function g() { return \"x\"; }"))).toEqual([]);
   });
 });
 
@@ -149,7 +149,7 @@ describe("dpa-066 — the clock follows calls (§48.6 / the bootstrap's host-cal
     "<program>",
     "    let <query:string=\"\"/>",
     "    function ping() -> number {",
-    "        return Date" + ".now()",
+    "        return Date" + ".now();",
     "    }",
     decls,
     "    <main>",

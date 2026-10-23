@@ -65,7 +65,7 @@ describe("parser — the `not` arm and literal arms", () => {
     expect(json).toContain('"PLit"');
   });
   test("a brace arm body that is one bare name is E-MATCH-ARM-SHORTHAND-AMBIGUOUS — in a `match` and in a `!{}` arm", () => {
-    expect(codes(prog(`${COLOR}\n    function f(ok: string) -> string {\n        return match @c {\n            .Red :> { ok },\n            else :> "x"\n        };\n    }`, `        <p>\${f("a")}</p>`))).toContain("E-MATCH-ARM-SHORTHAND-AMBIGUOUS");
+    expect(codes(prog(`${COLOR}\n    function f(ok: string) -> string {\n        return match @c {\n            .Red :> { ok },\n            else :> "x"\n        }\n    }`, `        <p>\${f("a")}</p>`))).toContain("E-MATCH-ARM-SHORTHAND-AMBIGUOUS");
     expect(codes(`<program>\n    type E:enum = { Bad }\n    function load()! E { fail E.Bad; }\n    function f(ok: string) -> string {\n        const v: string = load() !{ .Bad :> { ok } }\n        return v;\n    }\n    <main><p>\${f("a")}</p></main>\n</program>\n`)).toContain("E-MATCH-ARM-SHORTHAND-AMBIGUOUS");
   });
   test("`{ a }` with a `;`, `{ a: a }` and a bare `a` are not refused", () => {
@@ -128,7 +128,7 @@ describe("the plain-value match — §18", () => {
     expect(JSON.stringify(m.arms[0].pat)).toContain("Absent");   // the absence arm first (a payload test reads `.variant`)
   });
   test("statement position: arms that write, a block arm, payload binders (runtime)", async () => {
-    const src = `<program>\n    type E:enum = { NotFound(id: string), Busy(n: int, why: string), Gone }\n    let <log:string=""/>\n    function load(id: string)! E {\n        if (id == "b") fail E.Busy(3, "slow");\n        if (id == "x") fail E.NotFound(id);\n        fail E.Gone;\n    }\n    function note(e: E) {\n        match e {\n            .NotFound(id) :> @log = "nf " + id,\n            .Busy(n, why) :> {\n                @log = why;\n            },\n            .Gone :> @log = "gone"\n        };\n    }\n    function go(id: string) { load(id) !{ _ err :> note(err) }; }\n    <main>\n        <button onclick=go("b")>b</button>\n        <button onclick=go("x")>x</button>\n        <button onclick=go("g")>g</button>\n        <p id="log">\${@log}</p>\n    </main>\n</program>\n`;
+    const src = `<program>\n    type E:enum = { NotFound(id: string), Busy(n: int, why: string), Gone }\n    let <log:string=""/>\n    function load(id: string)! E {\n        if (id == "b") fail E.Busy(3, "slow");\n        if (id == "x") fail E.NotFound(id);\n        fail E.Gone;\n    }\n    function note(e: E) {\n        match e {\n            .NotFound(id) :> @log = "nf " + id,\n            .Busy(n, why) :> {\n                @log = why;\n            },\n            .Gone :> @log = "gone"\n        }\n    }\n    function go(id: string) { load(id) !{ _ err :> note(err) }; }\n    <main>\n        <button onclick=go("b")>b</button>\n        <button onclick=go("x")>x</button>\n        <button onclick=go("g")>g</button>\n        <p id="log">\${@log}</p>\n    </main>\n</program>\n`;
     await load(src);
     click(btn("b"));
     expect($("#log").textContent).toBe("slow");
@@ -176,8 +176,8 @@ describe("the plain-value match — §18", () => {
     expect(codes(prog(`    let <n:int=1/>`, `        <p>\${match @n { "1" :> 1, else :> 2, }}</p>`))).toEqual(["E-TYPE-001"]);
   });
   test("payload arity (E-TYPE-021); a whole-value binder on a plain match (E-MATCH-BARE-BINDER)", () => {
-    const S = `    type E:enum = { A(x: int, y: int), B }\n    function f(e: E) -> int {\n        return match e {\n            ARMS\n        };\n    }`;
-    expect(codes(prog(S.replace("ARMS", ".A(x) :> x\n            .B :> 0"), `        <p>x</p>`))).toEqual(["E-TYPE-021"]);
+    const S = `    type E:enum = { A(x: int, y: int), B }\n    function f(e: E) -> int {\n        return match e {\n            ARMS\n        }\n    }`;
+    expect(codes(prog(S.replace("ARMS", ".A(x) :> x,\n            .B :> 0"), `        <p>x</p>`))).toEqual(["E-TYPE-021"]);
     expect(codes(prog(S.replace("ARMS", ".A(x, y) :> x\n            _ e2 :> 0"), `        <p>x</p>`))).toEqual(["E-MATCH-BARE-BINDER"]);
   });
   test("a subject whose type the binder does not know (a call's result): arms inferred, then checked by the typer", () => {
@@ -217,7 +217,7 @@ describe("tapes keep their grants through a match", () => {
   });
   test("a write inside a statement match's arm is grant-checked like any other write", () => {
     const D = `    type Color:enum = { Red, Green }\n    let <c:Color=.Red/>\n    <xs:int[free, append]=[]/>`;
-    expect(codes(prog(D + `\n    function f() {\n        match @c {\n            .Red :> @xs.append(1),\n            .Green :> @xs.pop()\n        };\n    }`, `        <button onclick=f()>f</button>`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(codes(prog(D + `\n    function f() {\n        match @c {\n            .Red :> @xs.append(1),\n            .Green :> @xs.pop()\n        }\n    }`, `        <button onclick=f()>f</button>`))).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
 });
 
@@ -256,20 +256,20 @@ describe("security lens — the deny arm is reachable and chosen by its own test
   };
   const AUTH = `    type Auth:enum = { Granted, Denied }\n    function check(pw: string) -> Auth {\n        if (pw == "hunter2") return .Granted;\n        return .Denied;\n    }`;
   test("a `match` on an enum result — value form, deny arm first and last", async () => {
-    await expectLogin(LOGIN(AUTH, `    function attempt(pw: string) -> string {\n        return match check(pw) {\n            .Granted :> "welcome",\n            .Denied :> "denied",\n        };\n    }`), "denied", "welcome");
-    await expectLogin(LOGIN(AUTH, `    function attempt(pw: string) -> string {\n        return match check(pw) {\n            .Denied :> "denied",\n            .Granted :> "welcome",\n        };\n    }`), "denied", "welcome");
+    await expectLogin(LOGIN(AUTH, `    function attempt(pw: string) -> string {\n        return match check(pw) {\n            .Granted :> "welcome",\n            .Denied :> "denied"\n        };\n    }`), "denied", "welcome");
+    await expectLogin(LOGIN(AUTH, `    function attempt(pw: string) -> string {\n        return match check(pw) {\n            .Denied :> "denied",\n            .Granted :> "welcome"\n        };\n    }`), "denied", "welcome");
   });
   test("a `match` on an enum result — statement form", async () => {
-    await expectLogin(LOGIN(AUTH, `    function attempt(pw: string) -> string {\n        let m: string = "unset";\n        match check(pw) {\n            .Granted :> m = "welcome",\n            .Denied :> m = "denied"\n        };\n        return m;\n    }`), "denied", "welcome");
+    await expectLogin(LOGIN(AUTH, `    function attempt(pw: string) -> string {\n        let m: string = "unset";\n        match check(pw) {\n            .Granted :> m = "welcome",\n            .Denied :> m = "denied"\n        }\n        return m;\n    }`), "denied", "welcome");
   });
   test("a `match` on `T | not` — value and statement form", async () => {
     const FIND = `    type User:struct = { name: string }\n    function find(pw: string) -> User | not {\n        const u: User = { name: "bryan" };\n        if (pw == "hunter2") return u;\n        return not;\n    }`;
     await expectLogin(LOGIN(FIND, `    function attempt(pw: string) -> string {\n        return match find(pw) {\n            not :> "denied",\n            else :> "welcome"\n        };\n    }`), "denied", "welcome");
-    await expectLogin(LOGIN(FIND, `    function attempt(pw: string) -> string {\n        let m: string = "unset";\n        match find(pw) {\n            not :> m = "denied",\n            else :> m = "welcome"\n        };\n        return m;\n    }`), "denied", "welcome");
+    await expectLogin(LOGIN(FIND, `    function attempt(pw: string) -> string {\n        let m: string = "unset";\n        match find(pw) {\n            not :> m = "denied",\n            else :> m = "welcome"\n        }\n        return m;\n    }`), "denied", "welcome");
   });
   test("a literal-arm `match` on a string — with `else`, and with none (a wrong password takes no arm)", async () => {
     await expectLogin(LOGIN("", `    function attempt(pw: string) -> string {\n        return match pw {\n            "hunter2" :> "welcome",\n            else :> "denied"\n        };\n    }`), "denied", "welcome");
-    const noElse = LOGIN("", `    function grant(pw: string) -> string | not {\n        return match pw {\n            "guest" :> "guest",\n            "hunter2" :> "welcome",\n        };\n    }\n    function attempt(pw: string) -> string {\n        return match grant(pw) {\n            not :> "denied",\n            else :> "granted"\n        };\n    }`);
+    const noElse = LOGIN("", `    function grant(pw: string) -> string | not {\n        return match pw {\n            "guest" :> "guest",\n            "hunter2" :> "welcome"\n        };\n    }\n    function attempt(pw: string) -> string {\n        return match grant(pw) {\n            not :> "denied",\n            else :> "granted"\n        };\n    }`);
     expect(codes(noElse)).toEqual(["W-MATCH-002"]);
     const r = run(noElse);
     await loadProgram(r.core, "s469m-" + k++, []);
@@ -286,9 +286,9 @@ describe("security lens — the deny arm is reachable and chosen by its own test
 // end is refused (E-TYPE-043; `-> T | not`: E-BOOTSTRAP-UNSUPPORTED — not lowered to `not`).
 describe("review HIGH-1 — absence is `null` and `undefined`; no function falls off the end", () => {
   const js = (src) => mods.print.printProgram(clean(src).core, "t.client.js", "scrml-runtime.js").js;
-  const FIND = (tail) => `    type User:struct = { name: string }\n    function find(pw: string) -> User | not {\n        const u: User = { name: "bryan" };\n        if (pw == "hunter2") return u${tail}\n    }`;
+  const FIND = (tail) => `    type User:struct = { name: string }\n    function find(pw: string) -> User | not {\n        const u: User = { name: "bryan" };\n        if (pw == "hunter2") return u;${tail};\n    }`;
   const VAL = `    function attempt(pw: string) -> string {\n        return match find(pw) {\n            not :> "denied",\n            else :> "welcome"\n        };\n    }`;
-  const STMT = `    function attempt(pw: string) -> string {\n        let m: string = "denied"\n        match find(pw) {\n            not :> m = "denied",\n            else :> m = "welcome"\n        };\n        return m;\n    }`;
+  const STMT = `    function attempt(pw: string) -> string {\n        let m: string = "denied";\n        match find(pw) {\n            not :> m = "denied",\n            else :> m = "welcome"\n        }\n        return m;\n    }`;
   const P2 = (decls) => prog(decls, `        <p>\${attempt("x")}</p>`);
   test("the absence arm prints `== null` (value and statement form), never `=== null`", () => {
     for (const a of [VAL, STMT]) {
@@ -306,21 +306,21 @@ describe("review HIGH-1 — absence is `null` and `undefined`; no function falls
     }
   });
   test("`-> string` falling off the end is E-TYPE-043 (§17.6); `string | not` and an enum `| not` too (bryan: Always explicit)", () => {
-    expect(codes(prog(`    function f(a: int) -> string {\n        if (a == 1) return "one";\n    }`, `        <p>\${f(1)}</p>`))).toEqual(["E-TYPE-043"]);
-    expect(codes(prog(`    function f(a: int) -> string | not {\n        if (a == 1) return "one";\n    }`, `        <p>x</p>`))).toEqual(["E-TYPE-043"]);
-    expect(codes(prog(`    type R:enum = { A, B }\n    function f(a: int) -> R | not {\n        if (a == 1) return .A;\n    }`, `        <p>x</p>`))).toEqual(["E-TYPE-043"]);
+    expect(codes(prog(`    function f(a: int) -> string {\n        if (a == 1) return "one"\n    }`, `        <p>\${f(1)}</p>`))).toEqual(["E-TYPE-043"]);
+    expect(codes(prog(`    function f(a: int) -> string | not {\n        if (a == 1) return "one"\n    }`, `        <p>x</p>`))).toEqual(["E-TYPE-043"]);
+    expect(codes(prog(`    type R:enum = { A, B }\n    function f(a: int) -> R | not {\n        if (a == 1) return .A\n    }`, `        <p>x</p>`))).toEqual(["E-TYPE-043"]);
   });
   test("every path returning — if / else, an exhaustive statement match whose arms all return — is not refused; a non-exhaustive one is", () => {
-    expect(codes(prog(`    function f(a: int) -> string {\n        if (a == 1) {\n            return "one";\n        } else {\n            return "other";\n        };\n    }`, `        <p>\${f(1)}</p>`))).toEqual([]);
-    expect(codes(prog(COLOR + `\n    function f(x: Color) -> string {\n        match x {\n            .Red :> return "r",\n            .Green :> return "g",\n            .Blue :> return "b"\n        };\n    }`, `        <p>\${f(@c)}</p>`))).toEqual([]);
-    expect(codes(prog(`    function f(s: string) -> string {\n        match s {\n            "a" :> return "A"\n        };\n    }`, `        <p>\${f("a")}</p>`))).toEqual(["E-TYPE-043", "W-MATCH-002"]);
+    expect(codes(prog(`    function f(a: int) -> string {\n        if (a == 1) {\n            return "one";\n        } else {\n            return "other";\n        }\n    }`, `        <p>\${f(1)}</p>`))).toEqual([]);
+    expect(codes(prog(COLOR + `\n    function f(x: Color) -> string {\n        match x {\n            .Red :> return "r",\n            .Green :> return "g",\n            .Blue :> return "b"\n        }\n    }`, `        <p>\${f(@c)}</p>`))).toEqual([]);
+    expect(codes(prog(`    function f(s: string) -> string {\n        match s {\n            "a" :> return "A"\n        }\n    }`, `        <p>\${f("a")}</p>`))).toEqual(["E-TYPE-043", "W-MATCH-002"]);
   });
   test("§42.5: a security program's emitted JS never names `undefined`", () => {
-    const out = js(P2(FIND("\n        return not;") + "\n" + VAL));
+    const out = js(P2(FIND("\n        return not") + "\n" + VAL));
     expect(out).not.toMatch(/\bundefined\b/);
   });
   test("a return-typed function ending in an unreturned expression is E-TYPE-043 — scrml has no implicit tail return (bryan: Always explicit)", () => {
-    const d = diag(prog(COLOR + `\n    function f(x: Color) -> string {\n        match x {\n            .Red :> "r",\n            else :> "o"\n        };\n    }`, `        <p>\${f(@c)}</p>`), "E-TYPE-043");
+    const d = diag(prog(COLOR + `\n    function f(x: Color) -> string {\n        match x {\n            .Red :> "r"\n            else :> "o"\n        }\n    }`, `        <p>\${f(@c)}</p>`), "E-TYPE-043");
     expect(d?.message).toContain("no implicit tail return");
   });
   test("(review L1) a `not` arm on a subject that cannot be `not` is dead — E-TYPE-044 (binder-known and typer-known)", () => {
@@ -340,9 +340,9 @@ describe("review HIGH-1 — absence is `null` and `undefined`; no function falls
 // an unannotated function (HIGH-B), `== not` (HIGH-B 2, E-EQ-002), a bare `return` in `-> T` (MED-C).
 describe("delta review — no path yields `undefined`", () => {
   const LOGIN = (decls, attempt) => `<program>\n    type Denied:enum = { Bad }\n    let <wrong:string=""/>\n    let <right:string=""/>\n${decls}\n${attempt}\n    function login() {\n        @wrong = attempt("hunter3");\n        @right = attempt("hunter2");\n    }\n    <main>\n        <button onclick=login()>go</button>\n        <p id="wrong">\${@wrong}</p>\n        <p id="right">\${@right}</p>\n    </main>\n</program>\n`;
-  const ROLE = (tail) => `    function role(pw: string)! Denied {\n        if (pw == "hunter2") return "user"${tail}\n    }`;
+  const ROLE = (tail) => `    function role(pw: string)! Denied {\n        if (pw == "hunter2") return "user";${tail};\n    }`;
   const VAL = `    function attempt(pw: string) -> string {\n        return match role(pw) {\n            .Ok(v) :> "welcome",\n            _ :> "denied"\n        };\n    }`;
-  const GUARD = `    function attempt(pw: string) -> string {\n        const r: string = role(pw) !{ _ :> "denied" }\n        if (r == "user") return "welcome"\n        return "denied";\n    }`;
+  const GUARD = `    function attempt(pw: string) -> string {\n        const r: string = role(pw) !{ _ :> "denied" };\n        if (r == "user") return "welcome";\n        return "denied";\n    }`;
   test("HIGH-A: a `!` function whose success path can fall off is refused — `match` and `!{}` callers", () => {
     for (const a of [VAL, GUARD]) {
       const r = run(LOGIN(ROLE(""), a));
@@ -363,10 +363,10 @@ describe("delta review — no path yields `undefined`", () => {
     expect(codes(`<program>\n    type E:enum = { Bad }\n    let <n:int=0/>\n    function f(x: int)! E {\n        if (x == 0) fail .Bad;\n        @n = x;\n    }\n    function go() { f(1) !{ _ :> @n = 2 }; }\n    <main><button onclick=go()>g</button></main>\n</program>\n`)).toEqual([]);
   });
   test("HIGH-B: an unannotated function that returns a value on one path and falls off (or bare-returns) on another is refused", () => {
-    const LOOK = (tail) => `    function look(pw: string) {\n        if (pw == "hunter2") return "user"${tail}\n    }`;
+    const LOOK = (tail) => `    function look(pw: string) {\n        if (pw == "hunter2") return "user"${tail};\n    }`;
     const A = `    function attempt(pw: string) -> string {\n        if (look(pw) is not) return "denied";\n        return "welcome";\n    }`;
     expect(codes(LOGIN(LOOK(""), A))).toEqual(["E-RETURN-INCOMPLETE"]);
-    expect(codes(LOGIN(LOOK("\n        return;"), A))).toEqual(["E-RETURN-INCOMPLETE"]);
+    expect(codes(LOGIN(LOOK("\n        return"), A))).toEqual(["E-RETURN-INCOMPLETE"]);
     // an unannotated function with no value return is a procedure: not judged
     expect(codes(prog(`    let <n:int=0/>\n    function bump(x: int) {\n        if (x > 0) @n = x\n    }`, `        <button onclick=bump(1)>b</button>`))).toEqual([]);
   });
@@ -377,8 +377,8 @@ describe("delta review — no path yields `undefined`", () => {
     expect(codes(LOGIN(F, `    function attempt(pw: string) -> string {\n        if (look(pw) === not) return "denied";\n        return "welcome";\n    }`))).toContain("E-PARSE-STRICT-EQ");
   });
   test("MED-C: a bare `return` in a declared-return function is E-TYPE-043 — `-> T | not` included: write `return not;` (bryan)", () => {
-    expect(codes(prog(`    function role(pw: string) -> string {\n        if (pw == "hunter2") return "user";\n        return;\n    }`, `        <p>\${role("x")}</p>`))).toEqual(["E-TYPE-043"]);
-    expect(codes(prog(`    function role(pw: string) -> string | not {\n        if (pw == "hunter2") return "user";\n        return;\n    }`, `        <p>\${match role("x") { not :> "-", else :> "u", }}</p>`))).toEqual(["E-TYPE-043"]);
+    expect(codes(prog(`    function role(pw: string) -> string {\n        if (pw == "hunter2") return "user";\n        return\n    }`, `        <p>\${role("x")}</p>`))).toEqual(["E-TYPE-043"]);
+    expect(codes(prog(`    function role(pw: string) -> string | not {\n        if (pw == "hunter2") return "user"\n        return\n    }`, `        <p>\${match role("x") { not :> "-", else :> "u", }}</p>`))).toEqual(["E-TYPE-043"]);
   });
 });
 
@@ -386,20 +386,20 @@ describe("delta review — no path yields `undefined`", () => {
 // #1471 round 2 — bryan's ruling "Always explicit": no implicit return anywhere.
 describe("round 2 — always explicit; a no-value result is never read", () => {
   const D = `    type Denied:enum = { Bad }`;
-  const ROLE = `${D}\n    function role(pw: string)! Denied {\n        if (pw != "hunter2") return;\n        return "user";\n    }`;
+  const ROLE = `${D}\n    function role(pw: string)! Denied {\n        if (pw != "hunter2") return;\n        return "user"\n    }`;
   const CHK = `${D}\n    function chk(pw: string)! Denied {\n        if (pw != "hunter2") fail .Bad;\n    }`;
   test("HIGH-1: a bare `return` in a `!` function beside a value return is E-RETURN-INCOMPLETE", () => {
     expect(codes(prog(ROLE + `\n    function a(pw: string) -> string {\n        return match role(pw) {\n            .Ok(v) :> v,\n            .Bad :> "denied"\n        };\n    }`, `        <p>\${a("x")}</p>`))).toEqual(["E-RETURN-INCOMPLETE"]);
   });
   test("MED-2: a no-value `!` callee's success value read — by `!{}` or a bound `.Ok(v)` — is E-TYPE-001; `.Ok(_)` / a statement is fine", () => {
     expect(codes(prog(CHK + `\n    function a(pw: string) -> string {\n        const r: string = chk(pw) !{ _ :> "denied" };\n        return r;\n    }`, `        <p>\${a("x")}</p>`))).toEqual(["E-TYPE-001"]);
-    const M = (ok) => `\n    function a(pw: string) -> string {\n        return match chk(pw) {\n            ${ok}\n            .Bad :> "denied"\n        };\n    }`;
+    const M = (ok) => `\n    function a(pw: string) -> string {\n        return match chk(pw) {\n            ${ok},\n            .Bad :> "denied"\n        };\n    }`;
     expect(codes(prog(CHK + M('.Ok(v) :> "w" + v'), `        <p>\${a("x")}</p>`))).toEqual(["E-TYPE-001"]);
     expect(codes(prog(CHK + M('.Ok(_) :> "welcome"'), `        <p>\${a("x")}</p>`))).toEqual([]);
-    expect(codes(prog(CHK + `\n    let <m:string=""/>\n    function go() { chk("x") !{ _ :> @m = "denied" } }`, `        <button onclick=go()>g</button>`))).toEqual([]);
+    expect(codes(prog(CHK + `\n    let <m:string=""/>\n    function go() { chk("x") !{ _ :> @m = "denied" }; }`, `        <button onclick=go()>g</button>`))).toEqual([]);
   });
   test("MED-2: a function with no value used as one — initializer, markup — is E-TYPE-001; as a statement or handler it is fine", () => {
-    const N = `    function nothing(x: int) {\n        if (x > 0) {\n            const z: int = x;\n        };\n    }`;
+    const N = `    function nothing(x: int) {\n        if (x > 0) {\n            const z: int = x;\n        }\n    }`;
     expect(codes(prog(N + `\n    function a() -> string {\n        const s: string = nothing(1);\n        return s;\n    }`, `        <p>\${a()}</p>`))).toEqual(["E-TYPE-001"]);
     expect(codes(prog(N, `        <p>\${nothing(1)}</p>`))).toEqual(["E-TYPE-001"]);
     expect(codes(prog(N + `\n    function go() {\n        nothing(2);\n    }`, `        <button onclick=nothing(1)>b</button>\n        <button onclick=go()>g</button>`))).toEqual([]);
@@ -410,7 +410,7 @@ describe("round 2 — always explicit; a no-value result is never read", () => {
 // #1471 round 3 — "no value" is a TYPE: a function with no value-returning path is `void`;
 // a call of it is `void`, refused in every value position (E-TYPE-001) — one reader.
 describe("round 3 — `void` is a type", () => {
-  const N = `    function nothing(x: int) {\n        if (x > 0) {\n            const z: int = x;\n        };\n    }`;
+  const N = `    function nothing(x: int) {\n        if (x > 0) {\n            const z: int = x;\n        }\n    }`;
   test("a void pass-through wrapper is itself void: as a statement it is fine, read as a value it is E-TYPE-001", () => {
     const W = N + `\n    function w(x: int) {\n        return nothing(x);\n    }`;
     expect(codes(prog(W + `\n    function go() {\n        w(1);\n    }`, `        <button onclick=go()>g</button>`))).toEqual([]);

@@ -333,10 +333,10 @@ describe("A — block arms yield with `lift` (§18.5); the value-form `if` branc
     expect(codes(fn(`        const r = load(id) !{ _ :> { "e"; } };\n        return r;`))).toEqual([]);
     expect(codes(fn(`        const r = load(id) !{ _ :> { lift "e"; } };\n        return r;`))).toEqual([]);
     expect(codes(fn(`        const r = load(id) !{ _ :> {\n            @out = "e";\n            return "L";\n        } };\n        return r;`))).toEqual([]);
-    expect(codes(fn(`        load(id) !{ _ :> {\n            @out = "e";\n            @out = "f";\n        } };\n        return "s";`))).toEqual([]);
+    expect(codes(fn(`        load(id) !{ _ :> {\n            @out = "e"\n            @out = "f"\n        } }\n        return "s"`))).toEqual([]);
   });
   test("`lift` anywhere but an arm block's last statement is refused by name; so is one in a statement-position arm", () => {
-    expect(diag(fn(`        const r = load(id) !{ _ :> {\n            lift "a"\n            @out = "b";\n        } };\n        return r;`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("`lift`");
+    expect(diag(fn(`        const r = load(id) !{ _ :> {\n            lift "a"\n            @out = "b";\n        } }\n        return r;`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("`lift`");
     expect(diag(fn(`        load(id) !{ _ :> {\n            @out = "e";\n            lift "e";\n        } };\n        return "s";`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("yields to nothing");
     expect(diag(fn(`        lift "x"\n        return "s";`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("`lift`");
   });

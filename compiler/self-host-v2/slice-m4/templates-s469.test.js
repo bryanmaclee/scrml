@@ -38,7 +38,7 @@ const clean = (src) => {
 const js = (src) => mods.print.printProgram(clean(src).core, "t.client.js", "scrml-runtime.js").js;
 // a function returning `body` (a template), in a program that renders it
 const fnProg = (decls, params, body) =>
-  `<program>\n${decls}\n    fn f(${params}) -> string {\n        return ${body}\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
+  `<program>\n${decls}\n    fn f(${params}) -> string {\n        return ${body};\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
 const lexWhy = (tpl) => bootLex(mods, tpl);
 
 // ---------------------------------------------------------------------------
@@ -169,7 +169,7 @@ describe("P — parse", () => {
   });
   test("a `?{}` bound parameter is read by the same reader: one it cannot bound one way is refused (§8.1.2)", () => {
     const SQ = "?" + "{";
-    const prog = (slot) => `<program db="./app.db">\n    function f(id: int) {\n        ${SQ}\`UPDATE t SET a = 1 WHERE id = \${${slot}}\`}.run()\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
+    const prog = (slot) => `<program db="./app.db">\n    function f(id: int) {\n        ${SQ}\`UPDATE t SET a = 1 WHERE id = \${${slot}}\`}.run();\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
     const bad = run(prog(" { a: id } / 2 "));
     const d = bad.diags.find((x) => x.code === "E-PARSE-TEMPLATE");
     expect(d.message).toContain("bound parameter cannot be read one way");
@@ -213,7 +213,7 @@ describe("T — a slot is a text sink (§14.13.2)", () => {
   });
   test("E-OPERAND-NOT-NARROWED — a `T | not` slot; narrowed, it is text", () => {
     expect(codes(fnProg(D, "m: int | not", "`v=${m}`"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    const narrowed = `<program>\n    fn f(m: int | not) -> string {\n        if (m is given) {\n            return \`v=\${m}\`\n        };\n        return "none"\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
+    const narrowed = `<program>\n    fn f(m: int | not) -> string {\n        if (m is given) {\n            return \`v=\${m}\`;\n        }\n        return "none";\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
     expect(codes(narrowed)).toEqual([]);
   });
   test("an undeclared name in a slot is reported once (E-SCOPE-001), not again as text", () => {
@@ -348,7 +348,7 @@ describe("BACKSTOP — a Recovered node never reaches the printer when the file 
 
 describe("found by the end-to-end fuzz — a call of a value is never silently `not`", () => {
   test("`total()` on a `number` parameter is refused (it printed `null === 1`)", () => {
-    const src = "<program>\n    fn f(total: number) -> bool {\n        return total() == 1;\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
+    const src = "<program>\n    fn f(total: number) -> bool {\n        return total() == 1\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
     const d = diag(src, "E-BOOTSTRAP-UNSUPPORTED");
     expect(d.message).toContain("only a declared scrml function is callable");
     expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
@@ -412,7 +412,7 @@ describe("L1 — a template on the line after an expression reads two ways", () 
 });
 
 describe("P1 — the printer never merges a prefix `-` with its operand's sign", () => {
-  const P1 = (body, params) => "<program>\n    fn f(" + params + ") -> number {\n        return " + body + "\n    }\n    <main>\n        <p>${f(3)}</p>\n    </main>\n</program>\n";
+  const P1 = (body, params) => "<program>\n    fn f(" + params + ") -> number {\n        return " + body + ";\n    }\n    <main>\n        <p>${f(3)}</p>\n    </main>\n</program>\n";
   const fnText = (src) => {
     const out = jsOf(src);
     const at = out.indexOf("function f(");

@@ -39,7 +39,7 @@ function program() {
   return [
     {
       path: "app.scrml",
-      src: app.replace(appImport, 'import { dropdown } from "./lib/dropdown.scrml"\n    import { Openness } from "./lib/openness.scrml";\n    import { Tone } from "./lib/accent.scrml"'),
+      src: app.replace(appImport, 'import { dropdown } from "./lib/dropdown.scrml";\n    import { Openness } from "./lib/openness.scrml";\n    import { Tone } from "./lib/accent.scrml";'),
     },
     { path: "lib/accent.scrml", src: "// lib/accent.scrml\n${ export type Tone:enum = { Warm, Cool } }\n" },
     { path: "lib/dropdown.scrml", src: lib.replace(TYPE_LINE, '${ import { Openness } from "./openness.scrml"; }') },
@@ -49,7 +49,7 @@ function program() {
 
 /** The same program with an unresolved name in every file — a diagnostic per file. */
 function programWithDiags() {
-  return program().map((f, i) => ({ path: f.path, src: `${f.src}\n\${ fn broken${i}() -> int { return missing${i} } }\n` }));
+  return program().map((f, i) => ({ path: f.path, src: `${f.src}\n\${ fn broken${i}() -> int { return missing${i}; } }\n` }));
 }
 
 const ENTRY = "app.scrml";

@@ -44,7 +44,7 @@ describe("§48.3.3 — a `fn` body that writes a reactive cell is E-FN-003 (it c
     ["`reset(@n)`", "reset(@n)"],
   ]) {
     test(what, () => {
-      const d = run(P(`    fn f() -> int { ${body}\n        return 1; }`)).diags;
+      const d = run(P(`    fn f() -> int { ${body};\n        return 1; }`)).diags;
       expect(d.map((x) => x.code)).toEqual(["E-FN-003"]);
       expect(d[0].message).toContain("`fn f`");
       expect(d[0].message).toContain("§48.3.3");

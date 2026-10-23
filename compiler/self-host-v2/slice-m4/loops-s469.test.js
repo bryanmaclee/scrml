@@ -51,7 +51,7 @@ const fnCodes = (b, ret = "int", decls = "") => codes(fnProg(b, ret, decls));
 // ---------------------------------------------------------------------------
 describe("the four heads — statements, compiled and run", () => {
   test("`for (x of xs)` sums a tape; the sum is shown in markup (runtime)", async () => {
-    const src = prog(`    <xs:int[]=([3, 4, 5])/>\n    function sum(ys: int[]) -> int {\n        let total = 0;\n        for (y of ys) {\n            total = total + y;\n        };\n        return total;\n    }`,
+    const src = prog(`    <xs:int[]=([3, 4, 5])/>\n    function sum(ys: int[]) -> int {\n        let total = 0;\n        for (y of ys) {\n            total = total + y;\n        }\n        return total;\n    }`,
       `        <p id="s">\${sum(@xs)}</p>`);
     await load(src);
     expect($("#s").textContent).toBe("12");
@@ -63,12 +63,12 @@ describe("the four heads — statements, compiled and run", () => {
     expect([$("#a").textContent, $("#b").textContent, $("#c").textContent, $("#d").textContent]).toEqual(["123", "123", "0", "0"]);
   });
   test("a range's bounds are evaluated once: `0..n` where the body rebinds `n` (runtime)", async () => {
-    const src = fnProg(`        let n = 3;\n        let c = 0;\n        for (i of 0..n) {\n            n = n + 1;\n            c = c + 1;\n        };\n        return c;`);
+    const src = fnProg(`        let n = 3;\n        let c = 0;\n        for (i of 0..n) {\n            n = n + 1;\n            c = c + 1;\n        }\n        return c;`);
     await load(src);
     expect($("#o").textContent).toBe("3");
   });
   test("a `let` binder is the iteration's own: writing it never moves the loop (§49.3.5, runtime)", async () => {
-    const src = fnProg(`        let c = 0;\n        for (let i of 0..4) {\n            i = i + 10;\n            c = c + 1;\n        };\n        let s = 0;\n        for (let x of [1, 2]) {\n            x = x * 100;\n            s = s + x;\n        };\n        return c * 1000 + s;`);
+    const src = fnProg(`        let c = 0;\n        for (let i of 0..4) {\n            i = i + 10;\n            c = c + 1;\n        }\n        let s = 0;\n        for (let x of [1, 2]) {\n            x = x * 100;\n            s = s + x;\n        }\n        return c * 1000 + s;`);
     await load(src);
     expect($("#o").textContent).toBe("4300");
   });
@@ -78,24 +78,24 @@ describe("the four heads — statements, compiled and run", () => {
     expect($("#o").textContent).toBe("57");
   });
   test("`for (init; cond; step)`: `continue` runs the step (runtime)", async () => {
-    const src = fnProg(`        let s = 0;\n        for (let i = 0; i < 6; i = i + 1) {\n            if (i == 2) { continue; }\n            s = s + i;\n        };\n        let a = 0;\n        let b = 0;\n        for (a = 1, b = 10; a < 4; a = a + 1, b = b - 1) { s = s + 0; }\n        return s * 100 + a * 10 + b;`);
+    const src = fnProg(`        let s = 0;\n        for (let i = 0; i < 6; i = i + 1) {\n            if (i == 2) { continue; }\n            s = s + i;\n        }\n        let a = 0;\n        let b = 0;\n        for (a = 1, b = 10; a < 4; a = a + 1, b = b - 1) { s = s + 0; }\n        return s * 100 + a * 10 + b;`);
     await load(src);
     expect($("#o").textContent).toBe("1347");
   });
   test("`for { … }` and `for (;;)` loop until a `break` (runtime)", async () => {
-    const src = fnProg(`        let n = 0;\n        for {\n            n = n + 1;\n            if (n == 3) { break; }\n        };\n        for (;;) {\n            n = n + 10;\n            if (n > 40) { break; }\n        };\n        return n;`);
+    const src = fnProg(`        let n = 0;\n        for {\n            n = n + 1;\n            if (n == 3) { break; }\n        }\n        for (;;) {\n            n = n + 10;\n            if (n > 40) { break; }\n        }\n        return n;`);
     await load(src);
     expect($("#o").textContent).toBe("43");
   });
   test("labels: `break outer` leaves both loops, `continue outer` skips to the outer's next iteration (runtime)", async () => {
-    const src = fnProg(`        let s = 0;\n        outer: for (r of 0..3) {\n            for (c of 0..3) {\n                if (c == 1) { continue outer; }\n                s = s + 1;\n            }\n        };\n        let t = 0;\n        rows: for (r of 0..5) {\n            for (c of 0..5) {\n                if (r * c == 6) { break rows; }\n                t = t + 1;\n            }\n        };\n        return s * 100 + t;`);
+    const src = fnProg(`        let s = 0;\n        outer: for (r of 0..3) {\n            for (c of 0..3) {\n                if (c == 1) { continue outer; }\n                s = s + 1;\n            }\n        }\n        let t = 0;\n        rows: for (r of 0..5) {\n            for (c of 0..5) {\n                if (r * c == 6) { break rows; }\n                t = t + 1;\n            }\n        }\n        return s * 100 + t;`);
     await load(src);
     expect($("#o").textContent).toBe("313");
   });
   test("a forever loop with no `break` ends its block: no fall-off is reported after it", () => {
-    expect(fnCodes(`        let n = 0;\n        for {\n            n = n + 1;\n            if (n > 3) { return n; }\n        };`)).toEqual([]);
+    expect(fnCodes(`        let n = 0;\n        for {\n            n = n + 1;\n            if (n > 3) { return n; }\n        }`)).toEqual([]);
     // with a `break` it may complete: the missing return is reported
-    expect(fnCodes(`        let n = 0;\n        for {\n            n = n + 1;\n            if (n > 3) { break; }\n        };`)).toEqual(["E-TYPE-043"]);
+    expect(fnCodes(`        let n = 0;\n        for {\n            n = n + 1;\n            if (n > 3) { break }\n        }`)).toEqual(["E-TYPE-043"]);
   });
   test("a string iterates by code point (runtime)", async () => {
     const src = fnProg(`        let n = 0;\n        for (ch of "a😀b") { n = n + 1; }\n        return n;`);
@@ -110,7 +110,7 @@ describe("the four heads — statements, compiled and run", () => {
     expect($("#t").textContent).toBe("12");
   });
   test("the emitted JavaScript reads as the loop it is", () => {
-    const out = js(fnProg(`        let s = 0;\n        for (y of [1, 2]) { s = s + y; }\n        for (i of 0..=2) { s = s + i; }\n        for (s < 100) { s = s * 2; }\n        for (let j = 0; j < 2; j = j + 1) { s = s + j; }\n        outer: for {\n            for (q of 0..2) { if (q == 1) { break outer; } }\n        };\n        return s;`));
+    const out = js(fnProg(`        let s = 0;\n        for (y of [1, 2]) { s = s + y; }\n        for (i of 0..=2) { s = s + i; }\n        for (s < 100) { s = s * 2; }\n        for (let j = 0; j < 2; j = j + 1) { s = s + j; }\n        outer: for {\n            for (q of 0..2) { if (q == 1) { break outer; } }\n        }\n        return s;`));
     expect(out).toContain("for (const y of [1, 2]) {");
     expect(out).toContain("for (let i = 0, end = 2; i <= end; i = i + 1) {");
     expect(out).toContain("while (s < 100) {");
@@ -274,7 +274,7 @@ describe("review fixes (s469-boot-loops-1 adversarial review)", () => {
     expect(codes(fnProg(`        for (true q) { }\n        return 1;`))).toEqual(["E-PARSE-EXPECTED"]);
   });
   test("HIGH 1: node ids are not reused after the head's error (no two expression nodes share an id)", () => {
-    const f = mods.parse.parseFile("t.scrml", fnProg(`        let c = 0;\n        for (c < 3 c) { c = c + 1; }\n        return c;`), 0);
+    const f = mods.parse.parseFile("t.scrml", fnProg(`        let c = 0\n        for (c < 3 c) { c = c + 1 }\n        return c`), 0);
     const ids = [];
     const walk = (x) => {
       if (x && typeof x === "object") {
@@ -328,7 +328,7 @@ describe("review round 3 (s469-boot-loops-1 delta review)", () => {
     // count, and no longer the 18 the round-2 recovery produced.
     const ifCount = count(fnProg(`        let c = 0;\n        if (c < 3 { c = c + 1; }\n        return c;`));
     for (const head of ["c < 3", "x of [1, 2]", "let i = 0; i < 2; i = i + 1"]) {
-      const r = run(fnProg(`        let c = 0;\n        for (${head} { c = c + 1 }\n        return c;`));
+      const r = run(fnProg(`        let c = 0;\n        for (${head} { c = c + 1; }\n        return c`));
       expect([head, r.diags[0].code, r.diags[0].message.includes("found `{`")]).toEqual([head, "E-PARSE-EXPECTED", true]);
       expect([head, r.diags.length <= ifCount]).toEqual([head, true]);
     }

@@ -5,7 +5,7 @@
     type User:struct = { name: string }
     function find(pw: string) -> User | not {
         const u: User = { name: "bryan" };
-        if (pw == "hunter2") return u;
+        if (pw == "hunter2") return u
     }
     function attempt(pw: string) -> string {
         let m: string = "denied";

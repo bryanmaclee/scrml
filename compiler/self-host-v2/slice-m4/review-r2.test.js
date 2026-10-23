@@ -37,7 +37,7 @@ describe("item 1 — O19 on a CHILD field (own value AND attributes) is refused,
   });
 });
 
-const seq = (t, b) => `<program>\n <xs:${t}=([])/>\n function f() { ${b} }\n <main><p>x</p></main>\n</program>\n`;
+const seq = (t, b) => `<program>\n <xs:${t}=([])/>\n function f() { ${b}; }\n <main><p>x</p></main>\n</program>\n`;
 
 describe("item 2 — shrinking a FIXED-length sequence is E-WRITE-INVARIANT (F7's mirror)", () => {
   test("pop / shift / filter on a type without `free` → E-WRITE-INVARIANT", () => {

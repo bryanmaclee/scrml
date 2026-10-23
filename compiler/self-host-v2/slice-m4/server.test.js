@@ -41,11 +41,11 @@ const v = (x) => (x && typeof x === "object" ? x.variant : x);
 const SQ = "?" + "{";   // the sigil, for building sources in JS strings
 
 const fnQ = (name, sql, mode = "get", params = "id: int", ret = "") =>
-  `    function ${name}(${params})${ret} {\n        const r = ${SQ}\`${sql}\`}.${mode}()\n        return 1;\n    }`;
+  `    function ${name}(${params})${ret} {\n        const r = ${SQ}\`${sql}\`}.${mode}();\n        return 1;\n    }`;
 
 describe("§8.1 / §44.8 — parsing `?{}`", () => {
   test("a query with bound values parses: literal runs and values, `${}` never text", () => {
-    const r = run(P(DB, `    function f(id: int, n: string) {\n        ${SQ}\`UPDATE t SET name = \${n} WHERE id = \${id}\`}.run()\n    }`));
+    const r = run(P(DB, `    function f(id: int, n: string) {\n        ${SQ}\`UPDATE t SET name = \${n} WHERE id = \${id}\`}.run();\n    }`));
     const fn = r.asts[0].items[0].k.data.p.items.find((it) => v(it.k) === "FnItem").k.data.f;
     const sql = fn.body.stmts[0].k.data.e.k.data.q;
     expect(sql.chunks).toEqual(["UPDATE t SET name = ", " WHERE id = ", ""]);
@@ -56,7 +56,7 @@ describe("§8.1 / §44.8 — parsing `?{}`", () => {
 
   test("the chain: `.nobatch()` in any position, `.all()` / `.get()` / `.run()`, bare = all", () => {
     const parse = (chain) => {
-      const r = run(P(DB, `    function f() {\n        const x = ${SQ}\`SELECT a FROM t\`}${chain}\n    }`));
+      const r = run(P(DB, `    function f() {\n        const x = ${SQ}\`SELECT a FROM t\`}${chain};\n    }`));
       const fn = r.asts[0].items[0].k.data.p.items.find((it) => v(it.k) === "FnItem").k.data.f;
       return fn.body.stmts[0].k.data.init.k.data.q;
     };
@@ -69,7 +69,7 @@ describe("§8.1 / §44.8 — parsing `?{}`", () => {
   });
 
   test("a brace or a backtick inside a SQL string does not end the block (the bracket-matched scanner)", () => {
-    expect(codes(P(DB, `    function f() {\n        ${SQ}\`INSERT INTO t (a) VALUES ('}{ \\\`')\`}.run()\n    }`))).toEqual(["E-ERROR-002"]);
+    expect(codes(P(DB, `    function f() {\n        ${SQ}\`INSERT INTO t (a) VALUES ('}{ \\\`')\`}.run();\n    }`))).toEqual(["E-ERROR-002"]);
   });
 
   test("E-SQL-008 — an unterminated template, reported at the `?{`", () => {
@@ -103,7 +103,7 @@ describe("§8.1 / §44.8 — parsing `?{}`", () => {
   });
 
   test("`?{` is the sigil, never a ternary's `?`: a statement after a call on the previous line", () => {
-    expect(codes(P(DB, `    fn g() -> int { return 1; }\n    function f() {\n        g();\n        ${SQ}\`DELETE FROM t\`}.run()\n    }`))).toEqual(["E-ERROR-002"]);
+    expect(codes(P(DB, `    fn g() -> int { return 1; }\n    function f() {\n        g();\n        ${SQ}\`DELETE FROM t\`}.run();\n    }`))).toEqual(["E-ERROR-002"]);
   });
 });
 
@@ -113,7 +113,7 @@ describe("S451 R11 — `?{}` is failable everywhere; s451 Ue — the handling fo
   });
 
   test("a `!{}` handler on the query handles it (§19.8.3 item 1): clean — and lowered as an Attempt over the query", () => {
-    const src = P(DB, `    function f(id: int) {\n        const r = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get() !{ _ :> not }\n    }`);
+    const src = P(DB, `    function f(id: int) {\n        const r = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get() !{ _ :> not };\n    }`);
     expect(codes(src)).toEqual([]);
     const sus = run(src).core.server[0].body.stmts[0];
     expect(v(sus)).toBe("Suspend");
@@ -129,7 +129,7 @@ describe("S451 R11 — `?{}` is failable everywhere; s451 Ue — the handling fo
   });
 
   test("a `!` function: a query inside it propagates (§19.8.2) — not E-ERROR-002; `! SqlError` is compatible", () => {
-    const src = P(DB, `    function f(id: int)! -> SqlError {\n        ${SQ}\`DELETE FROM t WHERE id = \${id}\`}.run()\n    }`);
+    const src = P(DB, `    function f(id: int)! -> SqlError {\n        ${SQ}\`DELETE FROM t WHERE id = \${id}\`}.run();\n    }`);
     expect(codes(src)).toEqual([]);
   });
 
@@ -140,13 +140,13 @@ describe("S451 R11 — `?{}` is failable everywhere; s451 Ue — the handling fo
 
 describe("§8.1.1 / §44.2 — the database", () => {
   test("no `db=` anywhere → E-SQL-004 (mirror: server-db/sql-missing-db-e-sql-004-neg)", () => {
-    const src = P("", `    function getUsers() {\n        return ${SQ}\`SELECT id, name FROM users\`}.all()\n    }`, `        <button onclick=getUsers()>Load users</button>`);
+    const src = P("", `    function getUsers() {\n        return ${SQ}\`SELECT id, name FROM users\`}.all();\n    }`, `        <button onclick=getUsers()>Load users</button>`);
     expect(codes(src)).toContain("E-SQL-004");
     expect(codes(src)).not.toContain("E-SQL-009");
   });
 
   test("a configured `db=` → no E-SQL-004 (mirror: server-db/sql-configured-db-no-e-sql-004)", () => {
-    const src = P(` db="sqlite:./app.db"`, `    function getUsers() {\n        return ${SQ}\`SELECT id, name FROM users\`}.all()\n    }`);
+    const src = P(` db="sqlite:./app.db"`, `    function getUsers() {\n        return ${SQ}\`SELECT id, name FROM users\`}.all();\n    }`);
     expect(codes(src)).toEqual(["E-ERROR-002"]);
   });
 
@@ -168,7 +168,7 @@ describe("§8.1.1 / §44.2 — the database", () => {
   }
 
   test("the Db: driver, target (prefix removed), declaring file; owner iff a query here creates a table (§8.1.1 Ownership)", () => {
-    const r = run(P(` db="sqlite:./app.db"`, `    function init() {\n        ${SQ}\`CREATE TABLE IF NOT EXISTS t (id integer primary key)\`}.run()\n    }`));
+    const r = run(P(` db="sqlite:./app.db"`, `    function init() {\n        ${SQ}\`CREATE TABLE IF NOT EXISTS t (id integer primary key)\`}.run();\n    }`));
     const [db] = r.typed.tables.server.dbs;
     expect(v(db.driver)).toBe("Sqlite");
     expect(db.target).toBe("./app.db");
@@ -182,7 +182,7 @@ describe("§8.1.1 / §44.2 — the database", () => {
   });
 
   test("a TEMP table does not make the file an owner (§8.1.1)", () => {
-    const r = run(P(DB, `    function init() {\n        ${SQ}\`CREATE TEMP TABLE scratch (a)\`}.run()\n    }`));
+    const r = run(P(DB, `    function init() {\n        ${SQ}\`CREATE TEMP TABLE scratch (a)\`}.run();\n    }`));
     expect(r.typed.tables.server.dbs[0].owner).toBe(false);
   });
 });
@@ -203,7 +203,7 @@ describe("§12 — placement (Client / Server / Ambient; Split detected and refu
   });
 
   test("a query + a reactive write → Split (§19.9.5) — refused, naming U1d", () => {
-    const src = P(DB, `    let <n:int=0/>\n    function loadAndSet() {\n        const rows = ${SQ}\`SELECT id FROM items\`}.all()\n        @n = 1;\n    }`);
+    const src = P(DB, `    let <n:int=0/>\n    function loadAndSet() {\n        const rows = ${SQ}\`SELECT id FROM items\`}.all();\n        @n = 1;\n    }`);
     expect(placeOf(src, "loadAndSet")).toBe("Split");
     const d = run(src).diags.filter((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED");
     expect(d.length).toBe(1);
@@ -222,13 +222,13 @@ describe("§12 — placement (Client / Server / Ambient; Split detected and refu
 
 describe("§6.6.9 / §12 — a wholly-server body touches no cell", () => {
   test("E-REACTIVE-003: a server function reads a cell (once per cell)", () => {
-    const src = P(DB, `    let <n:int=0/>\n    function save() {\n        ${SQ}\`INSERT INTO t (a) VALUES (\${@n})\`}.run()\n        ${SQ}\`INSERT INTO t (b) VALUES (\${@n})\`}.run()\n    }`);
+    const src = P(DB, `    let <n:int=0/>\n    function save() {\n        ${SQ}\`INSERT INTO t (a) VALUES (\${@n})\`}.run();\n        ${SQ}\`INSERT INTO t (b) VALUES (\${@n})\`}.run();\n    }`);
     expect(sorted(src)).toEqual(["E-ERROR-002", "E-ERROR-002", "E-REACTIVE-003"]);
     expect(diag(src, "E-REACTIVE-003").message).toContain("@n");
   });
 
   test("twin: the value passed as an argument is clean of E-REACTIVE-003", () => {
-    expect(codes(P(DB, `    let <n:int=0/>\n    function save(total: int) {\n        ${SQ}\`INSERT INTO t (a) VALUES (\${total})\`}.run()\n    }`))).toEqual(["E-ERROR-002"]);
+    expect(codes(P(DB, `    let <n:int=0/>\n    function save(total: int) {\n        ${SQ}\`INSERT INTO t (a) VALUES (\${total})\`}.run();\n    }`))).toEqual(["E-ERROR-002"]);
   });
 
   test("E-RI-002: a `server`-modified function writes a cell (mirror: server-db/server-fn-writes-reactive-cell-pos)", () => {
@@ -248,7 +248,7 @@ describe("§6.6.9 / §12 — a wholly-server body touches no cell", () => {
 
 describe("§12.4 — E-ROUTE-002 / E-ROUTE-001 / E-ROUTE-005", () => {
   test("E-ROUTE-002 (R2): a server function reaches a cell through a callee — the message names the chain and the cell (mirror: server-fn/e-route-002-pos)", () => {
-    const src = P(DB, `    let <n:int=0/>\n    function auditAndFlash(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run()\n        flash();\n    }\n    function flash() {\n        mark();\n    }\n    function mark() {\n        @n = @n + 1;\n    }`);
+    const src = P(DB, `    let <n:int=0/>\n    function auditAndFlash(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run();\n        flash();\n    }\n    function flash() {\n        mark();\n    }\n    function mark() {\n        @n = @n + 1;\n    }`);
     expect(sorted(src)).toEqual(["E-ERROR-002", "E-ROUTE-002"]);
     const m = diag(src, "E-ROUTE-002").message;
     expect(m).toContain("auditAndFlash() → flash() → mark()");
@@ -256,12 +256,12 @@ describe("§12.4 — E-ROUTE-002 / E-ROUTE-001 / E-ROUTE-005", () => {
   });
 
   test("E-ROUTE-002 through a READ, transitively (R2: read OR write)", () => {
-    const src = P(DB, `    let <n:int=0/>\n    function helper() -> int {\n        return @n;\n    }\n    function srv(id: int) -> int {\n        ${SQ}\`DELETE FROM t WHERE id = \${id}\`}.run()\n        return helper();\n    }`);
+    const src = P(DB, `    let <n:int=0/>\n    function helper() -> int {\n        return @n;\n    }\n    function srv(id: int) -> int {\n        ${SQ}\`DELETE FROM t WHERE id = \${id}\`}.run();\n        return helper();\n    }`);
     expect(sorted(src)).toEqual(["E-ERROR-002", "E-ROUTE-002"]);
   });
 
   test("twin (mirror: server-fn/e-route-002-neg): client → server is the allowed direction — no E-ROUTE-002 (s454: the unhandled client call is E-ERROR-002, §19.9.10)", () => {
-    const src = P(DB, `    let <n:int=0/>\n    function refresh(name: string) {\n        @n = 1;\n        auditName(name);\n    }\n    function auditName(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run()\n    }`, `        <button onclick=refresh("hi")>Go</button>`);
+    const src = P(DB, `    let <n:int=0/>\n    function refresh(name: string) {\n        @n = 1;\n        auditName(name);\n    }\n    function auditName(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run();\n    }`, `        <button onclick=refresh("hi")>Go</button>`);
     const c = codes(src);
     expect(c).not.toContain("E-ROUTE-002");
     // one for the query (R11), one for the client call of the server function (§19.9.10)
@@ -270,22 +270,22 @@ describe("§12.4 — E-ROUTE-002 / E-ROUTE-001 / E-ROUTE-005", () => {
   });
 
   test("a pure helper called from a server function is fine (ambient)", () => {
-    expect(codes(P(DB, `    fn twice(x: int) -> int { return x * 2; }\n    function srv(id: int) -> int {\n        ${SQ}\`DELETE FROM t WHERE id = \${id}\`}.run()\n        return twice(id);\n    }`))).toEqual(["E-ERROR-002"]);
+    expect(codes(P(DB, `    fn twice(x: int) -> int { return x * 2; }\n    function srv(id: int) -> int {\n        ${SQ}\`DELETE FROM t WHERE id = \${id}\`}.run();\n        return twice(id);\n    }`))).toEqual(["E-ERROR-002"]);
   });
 
   test("E-ROUTE-001 (R3, an error): a server function calls through a parameter", () => {
-    const src = P(DB, `    function srv(k: int) -> int {\n        ${SQ}\`DELETE FROM t\`}.run()\n        return k(1);\n    }`);
+    const src = P(DB, `    function srv(k: int) -> int {\n        ${SQ}\`DELETE FROM t\`}.run();\n        return k(1)\n    }`);
     expect(codes(src)).toContain("E-ROUTE-001");
   });
 
   test("E-ROUTE-005: one body with a `?{}` AND a DOM global (mirror: server-fn/e-route-005-pos) — the one report for `document`", () => {
-    const src = P(DB, `    function saveAndPaint(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run()\n        document.title = name;\n    }`);
+    const src = P(DB, `    function saveAndPaint(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run();\n        document.title = name;\n    }`);
     expect(sorted(src)).toEqual(["E-ERROR-002", "E-ROUTE-005"]);
     expect(codes(src)).not.toContain("E-ROUTE-002");
   });
 
   test("twin (mirror: server-fn/e-route-005-neg): the concerns split — no E-ROUTE-005, no E-ROUTE-002", () => {
-    const src = P(DB, `    function persist(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run()\n    }\n    fn other(x: int) -> int { return x; }`);
+    const src = P(DB, `    function persist(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run();\n    }\n    fn other(x: int) -> int { return x; }`);
     const c = codes(src);
     expect(c).not.toContain("E-ROUTE-005");
     expect(c).not.toContain("E-ROUTE-002");
@@ -374,7 +374,7 @@ describe("refusals at the edge of U1a — each names the slice that lifts it", (
   });
 
   test("a `?{}` in an imported module (a module-with-db-context, §44.7.1) is refused", () => {
-    const lib = { path: "lib.scrml", src: `\${\n    export function load(id: int) -> int {\n        const r = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get()\n        return 1;\n    }\n}\n` };
+    const lib = { path: "lib.scrml", src: `\${\n    export function load(id: int) -> int {\n        const r = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get();\n        return 1;\n    }\n}\n` };
     const app = { path: "app.scrml", src: P(DB, `    import { load } from "./lib.scrml";`) };
     const c = frontEnd(mods, [lib, app]).diags.map((d) => d.code);
     expect(c).toContain("E-BOOTSTRAP-UNSUPPORTED");
@@ -461,7 +461,7 @@ describe("S239 review fix round — the kind scan cannot be talked into SqlSelec
     expect(kind("SELECT `nextval`('s')")).toBe(W);
   });
   test("through the front end too (the PA's reproduction)", () => {
-    const r = run(P(DB, `    function f() {\n        const x = ${SQ}\`SELECT "nextval"('s')\`}.get()\n    }`));
+    const r = run(P(DB, `    function f() {\n        const x = ${SQ}\`SELECT "nextval"('s')\`}.get();\n    }`));
     expect(v(r.typed.tables.server.sqls[0].kind)).toBe(W);
   });
   // (2) whitespace outside the scanner's whitelist
@@ -521,7 +521,7 @@ describe("S239 review fix round — the kind scan cannot be talked into SqlSelec
 
 describe("the lowered query in Core (s451 Ue: handled in the source; s468 U1c: a Suspend's `on`, its Attempt over the outcome)", () => {
   test("a ServerFn holds the query as a Suspend's `on`: runs, DEDUPED values (§8.2), slots, mode, facts, db", () => {
-    const r = run(P(DB, `    function find(id: int) {\n        const row = ${SQ}\`SELECT * FROM activity WHERE created_by = \${id} OR updated_by = \${id}\`}.get() !{ _ :> not }\n    }`));
+    const r = run(P(DB, `    function find(id: int) {\n        const row = ${SQ}\`SELECT * FROM activity WHERE created_by = \${id} OR updated_by = \${id}\`}.get() !{ _ :> not };\n    }`));
     const core = lowerClean(r);
     expect(core.server.map((s) => s.sym.hint)).toEqual(["find"]);
     const q = attemptQuery(core.server[0].body.stmts[0]);
@@ -535,14 +535,14 @@ describe("the lowered query in Core (s451 Ue: handled in the source; s468 U1c: a
   });
 
   test("distinct values keep distinct slots, in first-appearance order", () => {
-    const r = run(P(DB, `    function find(a: int, b: int) {\n        ${SQ}\`UPDATE t SET x = \${b} WHERE id = \${a} AND y = \${b}\`}.run() !{ _ :> not }\n    }`));
+    const r = run(P(DB, `    function find(a: int, b: int) {\n        ${SQ}\`UPDATE t SET x = \${b} WHERE id = \${a} AND y = \${b}\`}.run() !{ _ :> not };\n    }`));
     const q = attemptQuery(lowerClean(r).server[0].body.stmts[0]);
     expect(q.params.map((p) => p.data.sym.hint)).toEqual(["b", "a"]);
     expect(q.slots).toEqual([0, 1, 0]);
   });
 
   test("s454: the printer prints the client artifact — no SQL text reaches it", () => {
-    const core = lowerClean(run(P(DB, `    function f() -> int {\n        const r = ${SQ}\`SELECT a FROM t\`}.get() !{ _ :> not }\n        return 1;\n    }`)));
+    const core = lowerClean(run(P(DB, `    function f() -> int {\n        const r = ${SQ}\`SELECT a FROM t\`}.get() !{ _ :> not };\n        return 1;\n    }`)));
     const out = mods.print.printProgram(core, "t.client.js", "scrml-runtime.js");
     expect(out.refused).toEqual([]);
     expect(out.js).not.toContain("SELECT");
@@ -551,7 +551,7 @@ describe("the lowered query in Core (s451 Ue: handled in the source; s468 U1c: a
 });
 
 describe("check — the server boundary in Core (C-SQL1, C-S1..C-S4)", () => {
-  const base = () => lowerClean(run(P(DB, `    let <n:int=0/>\n    function find(id: int) -> int {\n        const row = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get() !{ _ :> not }\n        return 1;\n    }\n    function cli() {\n        @n = 2;\n    }`)));
+  const base = () => lowerClean(run(P(DB, `    let <n:int=0/>\n    function find(id: int) -> int {\n        const row = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get() !{ _ :> not };\n        return 1;\n    }\n    function cli() {\n        @n = 2;\n    }`)));
   const issues = (core, tag) => mods.check.checkCore(core).filter((s) => s.startsWith(tag));
 
   test("the lowered program is well-formed", () => {

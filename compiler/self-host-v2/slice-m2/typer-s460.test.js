@@ -100,7 +100,7 @@ describe("S460 NEW — a condition whose type the compiler cannot resolve is E-C
     expect(cs).toContain("E-COND-NOT-BOOLEAN");
   });
   test("a value from the SQL boundary (no row type in the bootstrap, §42.9) — and its explicit twin is legal", () => {
-    const fn = (cond) => `<program db="./app.db">\n    function f() -> int {\n        const r = ${SQ}\`SELECT a FROM t\`}.get() !{ _ :> not }\n        if (${cond}) { return 1 }\n        return 0;\n    }\n    <main><p>x</p></main>\n</program>\n`;
+    const fn = (cond) => `<program db="./app.db">\n    function f() -> int {\n        const r = ${SQ}\`SELECT a FROM t\`}.get() !{ _ :> not };\n        if (${cond}) { return 1; }\n        return 0;\n    }\n    <main><p>x</p></main>\n</program>\n`;
     expect(run(fn("r")).diags.map((d) => d.code)).toEqual(["E-COND-NOT-BOOLEAN"]);
     expect(run(fn("r is given")).diags.map((d) => d.code)).toEqual([]);
   });
@@ -173,14 +173,14 @@ describe("S460 — `x is given` / `x is not`: the explicit pair (parsed, typed `
     expect(codes(O, "<p if=(@o.v is given)>${@o.v + \"!\"}</p>")).toEqual([]);
   });
   test("twins — no narrowing where the test does not prove presence", () => {
-    expect(codes(O + "    function f() { if (@o.n is not) { @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(codes(O + "    function f() { if (@o.n is given || @b) { @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(codes(O + "    function f() { if (@o.n is not) { @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(codes(O + "    function f() { if (@o.n is given || @b) { @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("a write drops the narrowing — directly, and inside a NESTED block (the join, r2 F1 / F3)", () => {
-    expect(codes(O + "    function f() { if (@o.n is given) { @o = { v: not, n: not, f: not };\n @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    expect(codes(O + "    function f() { if (@o.n is given) { if (@b) { @o = { v: not, n: not, f: not }; }\n @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(codes(O + "    function f() { if (@o.n is given) { @o = { v: not, n: not, f: not };\n @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(codes(O + "    function f() { if (@o.n is given) { if (@b) { @o = { v: not, n: not, f: not } }\n @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
     // twin: a nested block that writes something else keeps it
-    expect(codes(O + "    function f() { if (@o.n is given) { if (@b) { @m = 2; }\n @m = @o.n + 1; } }")).toEqual([]);
+    expect(codes(O + "    function f() { if (@o.n is given) { if (@b) { @m = 2 }\n @m = @o.n + 1 } }")).toEqual([]);
   });
   test("a newline before `is` does not continue the line (§7.2.2)", () => {
     expect(codes(O + "    function f() { const q: bool = @o.n;\n        is; given }").some((c) => c.startsWith("E-PARSE-"))).toBe(true);
@@ -206,7 +206,7 @@ describe("S460 — `!` / `&&` / `||` take booleans only: a bare `T | not` is a p
 // condition; operands OUTSIDE a condition stay provable-or-silent (S440 Q2). SPEC §42.4 statement 10.
 describe("S460 F2 — an unresolved operand of `!` / `&&` / `||` in a condition is E-COND-NOT-BOOLEAN", () => {
   const G = "    function g() { return 1; }\n    let <b:bool=false/>\n    let <c:bool=false/>\n    let <m:int=0/>\n";
-  const inIf = (cond) => codes(G + `    function f() { if (${cond}) { @m = 1 } }`);
+  const inIf = (cond) => codes(G + `    function f() { if (${cond}) { @m = 1; } }`);
   test("fires — `!g()`, `g() && @b`, `g() || false` in an `if`", () => {
     expect(inIf("!g()")).toEqual(["E-COND-NOT-BOOLEAN"]);
     expect(inIf("g() && @b")).toEqual(["E-COND-NOT-BOOLEAN"]);
@@ -295,9 +295,9 @@ describe("S460 at runtime — `is given` / `is not` lower to absence checks, nev
 // position (an initializer, a call argument) stays a value: silent (S440 Q2).
 describe("S460 N1 — ternary arms of the condition's value are inside the condition", () => {
   const G = "    function g() { return 1; }\n    function h(x: bool) -> bool { return x; }\n    let <b:bool=false/>\n    let <c:bool=false/>\n    let <m:int=0/>\n";
-  const inIf = (cond) => diags(G + `    function f() { if (${cond}) { @m = 1 } }`);
+  const inIf = (cond) => diags(G + `    function f() { if (${cond}) { @m = 1; } }`);
   const blamed = (cond) => {
-    const src = prog(G + `    function f() { if (${cond}) { @m = 1 } }`);
+    const src = prog(G + `    function f() { if (${cond}) { @m = 1; } }`);
     return run(src).diags.map((d) => [d.code, src.slice(d.span.start, d.span.end)]);
   };
   test("fires — `@b ? !g() : @c` and `@b ? (g() && @c) : @c` (were clean), blamed at `g()`", () => {
@@ -344,7 +344,7 @@ describe("S460 N1 — ternary arms of the condition's value are inside the condi
     // each arm alone would be a legal condition value; their join is unresolved, and N1 admits nothing new
     const C = O + "    let <c:bool=false/>\n";
     for (const cond of ["@b ? @o.n : @c", "@b ? @c : @o.n"]) {
-      const src = prog(C + `    function f() { if (${cond}) { @m = 1 } }`);
+      const src = prog(C + `    function f() { if (${cond}) { @m = 1; } }`);
       const r = run(src);
       expect(r.diags.map((d) => [d.code, src.slice(d.span.start, d.span.end)])).toEqual([["E-COND-NOT-BOOLEAN", cond]]);
       expect(r.diags[0].message).toContain(UNRESOLVED_MSG);
@@ -352,7 +352,7 @@ describe("S460 N1 — ternary arms of the condition's value are inside the condi
     }
     expect(codes(C, "<p if=(@b ? @o.n : @c)>a</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
     // as an operand of `&&`: the `int | not` arm is not a boolean (statement 7)
-    expect(codes(C + "    function f() { if ((@b ? @o.n : @c) && @c) { @m = 1 } }")).not.toEqual([]);
+    expect(codes(C + "    function f() { if ((@b ? @o.n : @c) && @c) { @m = 1; } }")).not.toEqual([]);
   });
 });
 

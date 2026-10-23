@@ -43,7 +43,7 @@ const fnNamed = (core, name) => core.server.find((s) => s.sym.hint === name) ?? 
 // 1. The §13 gate (S467): the server half awaits BY CONSTRUCTION
 // =============================================================================
 describe("§13 gate — a server wait is a Core Suspend; `await` is printed there and nowhere else", () => {
-  const SRC = program(`        if (!check(pass, row.pw)) return "REJECTED";\n        return "WELCOME";`);
+  const SRC = program(`        if (!check(pass, row.pw)) return "REJECTED";\n        return "WELCOME"`);
 
   test("a `?{}` in a server body is `Suspend(o, Query(q), [Attempt(FSettled(o)) …])` — Suspend waits, Attempt inspects", () => {
     const { core } = compile(SRC);
@@ -98,7 +98,7 @@ describe("§13 gate — a server wait is a Core Suspend; `await` is printed ther
   });
 
   test("the transitive fact: a Trigger-5 helper that calls a waiting server function waits; one that does not, does not", () => {
-    const src = program(`        if (!w1(pass, row.pw)) return "REJECTED";\n        if (plain(name) != "bob") return "REJECTED";\n        return "WELCOME";`,
+    const src = program(`        if (!w1(pass, row.pw)) return "REJECTED";\n        if (plain(name) != "bob") return "REJECTED";\n        return "WELCOME"`,
       `    function w1(p: string, h: string) -> boolean {\n        return check(p, h);\n    }\n    function plain(n: string) -> string {\n        return n;\n    }`);
     const { core } = compile(src);
     expect(check(core)).toEqual([]);
@@ -111,7 +111,7 @@ describe("§13 gate — a server wait is a Core Suspend; `await` is printed ther
 // 2. The bite: force the waits fact false / drop the Suspend — RED
 // =============================================================================
 describe("§13 gate bite — a waiting call that is not a Suspend is RED at checkCore, and RED at run time", () => {
-  const SRC = program(`        if (!check(pass, row.pw)) return "REJECTED";\n        return "WELCOME";`);
+  const SRC = program(`        if (!check(pass, row.pw)) return "REJECTED";\n        return "WELCOME"`);
 
   // Rewrite f's `Suspend(b, Call(check), then)` into the plain `then` with the
   // call in place of `b` — what a printer that "forgot" the await would print.
@@ -230,14 +230,14 @@ describe("the route — every path answers; nothing runs on a refused request", 
     let <n:int=0/>
     type Cnt:struct = { n: int }
     function lookup(id: int, mode: int)! E {
-        const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM t WHERE id = \${id}\`}.get() !{ _ :> { return 0 } }
+        const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM t WHERE id = \${id}\`}.get() !{ _ :> { return 0; } };
         if (mode == 1) fail .NotFoundUser;
         if (mode == 2) fail .Invalid("bad mode");
         if (mode == 3) fail .Boom;
         return id + 1;
     }
     function touch(id: int) {
-        ${SQ}\`UPDATE t SET id = id WHERE id = \${id}\`}.run() !{ _ :> { return } }
+        ${SQ}\`UPDATE t SET id = id WHERE id = \${id}\`}.run() !{ _ :> { return; } };
     }`,
     `        <button id="a" onclick={ @n = lookup(1, 0) !{ _ :> return }; }>a</button>
         <button id="b" onclick={ touch(1) !{ .Transport(t) :> return }; }>b</button>`);
@@ -308,7 +308,7 @@ describe("§8.1 — a value interpolated in SQL never appears in the SQL text se
     const at = (sql) => codes(P(`    type Cnt:struct = { n: int }
     let <n:int=0/>
     function q(t: string) -> int {
-        const r: Cnt = ${SQ}\`${sql}\`}.get() !{ _ :> { return 0 } }
+        const r: Cnt = ${SQ}\`${sql}\`}.get() !{ _ :> { return 0; } };
         return r.n;
     }`, `        <button id="go" onclick={ @n = q("a") !{ .Transport(t) :> return }; }>go</button>`));
     expect(at("SELECT COUNT(*) AS n FROM users WHERE name LIKE '%\${t}%'")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
@@ -321,7 +321,7 @@ describe("§8.1 — a value interpolated in SQL never appears in the SQL text se
   const SRC = P(`    let <n:int=0/>
     type Cnt:struct = { n: int }
     function find(name: string, tag: string) -> int {
-        const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM users WHERE name = \${name} OR alias = \${name} OR tag = \${tag}\`}.get() !{ _ :> { return 0 } }
+        const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM users WHERE name = \${name} OR alias = \${name} OR tag = \${tag}\`}.get() !{ _ :> { return 0; } };
         return r.n;
     }`, `        <button id="go" onclick={ @n = find("x", "y") !{ .Transport(t) :> return }; }>go</button>`);
 
@@ -346,12 +346,12 @@ describe("§8.1 — a value interpolated in SQL never appears in the SQL text se
   test("§8.2 — a repeated expression is ONE parameter, evaluated ONCE (a waiting call in a slot runs once)", async () => {
     const src = P(`    let <n:int=0/>
     function stamp(x: string) -> string {
-        ${SQ}\`INSERT INTO log (v) VALUES (\${x})\`}.run() !{ _ :> { return x } }
+        ${SQ}\`INSERT INTO log (v) VALUES (\${x})\`}.run() !{ _ :> { return x; } };
         return x;
     }
     type Cnt:struct = { n: int }
     function twice(a: string) -> int {
-        const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM t WHERE a = \${stamp(a)} OR b = \${stamp(a)}\`}.get() !{ _ :> { return 0 } }
+        const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM t WHERE a = \${stamp(a)} OR b = \${stamp(a)}\`}.get() !{ _ :> { return 0; } };
         return r.n;
     }`, `        <button id="go" onclick={ @n = twice("q") !{ .Transport(t) :> return }; }>go</button>`);
     const r0 = compile(src);
@@ -376,14 +376,14 @@ describe("Trigger 5 is emission — a helper only the server reaches is in serve
     fn shared(x: int) -> int { return x * 2; }
     type Cnt:struct = { n: int }
     function viaParam(name: string) -> int {
-        const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM users WHERE name = \${norm(name)}\`}.get() !{ _ :> { return 0 } }
+        const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM users WHERE name = \${norm(name)}\`}.get() !{ _ :> { return 0; } };
         return shared(r.n);
     }
     function helperOnly(a: int) -> int {
         return a + 1;
     }
     function load(a: int) -> int {
-        const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM users\`}.get() !{ _ :> { return 0 } }
+        const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM users\`}.get() !{ _ :> { return 0; } };
         return helperOnly(r.n + a);
     }`,
     `        <button id="a" onclick={ @n = viaParam("x") !{ .Transport(t) :> return }; }>a</button>
@@ -449,7 +449,7 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     let <uid:int=0/>
     let <name:string=""/>
     function loadOne()! LoadError {
-        const u: User = ${SQ}\`SELECT id, name FROM users\`}.get() !{ _ :> { fail .Db } }
+        const u: User = ${SQ}\`SELECT id, name FROM users\`}.get() !{ _ :> { fail .Db; } };
         return u;
     }
     function load() {
@@ -465,7 +465,7 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     const src = P(`    type Widget:struct = { id: int, label: string }
     <rows:Widget[replace]=([])/>
     function loadAll() -> Widget[] {
-        return ${SQ}\`SELECT id, label FROM widgets\`}.all() !{ _ :> [] }
+        return ${SQ}\`SELECT id, label FROM widgets\`}.all() !{ _ :> [] };
     }`, `        <button id="load" onclick={ @rows = loadAll() !{ .Transport(t) :> return }; }>Load</button>
         <p id="count">\${@rows.length}</p>`);
     const { state } = await endToEnd(src, ["CREATE TABLE widgets (id INTEGER, label TEXT)"], { widgets: [{ id: 1, label: "a" }, { id: 2, label: "b" }, { id: 3, label: "c" }] }, ["#load"]);
@@ -477,7 +477,7 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     const src = P(`    type User:struct = { id: int, name: string }
     <users:User[replace]=([])/>
     function loadUsers() -> User[] {
-        return ${SQ}\`SELECT id, name FROM users\`}.all() !{ _ :> [] }
+        return ${SQ}\`SELECT id, name FROM users\`}.all() !{ _ :> [] };
     }`, `        <button id="load" onclick={ @users = loadUsers() !{ .Transport(t) :> return }; }>Load</button>
         <ul id="list"><each in=@users key=(@.id) as u><li class="row">\${u.name}</li></each></ul>
         <p id="count">Count: \${@users.length}</p>`);
@@ -493,10 +493,10 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     <users:User[replace]=([])/>
     <posts:Post[replace]=([])/>
     function loadUsers() -> User[] {
-        return ${SQ}\`SELECT id, name FROM users\`}.all() !{ _ :> [] }
+        return ${SQ}\`SELECT id, name FROM users\`}.all() !{ _ :> [] };
     }
     function loadPosts() -> Post[] {
-        return ${SQ}\`SELECT id, title FROM posts\`}.all() !{ _ :> [] }
+        return ${SQ}\`SELECT id, title FROM posts\`}.all() !{ _ :> [] };
     }`, `        <button id="lu" onclick={ @users = loadUsers() !{ .Transport(t) :> return }; }>LoadUsers</button>
         <button id="lp" onclick={ @posts = loadPosts() !{ .Transport(t) :> return }; }>LoadPosts</button>
         <p id="uc">\${@users.length}</p>
@@ -512,7 +512,7 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     const src = P(`    type Total:struct = { region: string, total: int }
     <totals:Total[replace]=([])/>
     function regionTotals() -> Total[] {
-        return ${SQ}\`SELECT region, SUM(amount) AS total FROM sales GROUP BY region ORDER BY region\`}.all() !{ _ :> [] }
+        return ${SQ}\`SELECT region, SUM(amount) AS total FROM sales GROUP BY region ORDER BY region\`}.all() !{ _ :> [] };
     }
     function onLoad() {
         @totals = regionTotals() !{ .Transport(t) :> return };
@@ -526,7 +526,7 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     const src = P(`    type Score:struct = { player: string, points: int }
     <top:Score[replace]=([])/>
     function topTwo() -> Score[] {
-        return ${SQ}\`SELECT player, points FROM scores ORDER BY points DESC LIMIT 2\`}.all() !{ _ :> [] }
+        return ${SQ}\`SELECT player, points FROM scores ORDER BY points DESC LIMIT 2\`}.all() !{ _ :> [] };
     }
     function onLoad() {
         @top = topTwo() !{ .Transport(t) :> return };
@@ -540,7 +540,7 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     const src = P(`    type User:struct = { id: int, name: string }
     <admins:User[replace]=([])/>
     function loadByRole(role: string) -> User[] {
-        return ${SQ}\`SELECT id, name FROM users WHERE role = \${role} ORDER BY id\`}.all() !{ _ :> [] }
+        return ${SQ}\`SELECT id, name FROM users WHERE role = \${role} ORDER BY id\`}.all() !{ _ :> [] };
     }`, `        <button id="load" onclick={ @admins = loadByRole("admin") !{ .Transport(t) :> return }; }>Load admins</button>`);
     const { state } = await endToEnd(src, ["CREATE TABLE users (id INTEGER, name TEXT, role TEXT)"],
       { users: [{ id: 1, name: "Alice", role: "admin" }, { id: 2, name: "Bob", role: "user" }, { id: 3, name: "Carol", role: "admin" }] }, ["#load"]);
@@ -551,7 +551,7 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     const src = P(`    type Book:struct = { title: string, author: string }
     <list:Book[replace]=([])/>
     function booksByAuthor(name: string) -> Book[] {
-        return ${SQ}\`SELECT b.title AS title, a.name AS author FROM books b JOIN authors a ON a.id = b.author_id WHERE a.name = \${name} ORDER BY b.id\`}.all() !{ _ :> [] }
+        return ${SQ}\`SELECT b.title AS title, a.name AS author FROM books b JOIN authors a ON a.id = b.author_id WHERE a.name = \${name} ORDER BY b.id\`}.all() !{ _ :> [] };
     }
     function onLoad() {
         @list = booksByAuthor("Ada") !{ .Transport(t) :> return };
@@ -565,7 +565,7 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     const src = P(`    type Item:struct = { id: int, qty: int }
     <updated:Item[replace]=([])/>
     function bump(id: int, by: int) -> Item[] {
-        return ${SQ}\`UPDATE items SET qty = qty + \${by} WHERE id = \${id} RETURNING id, qty\`}.all() !{ _ :> [] }
+        return ${SQ}\`UPDATE items SET qty = qty + \${by} WHERE id = \${id} RETURNING id, qty\`}.all() !{ _ :> [] };
     }
     function onBump() {
         @updated = bump(1, 3) !{ .Transport(t) :> return };
@@ -580,10 +580,10 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     const src = P(`    type Count:struct = { n: int }
     let <remaining:int=-1/>
     function removeTask(id: int) {
-        ${SQ}\`DELETE FROM tasks WHERE id = \${id}\`}.run() !{ _ :> { return } }
+        ${SQ}\`DELETE FROM tasks WHERE id = \${id}\`}.run() !{ _ :> { return; } };
     }
     function countTasks() -> int {
-        const c: Count = ${SQ}\`SELECT COUNT(*) AS n FROM tasks\`}.get() !{ _ :> { return -1 } }
+        const c: Count = ${SQ}\`SELECT COUNT(*) AS n FROM tasks\`}.get() !{ _ :> { return -1; } };
         return c.n;
     }
     function onDelete() {
@@ -604,10 +604,10 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     <inserted:Note[replace]=([])/>
     let <total:int=-1/>
     function addNote(body: string) -> Note[] {
-        return ${SQ}\`INSERT INTO notes (body) VALUES (\${body}) RETURNING id, body\`}.all() !{ _ :> [] }
+        return ${SQ}\`INSERT INTO notes (body) VALUES (\${body}) RETURNING id, body\`}.all() !{ _ :> [] };
     }
     function countNotes() -> int {
-        const c: Count = ${SQ}\`SELECT COUNT(*) AS n FROM notes\`}.get() !{ _ :> { return -1 } }
+        const c: Count = ${SQ}\`SELECT COUNT(*) AS n FROM notes\`}.get() !{ _ :> { return -1; } };
         return c.n;
     }
     function onAdd() {
@@ -626,10 +626,10 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     const src = P(`    type Count:struct = { n: int }
     let <total:int=-1/>
     function tryAdd(email: string) {
-        ${SQ}\`INSERT OR IGNORE INTO members (email) VALUES (\${email})\`}.run() !{ _ :> { return } }
+        ${SQ}\`INSERT OR IGNORE INTO members (email) VALUES (\${email})\`}.run() !{ _ :> { return; } };
     }
     function memberCount() -> int {
-        const c: Count = ${SQ}\`SELECT COUNT(*) AS n FROM members\`}.get() !{ _ :> { return -1 } }
+        const c: Count = ${SQ}\`SELECT COUNT(*) AS n FROM members\`}.get() !{ _ :> { return -1; } };
         return c.n;
     }
     function onAdd() {
@@ -665,7 +665,7 @@ describe("client ↔ server — the first call plants the CSRF cookie and is ret
     const src = P(`    let <n:int=0/>
     type Cnt:struct = { n: int }
     function count() -> int {
-        const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM t\`}.get() !{ _ :> { return -1 } }
+        const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM t\`}.get() !{ _ :> { return -1; } };
         return r.n;
     }`, `        <button id="go" onclick={ @n = count() !{ .Transport(t) :> return }; }>go</button>`);
     globalThis.document.cookie = "scrml_csrf=; Max-Age=0; Path=/";
@@ -689,7 +689,7 @@ describe("client ↔ server — the first call plants the CSRF cookie and is ret
     let <status:string=""/>
     type Cnt:struct = { n: int }
     function save(v: int)! SaveError {
-        const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM t\`}.get() !{ _ :> { fail .Storage } }
+        const r: Cnt = ${SQ}\`SELECT COUNT(*) AS n FROM t\`}.get() !{ _ :> { fail .Storage; } };
         if (r.n != v) fail .Conflict(r.n);
         return r.n;
     }
@@ -711,7 +711,7 @@ describe("client ↔ server — the first call plants the CSRF cookie and is ret
     fn noop(x: int) -> int { return x; }
     function work() -> int {
         defer noop(1);
-        ${SQ}\`INSERT INTO log (v) VALUES ('body')\`}.run() !{ _ :> { return -1 } }
+        ${SQ}\`INSERT INTO log (v) VALUES ('body')\`}.run() !{ _ :> { return -1; } };
         return 1;
     }`, `        <button id="go" onclick={ @n = work() !{ .Transport(t) :> return }; }>go</button>`);
     const r0 = compile(src);

@@ -127,7 +127,7 @@ describe("dpa-073 F2 — comma-separated arm lists", () => {
   });
 
   test("newline-separated arms are still read (dpa-073 F5 — enforcement follows the codemod) (runtime)", async () => {
-    const src = P(fn("go", `        @out = load("x") !{\n            .NotFound(m) :> join2("nf", m),\n            .Timeout :> "to",\n        };`), ["go"]);
+    const src = P(fn("go", `        @out = load("x") !{\n            .NotFound(m) :> join2("nf", m),\n            .Timeout :> "to"\n        };`), ["go"]);
     await load(src);
     click(btn("go"));
     expect($("#out").textContent).toBe("nf:x");
@@ -148,7 +148,7 @@ describe("dpa-073 F2 — comma-separated arm lists", () => {
   test("a trailing `,` on a newline list is mixed; a newline list with no `,` and a comma list with no trailing `,` are not", () => {
     const mixed = `        @out = load("x") !{\n            .NotFound(m) :> "nf",\n            .Timeout :> "to",\n        };`;
     expect(codes(P(fn("f", mixed)))).toEqual(["E-MATCH-ARM-SEPARATOR"]);
-    const commaNoTrail = `        @out = load("x") !{\n            .NotFound(m) :> "nf",\n            .Timeout :> "to",\n        };`;
+    const commaNoTrail = `        @out = load("x") !{\n            .NotFound(m) :> "nf",\n            .Timeout :> "to"\n        }`;
     expect(codes(P(fn("f", commaNoTrail)))).toEqual([]);
     const oneArmTrail = `        @out = load("x") !{ _ :> "w", }`;
     expect(codes(P(fn("f", oneArmTrail)))).toEqual([]);

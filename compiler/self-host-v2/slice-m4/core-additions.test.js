@@ -387,7 +387,7 @@ describe("4b — index places (`@xs[i].f = v`, Core ElemAt)", () => {
   // `int` (`int` enforced, RULED S440 JS-WAT 7(a)). A negative int is not a
   // type error — the SPEC says nothing about it — and stays the runtime refusal.
   test("an index that is not an `int` → E-TYPE-031 (a string param, a string literal, a non-integer, a `number`, an `int | not`)", () => {
-    const at = (params, ix) => P(`    type Row:struct = { let qty: int }\n    <rows:Row[]=([{ qty: 1 }])/>\n    function p(${params}) { @rows[${ix}].qty = 2 }`, `        <p>x</p>`);
+    const at = (params, ix) => P(`    type Row:struct = { let qty: int }\n    <rows:Row[]=([{ qty: 1 }])/>\n    function p(${params}) { @rows[${ix}].qty = 2; }`, `        <p>x</p>`);
     for (const [params, ix] of [["i: string", "i"], ["", '"0"'], ["", "0.5"], ["n: number", "n"], ["m: int | not", "m"], ["", "true"]]) {
       const d = run(at(params, ix)).diags;
       expect(d.map((x) => x.code)).toEqual(["E-TYPE-031"]);

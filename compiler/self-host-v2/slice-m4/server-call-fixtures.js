@@ -16,11 +16,11 @@ export const NOTES = `    type SaveError:enum = {
     let <flag:boolean=false/>
     function saveNote(id: string, text: string, base: int)! SaveError {
         if (text.length > 10000) fail .TooLong(10000);
-        ${SQ}\`UPDATE notes SET body = \${text} WHERE id = \${id}\`}.run() !{ _ :> { fail .Storage } }
+        ${SQ}\`UPDATE notes SET body = \${text} WHERE id = \${id}\`}.run() !{ _ :> { fail .Storage; } };
         return base + 1;
     }
     function wordCount(id: string) -> int {
-        const row = ${SQ}\`SELECT body FROM notes WHERE id = \${id}\`}.get() !{ _ :> not }
+        const row = ${SQ}\`SELECT body FROM notes WHERE id = \${id}\`}.get() !{ _ :> not };
         return 0;
     }`;
 
@@ -30,7 +30,7 @@ export const SAVE = `    function save() {
             .TooLong(n)    :> { @status = "too long"; return; },
             .Storage       :> { @status = "could not store"; return; },
             .Transport(t)  :> { @status = "transport"; return; }
-        }
+        };
         @status = "saved";
     }`;
 

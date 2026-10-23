@@ -3,7 +3,7 @@
     let <wrong:string=""/>
     let <right:string=""/>
     function look(pw: string) {
-        if (pw == "hunter2") return "user";
+        if (pw == "hunter2") return "user"
     }
     function attempt(pw: string) -> string {
         if (look(pw) is not) return "denied";

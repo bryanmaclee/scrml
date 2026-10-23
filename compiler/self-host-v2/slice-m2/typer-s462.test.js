@@ -43,9 +43,9 @@ describe("rule 5 — every member of the set infers, unannotated, with no diagno
     ["a sequence literal of one type", "<r=([1, 2, 3])/>"],
     ["a chain through another inferred cell", "<q=(@b + 1)/>\n    <r=(@q * 2)/>"],
     ["a cell declared later (order does not matter)", "<r=(@later + 1)/>\n    <later=(@b * 3)/>"],
-    ["a call with a declared return", "fn tw(x: int) -> int { return x * 2 }\n    <r=(tw(@b))/>"],
-    ["a call with an inferred-and-proven return (params by annotation)", "function h(y: number) { if (y > 0) { return y } else { return 0 } }\n    <r=(h(@n))/>"],
-    ["a call whose proven return reads a cell", "function g() { return @b + 1 }\n    <r=(g())/>"],
+    ["a call with a declared return", "fn tw(x: int) -> int { return x * 2; }\n    <r=(tw(@b))/>"],
+    ["a call with an inferred-and-proven return (params by annotation)", "function h(y: number) { if (y > 0) { return y; } else { return 0; } }\n    <r=(h(@n))/>"],
+    ["a call whose proven return reads a cell", "function g() { return @b + 1; }\n    <r=(g())/>"],
   ]) {
     test(label, () => { expect(codes(BASE + "    " + decl)).toEqual([]); });
   }
@@ -100,9 +100,9 @@ describe("rule 7 — outside the set is E-DECL-TYPE-NOT-INFERABLE", () => {
     ["`!`", "<r=(!@f)/>"],
     ["`&&`", "<r=(@f && @f)/>"],
     ["`is given`", "<r=(@f is given)/>"],
-    ["a call whose returns differ in type", "function k(b: bool) { if (b) { return 1 } else { return \"x\" } }\n    <r=(k(true))/>"],
-    ["a call returning a shadowed local of another type (fix round 1, F1)", "function g(x: int) { if (@f) { const x: string = \"a\"\n return x; } else { return 1; } }\n    <r=(g(1))/>"],
-    ["a call that is recursive", "function rec(x: int) { if (x > 0) { return rec(x - 1) } else { return 0 } }\n    <r=(rec(2))/>"],
+    ["a call whose returns differ in type", "function k(b: bool) { if (b) { return 1; } else { return \"x\"; } }\n    <r=(k(true))/>"],
+    ["a call returning a shadowed local of another type (fix round 1, F1)", "function g(x: int) { if (@f) { const x: string = \"a\";\n return x; } else { return 1; } }\n    <r=(g(1))/>"],
+    ["a call that is recursive", "function rec(x: int) { if (x > 0) { return rec(x - 1); } else { return 0; } }\n    <r=(rec(2))/>"],
     ["a ternary with arms of two kinds", "<r=(@f ? 1 : \"x\")/>"],
   ]) {
     test(label, () => { expect(codes(S + "    " + decl)).toContain("E-DECL-TYPE-NOT-INFERABLE"); });
@@ -110,7 +110,7 @@ describe("rule 7 — outside the set is E-DECL-TYPE-NOT-INFERABLE", () => {
   // s469 #1471 delta review HIGH-B: a function that returns on some paths and falls off on another is
   // refused where it is declared (E-BOOTSTRAP-UNSUPPORTED) — that report owns it
   test("a call that does not return on every path — the callee is refused (its fall-off would be `undefined`)", () => {
-    expect(codes(S + "    function half(x: int) { if (x > 0) { return 1; } }\n    <r=(half(2))/>")).toContain("E-RETURN-INCOMPLETE");
+    expect(codes(S + "    function half(x: int) { if (x > 0) { return 1 } }\n    <r=(half(2))/>")).toContain("E-RETURN-INCOMPLETE");
   });
   test("`(!0)` is no longer an `int` literal (dd D3) — the typer refuses the `!`, and that report owns it (no cascade)", () => {
     expect(codes("    <r=(!0)/>")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
@@ -258,7 +258,7 @@ describe("rule 10 — an unproven annotation is an error", () => {
     expect(codes(REC + "    <r:bool=(rec(1) || false)/>")).toEqual(["E-DECL-TYPE-UNPROVEN"]);
     expect(codes("    let <a:bool=true/>\n    function g() { return @a && false; }\n    <r=(g())/>\n    <q=(@r ? 1 : 2)/>")).toEqual([]);
     // a provably non-bool operand: the typer's E-OPERATOR-OPERAND-TYPE owns it (no second report)
-    expect(codes("    let <n:int=1/>\n    function g() { return @n || 2; }\n    <r:int=(g())/>")).toEqual(["E-OPERATOR-OPERAND-TYPE", "E-OPERATOR-OPERAND-TYPE"]);
+    expect(codes("    let <n:int=1/>\n    function g() { return @n || 2 }\n    <r:int=(g())/>")).toEqual(["E-OPERATOR-OPERAND-TYPE", "E-OPERATOR-OPERAND-TYPE"]);
   });
   test("fix round 2, N2 — an `as=` handle resolves in its OWNER's scope (the program's), never another declaration's", () => {
     const pre = "<chip:struct>\n    let <label:int=7/>\n</> renders <p>${label}</p>\n<pane:struct>\n    let <label:string=\"c\"/>\n</> renders <div><chip as=w/></div>\n";

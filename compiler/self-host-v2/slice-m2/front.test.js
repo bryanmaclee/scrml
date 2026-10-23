@@ -599,10 +599,10 @@ renders <p class="box">\${a},\${b},\${c}</p>
         return 0;
     }
     function e2${twin ? "W" : ""}() -> int {
-        ${guard ? "if (@log.length < 40) { @h.c = @log.length }" : "@h.c = @log.length"}
+        ${guard ? "if (@log.length < 40) { @h.c = @log.length; }" : "@h.c = @log.length"};
         return 0;
     }
-${twin ? "    function e1() -> int { return 0 }\n    function e2() -> int { return 0 }\n" : ""}    function go() { @n = 1 }
+${twin ? "    function e1() -> int { return 0; }\n    function e2() -> int { return 0; }\n" : ""}    function go() { @n = 1; }
     <main>
         <box as=h title="B"/>
         <p class="e1">\${e1()}</p>
@@ -688,15 +688,15 @@ describe("S440 F-A — a Commit outside a handler batch: no observer sees the ha
   // `twin`: react / watch write nothing; their writing bodies are reactW / watchW (grafted in Core)
   const REACT = (spread, twin) => `    let <n:int=0/>
     function react${twin ? "W" : ""}() -> int {
-        if (@n > 0) { @g = { ...@g, ${spread} } }
+        if (@n > 0) { @g = { ...@g, ${spread} }; }
         return @n;
-    }${twin ? "\n    function react() -> int { return @n }" : ""}`;
+    }${twin ? "\n    function react() -> int { return @n; }" : ""}`;
   const prog = (spread, fns, view, twin = false) => ({
     path: "fa.scrml",
     src: `${GATES}
 <program>
 ${REACT(spread, twin)}
-${twin ? fns.replace("function watch()", "function watchW()") + (fns ? '\n    function watch() -> string { return "w" }' : "") : fns}
+${twin ? fns.replace("function watch()", "function watchW()") + (fns ? '\n    function watch() -> string { return "w"; }' : "") : fns}
     <main>
         <gate as=g title="G"/>
         <p class="r">\${react()}</p>

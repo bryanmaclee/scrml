@@ -410,7 +410,7 @@ describe("C — no check against what failed to parse", () => {
     expect(h).not.toContain("E-CALL-ARITY");
   });
   test("a return type that failed to parse is not resolved (no E-TYPE-UNKNOWN \"unknown type ``\")", () => {
-    expect(inApp("    function g() -> [int;, string;] { };;;;;")).not.toContain("E-TYPE-UNKNOWN");
+    expect(inApp("    function g() -> [int, string] { }")).not.toContain("E-TYPE-UNKNOWN");
   });
 });
 
@@ -484,7 +484,7 @@ describe("G — `<each in=>` literals, row-scoped handles, exclusive arms", () =
 // day nested functions parse. The let / const twin still fires.
 describe("§7.3.3 ruling B1 — a nested function over a parameter", () => {
   test("no E-SCOPE-REDECLARE — `function f(x: int) { function x() { } }`", () => {
-    expect(inApp("    function f(x: int) { function; x(); { }; }")).not.toContain("E-SCOPE-REDECLARE");
+    expect(inApp("    function f(x: int) { function; x(); { } }")).not.toContain("E-SCOPE-REDECLARE");
   });
   test("twin fires — `let x` / `const x` over parameter `x`", () => {
     expect(inApp("    function f(x: int) { let x = 1; }")).toEqual(["E-SCOPE-REDECLARE"]);
@@ -557,21 +557,21 @@ describe("R2-3 — `<each key=…>` is resolved OUTSIDE the row's template (§66
 describe("R2-4 — §7.5.1 position 1: an annotated `let` / `const` initializer", () => {
   const F = (body) => "    let <s:string=\"\"/>\n    function f() { " + body + " }";
   for (const [body, want] of [
-    ["let a: string = 5", ["E-TYPE-031"]],
-    ["let a: bool = \"s\"", ["E-TYPE-031"]],
-    ["let a: boolean = 1", ["E-TYPE-031"]],
-    ["const a: string = true", ["E-TYPE-031"]],
-    ["let a: number = \"s\"", ["E-TYPE-031"]],
-    ["let a: string = not", ["E-TYPE-041"]],
-    ["let x: string = 1\n @s = x", ["E-TYPE-031"]],
+    ["let a: string = 5;", ["E-TYPE-031"]],
+    ["let a: bool = \"s\";", ["E-TYPE-031"]],
+    ["let a: boolean = 1;", ["E-TYPE-031"]],
+    ["const a: string = true;", ["E-TYPE-031"]],
+    ["let a: number = \"s\";", ["E-TYPE-031"]],
+    ["let a: string = not;", ["E-TYPE-041"]],
+    ["let x: string = 1;\n @s = x;", ["E-TYPE-031"]],
   ]) {
     test(`${want.join(", ")} — \`${body.replace(/\n/g, "; ")}\``, () => { expect(inApp(F(body))).toEqual(want); });
   }
   test("twins silent — matching literals; `string | not` given `not`", () => {
-    expect(inApp(F("let a: string = \"x\"\n let b: bool = true;\n const c: number = 1;\n let d: string | not = not"))).toEqual([]);
+    expect(inApp(F("let a: string = \"x\";\n let b: bool = true;\n const c: number = 1;\n let d: string | not = not;"))).toEqual([]);
   });
   test("E-TYPE-031 (int enforced, S440 JS-WAT 7(a)) — `let a: int = \"s\"`", () => {
-    expect(inApp(F("let a: int = \"s\""))).toEqual(["E-TYPE-031"]);
+    expect(inApp(F("let a: int = \"s\";"))).toEqual(["E-TYPE-031"]);
   });
   test("E-TYPE-031 — a struct literal initializer, field by field (`let v: P = { x: 1, y: \"s\" }`)", () => {
     const P = "    type P:struct = { x: int, y: int }\n";
@@ -579,8 +579,8 @@ describe("R2-4 — §7.5.1 position 1: an annotated `let` / `const` initializer"
     expect(inApp(P + "    function f() { let v: P = { x: 1, y: 2 }; }")).toEqual([]);
   });
   test("E-TYPE-031 — a later write to an annotated local; twin silent", () => {
-    expect(inApp(F("let a: string = \"x\"\n a = 5"))).toEqual(["E-TYPE-031"]);
-    expect(inApp(F("let a: string = \"x\"\n a = \"y\""))).toEqual([]);
+    expect(inApp(F("let a: string = \"x\";\n a = 5;"))).toEqual(["E-TYPE-031"]);
+    expect(inApp(F("let a: string = \"x\";\n a = \"y\";"))).toEqual([]);
   });
 });
 
@@ -609,9 +609,9 @@ describe("R2-5 — Rule C: only a component's OWN type expression failing to par
 describe("R2-7 / R2-8 — the fixpoint bound; compound assignment", () => {
   const chain = (n, cell) => {
     let s = "    let <x:" + cell + "/>\n    function f() {";
-    for (let i = 1; i <= n; i++) s += " let a" + i + " = \"s\"\n";
+    for (let i = 1; i <= n; i++) s += " let a" + i + " = \"s\";\n";
     for (let i = 1; i < n; i++) s += " a" + i + " = a" + (i + 1) + "\n";
-    return s + " a" + n + " = not\n @x = a1; }";
+    return s + " a" + n + " = not;\n @x = a1; }";
   };
   test("E-TYPE-031 — a chain of 8 rebound locals settles (`string | not` reaches `a1`) into an int cell", () => {
     expect(inApp(chain(8, "int=0"))).toEqual(["E-TYPE-031"]);
@@ -621,7 +621,7 @@ describe("R2-7 / R2-8 — the fixpoint bound; compound assignment", () => {
     expect(inApp(chain(8, "string=\"\""))).toEqual(["E-TYPE-031"]);
   });
   test("silent — a chain of 8 whose far end is widened to Unknown (`a8 = 1`): `a1` must SETTLE to Unknown, not stop at `string`", () => {
-    const src = chain(8, "int=0").replace(" a8 = not;\n", " a8 = 1;\n");
+    const src = chain(8, "int=0").replace(" a8 = not\n", " a8 = 1;\n");
     expect(inApp(src)).toEqual([]);
   });
   test("`@s += 1` on a string cell — only the unsupported-syntax report (recovered, not typed as `@s = 1`)", () => {

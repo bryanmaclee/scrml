@@ -257,7 +257,7 @@ describe("§6.7.4 the retiring keyword form — `when … changes { }` parses id
 
 describe("§6.7.4 — codes", () => {
   const D = `    let <n:int=0/>\n    let <m:int=0/>\n    <step=1/>\n    <dbl:int=(@n * 2)/>\n${PING}`;
-  const body = `>\${ ping() }</>`;
+  const body = `>\${ ping(); }</>`;
 
   test("E-EFFECT-NO-DEPS — no `deps=`, or `deps=[]` (an effect never runs on mount, so it would never run)", () => {
     expect(codes(P(D, "") .replace("<main>", `<effect${body}\n    <main>`))).toEqual(["E-EFFECT-NO-DEPS"]);
@@ -311,37 +311,37 @@ describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive wr
   const W = (src) => src.map((d) => d.code);
 
   test("rule 1: a direct write in the body — assignment, `reset`, an edit call — each is an error", () => {
-    expect(W(writes("", `<effect deps=[@query]>\${ @page = 1 }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
-    expect(W(writes("", `<effect deps=[@query]>\${ reset(@page) }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
-    expect(W(writes("", `<effect deps=[@query]>\${ @xs.append(1) }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
-    expect(W(writes("", `<effect deps=[@query]>\${\n        if (@page > 1) {\n            @hits = @hits + 1\n        }\n    }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(W(writes("", `<effect deps=[@query]>\${ @page = 1; }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(W(writes("", `<effect deps=[@query]>\${ reset(@page); }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(W(writes("", `<effect deps=[@query]>\${ @xs.append(1); }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(W(writes("", `<effect deps=[@query]>\${\n        if (@page > 1) {\n            @hits = @hits + 1;\n        }\n    }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
   });
 
   test("the message names the cell and the fix BY SHAPE (S447 1a): reset → `reset-on=`; a call result → `<request>`; otherwise → the writer / derive", () => {
-    const reset = writes("", `<effect deps=[@query]>\${ @page = 1 }</>`)[0].message;
+    const reset = writes("", `<effect deps=[@query]>\${ @page = 1; }</>`)[0].message;
     expect(reset).toContain("writes `@page`");
     expect(reset).toContain("declare it on the cell: `reset-on=[@query]` (§6.8.4)");
-    expect(writes("", `<effect deps=[@query]>\${ reset(@page) }</>`)[0].message).toContain("`reset-on=[@query]`");
-    const req = writes(`    fn load(q: string) -> int { return 3 }`, `<effect deps=[@query]>\${ @page = load(@query) }</>`)[0].message;
+    expect(writes("", `<effect deps=[@query]>\${ reset(@page); }</>`)[0].message).toContain("`reset-on=[@query]`");
+    const req = writes(`    fn load(q: string) -> int { return 3; }`, `<effect deps=[@query]>\${ @page = load(@query); }</>`)[0].message;
     expect(req).toContain("`<request>`'s job");
-    const other = writes("", `<effect deps=[@query]>\${ @hits = @hits + 1 }</>`)[0].message;
+    const other = writes("", `<effect deps=[@query]>\${ @hits = @hits + 1; }</>`)[0].message;
     expect(other).toContain("Move the write into the code that writes the trigger");
   });
 
   test("rule 2: a write THROUGH a called function — one level and two — names the call chain down to the write", () => {
-    const one = writes(`    function logFilter() {\n        @hits = @hits + 1;\n    }`, `<effect deps=[@query]>\${ logFilter() }</>`);
+    const one = writes(`    function logFilter() {\n        @hits = @hits + 1;\n    }`, `<effect deps=[@query]>\${ logFilter(); }</>`);
     expect(W(one)).toEqual(["E-EFFECT-WRITES-STATE"]);
     expect(one[0].message).toContain("`logFilter() → @hits`");
     // mutation RED (bite proof, progress.md): `propagated` returning `s` unchanged — the summary no
     // longer reaches through a call, so `track()` (which writes nothing itself) looks write-free
-    const two = writes(`    function logFilter() {\n        @hits = @hits + 1;\n    }\n    function track() {\n        logFilter()\n    }`, `<effect deps=[@query]>\${ track() }</>`);
+    const two = writes(`    function logFilter() {\n        @hits = @hits + 1;\n    }\n    function track() {\n        logFilter();\n    }`, `<effect deps=[@query]>\${ track(); }</>`);
     expect(W(two)).toEqual(["E-EFFECT-WRITES-STATE"]);
     expect(two[0].message).toContain("`track() → logFilter() → @hits`");
   });
 
   test("across a module boundary: a writer imported from a `.scrml` library is summarized too (its body is linked)", () => {
     const lib = `// lib/log.scrml\nexport <counter:struct> let <n:int=0/> </>\nexport function bumpCount() { @counter.n = @counter.n + 1; }\nexport function readCount() { const c = @counter.n; }\n`;
-    const app = (call) => `<program>\n    \${ import { bumpCount, readCount } from "./lib/log.scrml"; }\n    let <query:string=""/>\n    <effect deps=[@query]>\${ ${call} }</>\n    <main></main>\n</program>\n`;
+    const app = (call) => `<program>\n    \${ import { bumpCount, readCount } from "./lib/log.scrml"; }\n    let <query:string=""/>\n    <effect deps=[@query]>\${ ${call}; }</>\n    <main></main>\n</program>\n`;
     const files = (call) => [{ path: "lib/log.scrml", src: lib }, { path: "app.scrml", src: app(call) }];
     const ds = frontEnd(mods, files("bumpCount()")).diags;
     expect(ds.map((d) => d.code)).toEqual(["E-EFFECT-WRITES-STATE"]);
@@ -377,14 +377,14 @@ describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive wr
     // the formula inside the effect body).
     const decls = `    let <n:int=0/>\n    let <a:int=0/>\n    function g() -> int {\n        @a = @a + 1;\n        return 1;\n    }\n    <d:int=(@n + g())/>`;
     const eff = (body) => `<effect deps=[@query]>\${\n        ${body}\n    }</>`;
-    const direct = writes(decls, eff("const q = @d"));
+    const direct = writes(decls, eff("const q = @d;"));
     expect(W(direct)).toEqual([SRC]);
     expect(direct[0].message).toContain("the formula of derived `@d` writes `@a` through a call: `g() → @a`");
     // through a write-free function that reads it; through a shared instance whose seed reads it
-    expect(W(writes(`${decls}\n    function peek() -> int { return @d }`, eff("const q = peek()")))).toEqual([SRC]);
-    expect(W(writes(`${decls}\n    <box:struct> let <k:int=(@d)/> </>\n    renders <div>\${k}</div>`, eff("const q = @box.k")))).toEqual([SRC]);
+    expect(W(writes(`${decls}\n    function peek() -> int { return @d; }`, eff("const q = peek();")))).toEqual([SRC]);
+    expect(W(writes(`${decls}\n    <box:struct> let <k:int=(@d)/> </>\n    renders <div>\${k}</div>`, eff("const q = @box.k;")))).toEqual([SRC]);
     // negative: a derived cell whose formula writes nothing
-    expect(W(writes(`    let <n:int=0/>\n    <d:int=(@n * 2)/>`, eff("const q = @d")))).toEqual([]);
+    expect(W(writes(`    let <n:int=0/>\n    <d:int=(@n * 2)/>`, eff("const q = @d;")))).toEqual([]);
   });
 
   test("S449 item 3 (was fix round HIGH-1, runtime): the reviewer's program is rejected at its formula; its write-free twin runs with no write", async () => {
@@ -398,9 +398,9 @@ describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive wr
 
   test("recursion: the summary is a fixed point — mutual recursion that writes is found; that does not, is clean", () => {
     const rec = `    function a(k: int) {\n        if (k > 0) {\n            b(k - 1);\n        }\n    }\n    function b(k: int) {\n        a(k);\n        @hits = k;\n    }`;
-    expect(W(writes(rec, `<effect deps=[@query]>\${ a(3) }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
-    const pure = `    function c(k: int) {\n        if (k > 0) {\n            d(k - 1)\n        }\n    }\n    function d(k: int) {\n        c(k)\n        const t = Date.now();\n    }`;
-    expect(W(writes(pure, `<effect deps=[@query]>\${ c(3) }</>`))).toEqual([]);
+    expect(W(writes(rec, `<effect deps=[@query]>\${ a(3); }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    const pure = `    function c(k: int) {\n        if (k > 0) {\n            d(k - 1);\n        }\n    }\n    function d(k: int) {\n        c(k);\n        const t = Date.now();\n    }`;
+    expect(W(writes(pure, `<effect deps=[@query]>\${ c(3); }</>`))).toEqual([]);
   });
 
   test("rule 3: a function VALUE counts as called — an arrow function's call inside `.map` reaches a writer", () => {
@@ -422,11 +422,11 @@ describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive wr
   });
 
   test("a write to a cell an effect LISTS is the same error (E-LIFECYCLE-006 is subsumed)", () => {
-    expect(W(writes("", `<effect deps=[@page]>\${ @page = @page + 1 }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(W(writes("", `<effect deps=[@page]>\${ @page = @page + 1; }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
   });
 
   test("a write the binder refuses (a locked cell) is still a write of the effect", () => {
-    const ds = writes(`    <locked=3/>`, `<effect deps=[@query]>\${ @locked = 4 }</>`);
+    const ds = writes(`    <locked=3/>`, `<effect deps=[@query]>\${ @locked = 4; }</>`);
     expect(W(ds)).toContain("E-EFFECT-WRITES-STATE");
   });
 });
@@ -435,13 +435,13 @@ describe("§6.7.4 rule 4 — E-EFFECT-WRITE-UNPROVEN (fails closed)", () => {
   const D = `    let <query:string=""/>\n${PING}`;
 
   test("a call through a local holding a function value — the compiler cannot resolve it", () => {
-    const ds = fnValueRefused(diagsOf(P(`${D}\n    <effect deps=[@query]>\${\n        const g = ping;\n        g();\n    }</>`, "")));
+    const ds = fnValueRefused(diagsOf(P(`${D}\n    <effect deps=[@query]>\${\n        const g = ping;\n        g()\n    }</>`, "")));
     expect(ds.map((d) => d.code)).toEqual(["E-EFFECT-WRITE-UNPROVEN"]);
     expect(ds[0].message).toMatch(/`g\(…\)` calls through `g`.*fails closed/);
   });
 
   test("…reached through a called function: the message names the chain", () => {
-    const ds = fnValueRefused(diagsOf(P(`${D}\n    function viaLocal() {\n        const g = ping;\n        g();\n    }\n    <effect deps=[@query]>\${ viaLocal(); }</>`, "")));
+    const ds = fnValueRefused(diagsOf(P(`${D}\n    function viaLocal() {\n        const g = ping;\n        g();\n    }\n    <effect deps=[@query]>\${ viaLocal() }</>`, "")));
     expect(ds.map((d) => d.code)).toEqual(["E-EFFECT-WRITE-UNPROVEN"]);
     expect(ds[0].message).toContain("through `viaLocal()`");
   });

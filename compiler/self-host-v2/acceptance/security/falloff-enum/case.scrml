@@ -4,7 +4,7 @@
     let <right:string=""/>
     type Auth:enum = { Granted, Locked }
     function find(pw: string) -> Auth | not {
-        if (pw == "hunter2") return .Granted;
+        if (pw == "hunter2") return .Granted
     }
     function attempt(pw: string) -> string {
         return match find(pw) {
