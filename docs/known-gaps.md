@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 263 | 4 |
-| MED | 679 | 8 |
+| HIGH | 262 | 4 |
+| MED | 676 | 8 |
 | LOW | 472 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -160,11 +160,13 @@ The S469 follow-up fixed the examples the fidelity review named (§18.8.1 / §53
 
 Owed: the bootstrap parses a `<db>` body and a `<channel>` body as item positions (§66.2.5 amendment): a §66 declaration there is a declaration scoped to that block — channel state shared across the channel's clients (§38.4), db-block state server-side. Today it reads those bodies as free text, so `let <x/>` there is refused. impl#1 carries the rule (§34.0). **Widened S469** (ruling:user-voice-scrml.md S469 "O61 reach and the page/theme half" — "Same rule as channel/db (Rec)"; "Readable program-wide (Rec)"): `<page>` and `<theme>` bodies are item positions too, and block-declared state in all four is readable program-wide by `@`. Owed in the bootstrap for all four bodies; whether its `<page>` / `<theme>` paths refuse today in the same way is not separately measured.
 
-### g-bootstrap-newline-arm-lists-accepted-s469 — the BOOTSTRAP still reads a wholly newline-separated arm list (`match` / `!{}` / engine message arms), but dpa-073 F5(4) ruled that the bootstrap enforces arm commas by construction (`E-MATCH-ARM-SEPARATOR` on every missing `,`) — `NEW S469; MED; open (owed bootstrap change)`
+### g-bootstrap-newline-arm-lists-accepted-s469 — the BOOTSTRAP still reads a wholly newline-separated arm list (`match` / `!{}` / engine message arms), but dpa-073 F5(4) ruled that the bootstrap enforces arm commas by construction (`E-MATCH-ARM-SEPARATOR` on every missing `,`) — `NEW S469; MED; RESOLVED S469 (s469-boot-semicolons, #1510)`
 
-<!-- @gap id=g-bootstrap-newline-arm-lists-accepted-s469 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(the arm-list parser — reports only a list that mixes `,` and newline boundaries) prov=ruling:user-voice-scrml.md(S469 "⭐ RULED — dpa-073 F5 Bootstrap enforces (Recommended)" — "(4) the BOOTSTRAP enforces `;` + commas by construction");review:s469-spec-catchup(fidelity review of 5245b8854, F4);spec:§18.2 -->
+<!-- @gap id=g-bootstrap-newline-arm-lists-accepted-s469 sev=MED status=resolved resolved-by=s469-boot-semicolons locus=compiler/self-host-v2/parse.scrml(the arm-list parser — reports only a list that mixes `,` and newline boundaries) prov=ruling:user-voice-scrml.md(S469 "⭐ RULED — dpa-073 F5 Bootstrap enforces (Recommended)" — "(4) the BOOTSTRAP enforces `;` + commas by construction");review:s469-spec-catchup(fidelity review of 5245b8854, F4);spec:§18.2 -->
 
 The bootstrap's parser accepts both spellings and reports `E-MATCH-ARM-SEPARATOR` only for a list that MIXES them (its comment: the newline list "is still read during the migration … the bootstrap's own source is newline-separated, and impl#1, which builds it, does not read arm commas yet"). The ruled end state is that the bootstrap refuses every missing `,`; only impl#1 keeps the newline list (a carried divergence). Sequencing: enforcing it needs the bootstrap's own source migrated first (6,139 arm boundaries, by the `scrml fix` codemod — dpa-073 F5 steps 2–3), and impl#1 to accept commas (`g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469`), since impl#1 builds the bootstrap. Filed so the interim is not mistaken for the rule.
+
+**RESOLVED S469 (s469-boot-semicolons, #1510).** The bootstrap now reports every arm after the first that does not follow a `,` (`compiler/self-host-v2/parse.scrml` `parseArms` / `missingArmComma`), including a `!{}` list separated only by leading `|` (probed s469-spec-small: `!{ | .A :> 0 | .B :> 1 }` → E-MATCH-ARM-SEPARATOR; `!{ | .A :> 0, | .B :> 1 }` compiles with two W-ARM-PIPE-LEGACY). SPEC §18.2 / §19.4.5 / the §34 row updated.
 
 ### g-bootstrap-loop-value-form-s469 — in the BOOTSTRAP, a `for` bound as a value (§49.6, `const xs = for (…) { lift e }`) and the Tier-0 `${ for … lift }` in markup are REFUSED (E-BOOTSTRAP-UNSUPPORTED) — `NEW S469; MED; open (refused, fails closed)`
 
@@ -24696,28 +24698,38 @@ PA-measured S445: 81 orphaned bun servers (~3 GB RAM) accumulated over ~a day of
 **Reproduced on `310eee4c4`.** In a function body, `const a = @r ?⏎ "x" :⏎ "y"` → `E-STMT-MISSING-SEMICOLON` + `E-EXPR-UNEXPECTED` (Colon) + `E-STMT-UNEXPECTED-TOKEN`, exit 1. The default parser compiles it. Fails closed, but it rejects the exact spelling §7.2.2 rule 2 makes canonical (and that the codemod will produce from the 105 leading-`?`/`:` corpus lines), so it blocks native parity with the ruling.
 
 ### g-bootstrap-two-statements-one-line-accepted — the bootstrap parser accepts two statements on one line with no `;` and no diagnostic
-<!-- @gap id=g-bootstrap-two-statements-one-line-accepted sev=MED status=open locus=compiler/self-host-v2/parse.scrml(parseBlock ~L565 — one optional `;` per statement, no same-line check) prov=dd:statement-termination-dpa-063-2026-09-30-R3 · empirical:S446-spec-063-reproduced -->
+<!-- @gap id=g-bootstrap-two-statements-one-line-accepted sev=MED status=resolved locus=compiler/self-host-v2/parse.scrml(parseBlock ~L565 — one optional `;` per statement, no same-line check) prov=dd:statement-termination-dpa-063-2026-09-30-R3 · empirical:S446-spec-063-reproduced -->
 **Reproduced on `310eee4c4`.** `${ function f() { let x = 1 let y = 2 } }` → two `Local` statements, zero diagnostics. §7.2.2 rule 7 (and the S284 ruling "reject") make it `E-STMT-MISSING-SEMICOLON`; impl#1-native already fires it. Silent acceptance of an ill-formed program.
 
+**RESOLVED S469 (s469-boot-semicolons, #1510).** The bootstrap now requires `;` after every non-block-like statement (§7.2.2 rule 1, dpa-073 F1 (a)), so `let x = 1 let y = 2;` is E-STMT-MISSING-SEMICOLON after `1`.
+
 ### g-dpa063-termination-unbuilt-bootstrap — the §7.2.2 statement-termination rule is not implemented in the bootstrap (build-owed)
-<!-- @gap id=g-dpa063-termination-unbuilt-bootstrap sev=HIGH status=open locus=compiler/self-host-v2/parse.scrml(parseBinary ~L280, parsePostfixFrom ~L319, parseBlock ~L565, parseStmt ~L580) prov=ruling:user-voice-scrml.md S446 dpa-063 Call 1 "b, your rec" · dd:statement-termination-dpa-063-2026-09-30 -->
+<!-- @gap id=g-dpa063-termination-unbuilt-bootstrap sev=HIGH status=resolved locus=compiler/self-host-v2/parse.scrml(parseBinary ~L280, parsePostfixFrom ~L319, parseBlock ~L565, parseStmt ~L580) prov=ruling:user-voice-scrml.md S446 dpa-063 Call 1 "b, your rec" · dd:statement-termination-dpa-063-2026-09-30 -->
 Build owed FIRST (Call 6 order: the bootstrap by construction). Today (dd C3, dd-executed at `29eb80c31`; only the same-line half was re-executed here — R3): `parseBinary` continues across a line break for every operator, so `let s = a⏎-3102` → `Binary(Sub, a, 3102)` and a handler `@n = @n + 1⏎-3102` joins into a write that changes the stored value; a leading `.` continues; `return⏎42` → `Return(∅)` + `Eval(42)` silently; body-top `;` is `E-PARSE-ITEM`. Owed: `E-STMT-LEADING-OPERATOR` when an operator / `.` / `?.` / `?` / `:` token is first on its line at statement level; the same-line `E-STMT-MISSING-SEMICOLON` (see `g-bootstrap-two-statements-one-line-accepted`); `;` accepted as the body-top separator. Silent semantics change until built.
+
+**SUPERSEDED + RESOLVED S469.** The S446 rule this entry tracked was superseded by dpa-073 F1 (a) (`;` terminates, a newline is whitespace); §7.2.2 is rewritten (s469-spec-small) and the bootstrap enforces the new rule (s469-boot-semicolons, #1510). The remaining line-sensitive readings are tracked at [[g-bootstrap-newline-sensitive-rules-remain-s469]].
 
 ### g-dpa063-termination-unbuilt-impl1-legacy — impl#1's default parser runs its pre-S446 termination heuristic (JS-ASI-shaped joins), not §7.2.2
 <!-- @gap id=g-dpa063-termination-unbuilt-impl1-legacy sev=HIGH status=open locus=compiler/src/ast-builder.js(collectExpr BUG-ASI-NEWLINE continuation ~L6180; return ASI) prov=ruling:user-voice-scrml.md S446 dpa-063 Calls 1, 6 · dd:statement-termination-dpa-063-2026-09-30 C3 -->
 `console.log("m")⏎-3102` compiles as `console.log("m") - 3102` in `${}`, function bodies, handler blocks, the body top and `^{}` (dd probes P1–P4, P13, dd-executed at `29eb80c31`, not re-executed here); `let b = a⏎(a + 1).toString()` joins into a call; leading `.` / `?` / `:` / `&&` / `+` lines continue. Parity is owed under the S435 security/bootstrap exception (S446 Call 6: *"impl#1 parity under the security/bootstrap exception so the two compilers agree"*). Subsumes the S440 JS-WAT #6 non-implementation (dd R4) and closes `g-body-top-next-line-continuation-runtime-crash` when built.
 
+**CARRIED S469 — not to be built** (status kept `open` until an xfail conformance case pins it; `status=carried` requires one). dpa-073 F5: *"impl#1 does NOT enforce `;`/commas — it keeps accepting newline-terminated code as a carried, impl#1-labelled divergence"*. The S446 rule this entry tracked is superseded (§7.2.2, rewritten S469).
+
 ### g-dpa063-termination-unbuilt-impl1-native — `--parser=scrml-native` runs ECMAScript ASI, not §7.2.2
 <!-- @gap id=g-dpa063-termination-unbuilt-impl1-native sev=MED status=open locus=compiler/native-parser/parse-stmt.scrml(canInsertSemicolon / consumeSemicolon L274–325) prov=ruling:user-voice-scrml.md S446 dpa-063 Calls 1, 6 · dd:statement-termination-dpa-063-2026-09-30 C3 -->
 Native inserts a `;` only when the next token cannot continue (ECMAScript ASI rule 1), so every hazard join of the legacy entry above happens here too, then fails in E-CODEGEN on some shapes. Owed alongside `g-native-trailing-operator-ternary-rejected`. Opt-in parser.
+
+**CARRIED S469 — not to be built** (status kept `open`, as the legacy entry). As [[g-dpa063-termination-unbuilt-impl1-legacy]]: dpa-073 F5 keeps impl#1 (both parsers) on its own termination reading as a carried divergence; the S446 rule is superseded.
 
 ### g-stmt-no-effect-language-wide-unbuilt — `E-STMT-NO-EFFECT` fires only at a `<program>` / `<page>` / `<channel>` body top; S446 Call 5 made it language-wide
 <!-- @gap id=g-stmt-no-effect-language-wide-unbuilt sev=MED status=open locus=compiler/native-parser/body-top-coverage.js(liveExprHasEffect — body-top caller only)+compiler/src/ast-builder.js(noEffectError)+compiler/self-host-v2 prov=ruling:user-voice-scrml.md S446 dpa-063 Call 5 "(i), your rec, and yes on +/-" -->
 A bare `@count`, `a == 1` or orphan `(y)` in a function / `fn` body, a handler block, `${}`, `^{}` or a code-default body compiles silently in every front end. §40.8 now states the rule for every statement list, including the `~` exemption (a value the next statement reads through `~` is used). Pole B's safety depends on it: without it a mis-split line in a function body is a silent dead statement. Unbuilt in impl#1 (both parsers) and the bootstrap.
 
 ### g-dpa063-migrate-codemod-unbuilt — the `scrml migrate --fix` leading-operator rule (S446 Call 6) does not exist
-<!-- @gap id=g-dpa063-migrate-codemod-unbuilt sev=MED status=open locus=compiler/src/commands/migrate.js(--fix tier) prov=ruling:user-voice-scrml.md S446 "b on retrigger, your recs on 6 and 7" (Call 6) -->
+<!-- @gap id=g-dpa063-migrate-codemod-unbuilt sev=MED status=resolved locus=compiler/src/commands/migrate.js(--fix tier) prov=ruling:user-voice-scrml.md S446 "b on retrigger, your recs on 6 and 7" (Call 6) -->
 Owed WITH the termination build (§7.2.2 Migration): move each leading operator to the end of the previous line (before a trailing `//` comment), or paren-wrap a leading-`.` chain; verified by emit diff (identical JS modulo the content hash). Stake: ≈205 lines in 2,489 core files (dd C4) + adopter repos via inboxes. Until it ships, landing the error in any front end breaks those files with no tool.
+
+**SUPERSEDED S469 — moot.** Under dpa-073 F1 (a) a leading operator continues the line above (§7.2.2 rule 4), so this leading-operator rule has nothing to move. The F5 codemod (insert `;` and arm `,`) replaces it.
 
 ### g-when-retrigger-newest-wins-unbuilt — a `when` effect re-triggered while an earlier run is suspended at a server call: both runs continue (impl#1); §6.7.4 now rules newest-run-wins
 <!-- @gap id=g-when-retrigger-newest-wins-unbuilt sev=MED status=open locus=searched:compiler/src/codegen(when-effect lowering)—not-traced+bootstrap:no-`when`-on-main(U0-branch-runtime-rt.when/rt.suspend-cancels-only-on-teardown) prov=ruling:user-voice-scrml.md S446 "b on retrigger, your recs on 6 and 7" · design:docs/changes/s446-bootstrap-u0-when-effects/DESIGN.md §5 (unlanded branch) -->
