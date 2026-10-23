@@ -25,8 +25,8 @@ const variantsOf = (ti) =>
 const fnInfo = (r, name) => r.typed.tables.fns.find((f) => f.name === name);
 
 const SAVE_ERROR = `    type SaveError:enum = {\n        Conflict(current: int)\n        TooLong(limit: int)\n        Storage\n    }`;
-const SAVE_NOTE = `    function saveNote(id: string, text: string, base: int)! SaveError {\n        ${SQ}\`UPDATE notes SET body = \${text} WHERE id = \${id}\`}.run()\n        return base + 1\n    }`;
-const WORD_COUNT = `    function wordCount(id: string) -> int {\n        const row = ${SQ}\`SELECT body FROM notes WHERE id = \${id}\`}.get() !{ _ :> not }\n        return 0\n    }`;
+const SAVE_NOTE = `    function saveNote(id: string, text: string, base: int)! SaveError {\n        ${SQ}\`UPDATE notes SET body = \${text} WHERE id = \${id}\`}.run()\n        return base + 1;\n    }`;
+const WORD_COUNT = `    function wordCount(id: string) -> int {\n        const row = ${SQ}\`SELECT body FROM notes WHERE id = \${id}\`}.get() !{ _ :> not }\n        return 0;\n    }`;
 
 describe("S1 — §19.9.10 the built-in `ServerCallError`", () => {
   test("it is a built-in enum with the four S454 variants and their payloads", () => {
@@ -87,7 +87,7 @@ describe("S1 — §19.9.10 the failure enum of a client call (Item 1 B: minted `
   });
 
   test("a client function (no server trigger of its own) has no client-call failure enum", () => {
-    const r = run(P(`    function local(n: int) -> int {\n        return n + 1\n    }`));
+    const r = run(P(`    function local(n: int) -> int {\n        return n + 1;\n    }`));
     expect(fnInfo(r, "local").serverOwn).toBe(false);
     expect(fnInfo(r, "local").rerr).toBe(null);
   });
@@ -96,7 +96,7 @@ describe("S1 — §19.9.10 the failure enum of a client call (Item 1 B: minted `
 describe("S1 — E-ERROR-016 (§19.9.10 \"A declared variant named `Transport`\")", () => {
   const BAD = `    type SaveError:enum = {\n        Storage\n        Transport(code: int)\n    }`;
   test("a declared `Transport` of another payload, called from the client: E-ERROR-016 at the call site, naming f, its enum, the payload", () => {
-    const src = P(BAD + "\n" + SAVE_NOTE, `        <button onclick={ saveNote("n1", "x", 1) !{ _ :> {} } }>Save</button>`);
+    const src = P(BAD + "\n" + SAVE_NOTE, `        <button onclick={ saveNote("n1", "x", 1) !{ _ :> {} }; }>Save</button>`);
     const r = run(src);
     const d = r.diags.find((x) => x.code === "E-ERROR-016");
     expect(d).toBeDefined();
@@ -110,7 +110,7 @@ describe("S1 — E-ERROR-016 (§19.9.10 \"A declared variant named `Transport`\"
 
   test("a `Transport` with NO payload is \"any other payload (or none)\" — E-ERROR-016 too", () => {
     const NONE = `    type SaveError:enum = {\n        Storage\n        Transport\n    }`;
-    expect(codes(P(NONE + "\n" + SAVE_NOTE, `        <button onclick={ saveNote("n1", "x", 1) !{ _ :> {} } }>Save</button>`))).toContain("E-ERROR-016");
+    expect(codes(P(NONE + "\n" + SAVE_NOTE, `        <button onclick={ saveNote("n1", "x", 1) !{ _ :> {} }; }>Save</button>`))).toContain("E-ERROR-016");
   });
 
   test("the same enum on a server function nobody calls from the client: no E-ERROR-016 (it fires at a CLIENT call site)", () => {

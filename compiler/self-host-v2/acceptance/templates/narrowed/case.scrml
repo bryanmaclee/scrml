@@ -2,9 +2,9 @@
 <program>
     fn show(m: int | not) -> string {
         if (m is given) {
-            return `got ${m}`
+            return `got ${m}`;
         }
-        return "none"
+        return "none";
     }
     <main>
         <p id="some">${show(4)}</p>

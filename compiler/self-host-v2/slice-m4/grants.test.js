@@ -58,7 +58,7 @@ describe("`[free, insert, remove, write]` — anywhere covers end and front", ()
     expect(codes(T, `@xs = @xs.filter(x => true)`)).toEqual(GRANTED);
   });
   test("runs: an `insert` grant appends AND prepends", async () => {
-    const src = `<program>\n    <xs:string[free, insert]=([])/>\n    function f() { @xs.append("b")\n @xs.prepend("a")\n @xs = [...@xs, "c"] }\n    <main><button onclick=f()>go</button><ul><each in=@xs as x><li>\${x}</li></each></ul></main>\n</program>\n`;
+    const src = `<program>\n    <xs:string[free, insert]=([])/>\n    function f() { @xs.append("b");\n @xs.prepend("a");\n @xs = [...@xs, "c"]; }\n    <main><button onclick=f()>go</button><ul><each in=@xs as x><li>\${x}</li></each></ul></main>\n</program>\n`;
     const r = frontEnd(mods, [{ path: "g.scrml", src }]);
     expect(r.diags).toEqual([]);
     expect(mods.check.checkCore(r.core)).toEqual([]);

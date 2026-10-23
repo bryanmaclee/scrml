@@ -2,12 +2,12 @@
 <program>
     let <hits:int=0/>
     function bump() -> int {
-        @hits = @hits + 1
-        return 1
+        @hits = @hits + 1;
+        return 1;
     }
     function label() -> string {
-        @hits = @hits + 1
-        return "x"
+        @hits = @hits + 1;
+        return "x";
     }
     <main>
         <p if=(bump() > 0)>x</p>

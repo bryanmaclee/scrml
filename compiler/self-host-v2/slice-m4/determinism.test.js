@@ -39,10 +39,10 @@ function program() {
   return [
     {
       path: "app.scrml",
-      src: app.replace(appImport, 'import { dropdown } from "./lib/dropdown.scrml"\n    import { Openness } from "./lib/openness.scrml"\n    import { Tone } from "./lib/accent.scrml"'),
+      src: app.replace(appImport, 'import { dropdown } from "./lib/dropdown.scrml"\n    import { Openness } from "./lib/openness.scrml";\n    import { Tone } from "./lib/accent.scrml"'),
     },
     { path: "lib/accent.scrml", src: "// lib/accent.scrml\n${ export type Tone:enum = { Warm, Cool } }\n" },
-    { path: "lib/dropdown.scrml", src: lib.replace(TYPE_LINE, '${ import { Openness } from "./openness.scrml" }') },
+    { path: "lib/dropdown.scrml", src: lib.replace(TYPE_LINE, '${ import { Openness } from "./openness.scrml"; }') },
     { path: "lib/openness.scrml", src: "// lib/openness.scrml\n${ " + TYPE_LINE + " }\n" },
   ];
 }
@@ -171,10 +171,10 @@ describe("determinism (r2) — the entry omitted, and the driver's input contrac
   /** A diamond: app → { left, right } → base. */
   function diamond() {
     return [
-      { path: "app.scrml", src: '${ import { L } from "./lib/left.scrml"\n import { R } from "./lib/right.scrml" }\n<program>\n    <p>diamond</p>\n</program>\n' },
+      { path: "app.scrml", src: '${ import { L } from "./lib/left.scrml";\n import { R } from "./lib/right.scrml"; }\n<program>\n    <p>diamond</p>\n</program>\n' },
       { path: "lib/base.scrml", src: "${ export type Base:enum = { One, Two } }\n" },
-      { path: "lib/left.scrml", src: '${ import { Base } from "./base.scrml"\n export type L:enum = { Left } }\n' },
-      { path: "lib/right.scrml", src: '${ import { Base } from "./base.scrml"\n export type R:enum = { Right } }\n' },
+      { path: "lib/left.scrml", src: '${ import { Base } from "./base.scrml";\n export type L:enum = { Left } }\n' },
+      { path: "lib/right.scrml", src: '${ import { Base } from "./base.scrml";\n export type R:enum = { Right } }\n' },
     ];
   }
   const rotations = (xs) => xs.map((_, i) => [...xs.slice(i), ...xs.slice(0, i)]);

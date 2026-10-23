@@ -55,10 +55,10 @@ export const SEARCH_PROGRAM = `<program>
     let <query:string=""/>
     let <page:int=1 reset-on=[@query]/>
     function search() {
-        const t = Date.now()
+        const t = Date.now();
     }
 
-    <effect deps=[@query, @page]>\${ search() }</>
+    <effect deps=[@query, @page]>\${ search(); }</>
 
     <main>
         <p class="out">\${@query}|\${@page}</p>
@@ -97,7 +97,7 @@ describe("§6.8.4 — the reset, end to end", () => {
   });
 
   test("rule 3: a chain (`a` resets on `b`, `b` resets on `c`) — ranks 1 and 0; one write of `c` resets both, one change", async () => {
-    const src = P(`    let <c:int=0/>\n    let <b:int=5 reset-on=[@c]/>\n    let <a:int=7 reset-on=[@b]/>\n    function ping() {\n        const t = Date.now()\n    }\n    <effect deps=[@a, @b, @c]>\${ ping() }</>`,
+    const src = P(`    let <c:int=0/>\n    let <b:int=5 reset-on=[@c]/>\n    let <a:int=7 reset-on=[@b]/>\n    function ping() {\n        const t = Date.now();\n    }\n    <effect deps=[@a, @b, @c]>\${ ping(); }</>`,
       `        <p class="out">\${@a} \${@b} \${@c}</p>\n        <button onclick=(@a = @a + 1)>a</button>\n        <button onclick=(@b = @b + 1)>b</button>\n        <button onclick=(@c = @c + 1)>c</button>`);
     const core = coreOf(src);
     expect(resets(core).map((r) => r.rank).sort()).toEqual([0, 1]);
@@ -180,17 +180,17 @@ describe("§6.8.4 — codes", () => {
     // E-BOOTSTRAP-UNSUPPORTED; S449 item 3 (an initializer may not write) rejects it at its source, so that
     // refusal is removed — the DEAD-PROOF: the source-side error is the only one, for every shape it caught.
     const SRC = "E-VALUE-WRITES-STATE";
-    const loop = diagsOf(P(`    let <q:int=0/>\n    function bump() -> int {\n        @q = @q + 1\n        return 1\n    }\n    let <page:int=(bump()) reset-on=[@q]/>`, ""));
+    const loop = diagsOf(P(`    let <q:int=0/>\n    function bump() -> int {\n        @q = @q + 1;\n        return 1;\n    }\n    let <page:int=(bump()) reset-on=[@q]/>`, ""));
     expect(loop.map((d) => d.code)).toEqual([SRC]);
     expect(loop[0].message).toContain("the initializer of `@page` writes `@q` through a call: `bump() → @q`");
     // a writer of an UNRELATED cell
-    expect(codes(P(`    let <q:int=0/>\n    let <other:int=0/>\n    function note() -> int {\n        @other = 1\n        return 1\n    }\n    let <page:int=(note()) reset-on=[@q]/>`, ""))).toEqual([SRC]);
+    expect(codes(P(`    let <q:int=0/>\n    let <other:int=0/>\n    function note() -> int {\n        @other = 1;\n        return 1;\n    }\n    let <page:int=(note()) reset-on=[@q]/>`, ""))).toEqual([SRC]);
     // the writer reached through a DERIVED cell the initializer reads — rejected at that cell's formula
-    const viaDerived = diagsOf(P(`    let <q:int=0/>\n    function g() -> int {\n        @q = @q + 1\n        return 1\n    }\n    <d:int=(@q + g())/>\n    let <page:int=(@d) reset-on=[@q]/>`, ""));
+    const viaDerived = diagsOf(P(`    let <q:int=0/>\n    function g() -> int {\n        @q = @q + 1;\n        return 1;\n    }\n    <d:int=(@q + g())/>\n    let <page:int=(@d) reset-on=[@q]/>`, ""));
     expect(viaDerived.map((d) => d.code)).toEqual([SRC]);
     expect(viaDerived[0].message).toContain("the formula of derived `@d` writes `@q` through a call: `g() → @q`");
     // negative: an initializer that calls a write-free function
-    expect(codes(P(`    let <q:int=0/>\n    fn one() -> int { return 1 }\n    let <page:int=(one()) reset-on=[@q]/>`, ""))).toEqual([]);
+    expect(codes(P(`    let <q:int=0/>\n    fn one() -> int { return 1; }\n    let <page:int=(one()) reset-on=[@q]/>`, ""))).toEqual([]);
   });
 
   test("a `reset-on=` on a declaration's field is refused — per-instance resets are OPEN (§6.8.4)", () => {

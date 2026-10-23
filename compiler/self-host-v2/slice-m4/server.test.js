@@ -41,7 +41,7 @@ const v = (x) => (x && typeof x === "object" ? x.variant : x);
 const SQ = "?" + "{";   // the sigil, for building sources in JS strings
 
 const fnQ = (name, sql, mode = "get", params = "id: int", ret = "") =>
-  `    function ${name}(${params})${ret} {\n        const r = ${SQ}\`${sql}\`}.${mode}()\n        return 1\n    }`;
+  `    function ${name}(${params})${ret} {\n        const r = ${SQ}\`${sql}\`}.${mode}()\n        return 1;\n    }`;
 
 describe("§8.1 / §44.8 — parsing `?{}`", () => {
   test("a query with bound values parses: literal runs and values, `${}` never text", () => {
@@ -103,7 +103,7 @@ describe("§8.1 / §44.8 — parsing `?{}`", () => {
   });
 
   test("`?{` is the sigil, never a ternary's `?`: a statement after a call on the previous line", () => {
-    expect(codes(P(DB, `    fn g() -> int { return 1 }\n    function f() {\n        g()\n        ${SQ}\`DELETE FROM t\`}.run()\n    }`))).toEqual(["E-ERROR-002"]);
+    expect(codes(P(DB, `    fn g() -> int { return 1; }\n    function f() {\n        g();\n        ${SQ}\`DELETE FROM t\`}.run()\n    }`))).toEqual(["E-ERROR-002"]);
   });
 });
 
@@ -124,7 +124,7 @@ describe("S451 R11 — `?{}` is failable everywhere; s451 Ue — the handling fo
   });
 
   test("a `match` on a query's result handles it (§19.8.3 item 2): clean", () => {
-    const src = P(DB, `    function f() {\n        const r = match ${SQ}\`SELECT a FROM t\`}.all() {\n            _ :> 1\n        }\n    }`);
+    const src = P(DB, `    function f() {\n        const r = match ${SQ}\`SELECT a FROM t\`}.all() {\n            _ :> 1\n        };\n    }`);
     expect(codes(src)).toEqual([]);
   });
 
@@ -191,19 +191,19 @@ describe("§12 — placement (Client / Server / Ambient; Split detected and refu
   const placeOf = (src, name) => v(run(src).typed.tables.server.places.find((p) => p.name === name).place);
 
   test("a `?{}` places a function on the server; a cell access on the client; neither → ambient", () => {
-    const src = P(DB, `    let <n:int=0/>\n${fnQ("srv", "SELECT a FROM t")}\n    function cli() {\n        @n = 1\n    }\n    function amb(x: int) -> int {\n        return x + 1\n    }`);
+    const src = P(DB, `    let <n:int=0/>\n${fnQ("srv", "SELECT a FROM t")}\n    function cli() {\n        @n = 1;\n    }\n    function amb(x: int) -> int {\n        return x + 1;\n    }`);
     expect(placeOf(src, "srv")).toBe("Server");
     expect(placeOf(src, "cli")).toBe("Client");
     expect(placeOf(src, "amb")).toBe("Ambient");
   });
 
   test("calling a client-only function pins the caller to the client (§12.4)", () => {
-    const src = P(DB, `    let <n:int=0/>\n    function cli() -> int {\n        return @n\n    }\n    function viaCli() -> int {\n        return cli()\n    }`);
+    const src = P(DB, `    let <n:int=0/>\n    function cli() -> int {\n        return @n;\n    }\n    function viaCli() -> int {\n        return cli();\n    }`);
     expect(placeOf(src, "viaCli")).toBe("Client");
   });
 
   test("a query + a reactive write → Split (§19.9.5) — refused, naming U1d", () => {
-    const src = P(DB, `    let <n:int=0/>\n    function loadAndSet() {\n        const rows = ${SQ}\`SELECT id FROM items\`}.all()\n        @n = 1\n    }`);
+    const src = P(DB, `    let <n:int=0/>\n    function loadAndSet() {\n        const rows = ${SQ}\`SELECT id FROM items\`}.all()\n        @n = 1;\n    }`);
     expect(placeOf(src, "loadAndSet")).toBe("Split");
     const d = run(src).diags.filter((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED");
     expect(d.length).toBe(1);
@@ -211,7 +211,7 @@ describe("§12 — placement (Client / Server / Ambient; Split detected and refu
   });
 
   test("`server function` → W-DEPRECATED-SERVER-MODIFIER; the function is a Core ServerFn", () => {
-    const r = run(P("", `    server function bump(n: int) -> int {\n        return n + 1\n    }`));
+    const r = run(P("", `    server function bump(n: int) -> int {\n        return n + 1;\n    }`));
     expect(r.diags.map((d) => d.code)).toEqual(["W-DEPRECATED-SERVER-MODIFIER"]);
     expect(r.core.server.map((s) => s.sym.hint)).toEqual(["bump"]);
     expect(r.core.fns.map((f) => f.sym.hint)).not.toContain("bump");
@@ -232,23 +232,23 @@ describe("§6.6.9 / §12 — a wholly-server body touches no cell", () => {
   });
 
   test("E-RI-002: a `server`-modified function writes a cell (mirror: server-db/server-fn-writes-reactive-cell-pos)", () => {
-    const src = P("", `    let <count:int=0/>\n    server function loadAndSet() {\n        @count = 1\n    }`);
+    const src = P("", `    let <count:int=0/>\n    server function loadAndSet() {\n        @count = 1;\n    }`);
     expect(sorted(src)).toEqual(["E-RI-002", "W-DEPRECATED-SERVER-MODIFIER"]);
   });
 
   test("E-RI-002 for `reset(@x)` in a `server` function — its argument is the write's target, not also a read (no E-REACTIVE-003)", () => {
-    expect(sorted(P("", `    let <count:int=0/>\n    server function clear() {\n        reset(@count)\n    }`))).toEqual(["E-RI-002", "W-DEPRECATED-SERVER-MODIFIER"]);
+    expect(sorted(P("", `    let <count:int=0/>\n    server function clear() {\n        reset(@count);\n    }`))).toEqual(["E-RI-002", "W-DEPRECATED-SERVER-MODIFIER"]);
   });
 
   test("twin: the server function returns the value; the caller is not refused for E-RI-002 (mirror: …-neg)", () => {
-    const src = P("", `    let <count:int=0/>\n    server function loadCount() -> int {\n        return 1\n    }`);
+    const src = P("", `    let <count:int=0/>\n    server function loadCount() -> int {\n        return 1;\n    }`);
     expect(codes(src)).toEqual(["W-DEPRECATED-SERVER-MODIFIER"]);
   });
 });
 
 describe("§12.4 — E-ROUTE-002 / E-ROUTE-001 / E-ROUTE-005", () => {
   test("E-ROUTE-002 (R2): a server function reaches a cell through a callee — the message names the chain and the cell (mirror: server-fn/e-route-002-pos)", () => {
-    const src = P(DB, `    let <n:int=0/>\n    function auditAndFlash(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run()\n        flash()\n    }\n    function flash() {\n        mark()\n    }\n    function mark() {\n        @n = @n + 1\n    }`);
+    const src = P(DB, `    let <n:int=0/>\n    function auditAndFlash(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run()\n        flash();\n    }\n    function flash() {\n        mark();\n    }\n    function mark() {\n        @n = @n + 1;\n    }`);
     expect(sorted(src)).toEqual(["E-ERROR-002", "E-ROUTE-002"]);
     const m = diag(src, "E-ROUTE-002").message;
     expect(m).toContain("auditAndFlash() → flash() → mark()");
@@ -256,12 +256,12 @@ describe("§12.4 — E-ROUTE-002 / E-ROUTE-001 / E-ROUTE-005", () => {
   });
 
   test("E-ROUTE-002 through a READ, transitively (R2: read OR write)", () => {
-    const src = P(DB, `    let <n:int=0/>\n    function helper() -> int {\n        return @n\n    }\n    function srv(id: int) -> int {\n        ${SQ}\`DELETE FROM t WHERE id = \${id}\`}.run()\n        return helper()\n    }`);
+    const src = P(DB, `    let <n:int=0/>\n    function helper() -> int {\n        return @n;\n    }\n    function srv(id: int) -> int {\n        ${SQ}\`DELETE FROM t WHERE id = \${id}\`}.run()\n        return helper();\n    }`);
     expect(sorted(src)).toEqual(["E-ERROR-002", "E-ROUTE-002"]);
   });
 
   test("twin (mirror: server-fn/e-route-002-neg): client → server is the allowed direction — no E-ROUTE-002 (s454: the unhandled client call is E-ERROR-002, §19.9.10)", () => {
-    const src = P(DB, `    let <n:int=0/>\n    function refresh(name: string) {\n        @n = 1\n        auditName(name)\n    }\n    function auditName(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run()\n    }`, `        <button onclick=refresh("hi")>Go</button>`);
+    const src = P(DB, `    let <n:int=0/>\n    function refresh(name: string) {\n        @n = 1;\n        auditName(name);\n    }\n    function auditName(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run()\n    }`, `        <button onclick=refresh("hi")>Go</button>`);
     const c = codes(src);
     expect(c).not.toContain("E-ROUTE-002");
     // one for the query (R11), one for the client call of the server function (§19.9.10)
@@ -270,22 +270,22 @@ describe("§12.4 — E-ROUTE-002 / E-ROUTE-001 / E-ROUTE-005", () => {
   });
 
   test("a pure helper called from a server function is fine (ambient)", () => {
-    expect(codes(P(DB, `    fn twice(x: int) -> int { return x * 2 }\n    function srv(id: int) -> int {\n        ${SQ}\`DELETE FROM t WHERE id = \${id}\`}.run()\n        return twice(id)\n    }`))).toEqual(["E-ERROR-002"]);
+    expect(codes(P(DB, `    fn twice(x: int) -> int { return x * 2; }\n    function srv(id: int) -> int {\n        ${SQ}\`DELETE FROM t WHERE id = \${id}\`}.run()\n        return twice(id);\n    }`))).toEqual(["E-ERROR-002"]);
   });
 
   test("E-ROUTE-001 (R3, an error): a server function calls through a parameter", () => {
-    const src = P(DB, `    function srv(k: int) -> int {\n        ${SQ}\`DELETE FROM t\`}.run()\n        return k(1)\n    }`);
+    const src = P(DB, `    function srv(k: int) -> int {\n        ${SQ}\`DELETE FROM t\`}.run()\n        return k(1);\n    }`);
     expect(codes(src)).toContain("E-ROUTE-001");
   });
 
   test("E-ROUTE-005: one body with a `?{}` AND a DOM global (mirror: server-fn/e-route-005-pos) — the one report for `document`", () => {
-    const src = P(DB, `    function saveAndPaint(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run()\n        document.title = name\n    }`);
+    const src = P(DB, `    function saveAndPaint(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run()\n        document.title = name;\n    }`);
     expect(sorted(src)).toEqual(["E-ERROR-002", "E-ROUTE-005"]);
     expect(codes(src)).not.toContain("E-ROUTE-002");
   });
 
   test("twin (mirror: server-fn/e-route-005-neg): the concerns split — no E-ROUTE-005, no E-ROUTE-002", () => {
-    const src = P(DB, `    function persist(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run()\n    }\n    fn other(x: int) -> int { return x }`);
+    const src = P(DB, `    function persist(name: string) {\n        ${SQ}\`INSERT INTO audit (who) VALUES (\${name})\`}.run()\n    }\n    fn other(x: int) -> int { return x; }`);
     const c = codes(src);
     expect(c).not.toContain("E-ROUTE-005");
     expect(c).not.toContain("E-ROUTE-002");
@@ -296,23 +296,23 @@ describe("§12.5.3 — E-ROUTE-003 / E-ROUTE-004 via the §57 codec", () => {
   const T = `    type Kind:enum = { A, B }\n    type Pt:struct = { x: int, y: int }\n    type Shape:enum = { Dot, Circle(r: int) }\n    <box:struct> let <k:int=0/> </>\n    renders <div>\${k}</div>`;
 
   test("a declaration's instance as a parameter → E-ROUTE-004; as the return type → E-ROUTE-003", () => {
-    expect(sorted(P("", `${T}\n    server function f(b: box) {\n        return\n    }`))).toEqual(["E-ROUTE-004", "W-DEPRECATED-SERVER-MODIFIER"]);
-    expect(sorted(P("", `${T}\n    server function g() -> box {\n        return @box\n    }`))).toContain("E-ROUTE-003");
+    expect(sorted(P("", `${T}\n    server function f(b: box) {\n        return;\n    }`))).toEqual(["E-ROUTE-004", "W-DEPRECATED-SERVER-MODIFIER"]);
+    expect(sorted(P("", `${T}\n    server function g() -> box {\n        return @box;\n    }`))).toContain("E-ROUTE-003");
   });
 
   test("structs, payload-free enums, sequences, optionals have a wire form — clean", () => {
-    expect(codes(P("", `${T}\n    server function f(p: Pt, k: Kind, xs: int[], s: string | not) -> Pt {\n        return p\n    }`))).toEqual(["W-DEPRECATED-SERVER-MODIFIER"]);
+    expect(codes(P("", `${T}\n    server function f(p: Pt, k: Kind, xs: int[], s: string | not) -> Pt {\n        return p;\n    }`))).toEqual(["W-DEPRECATED-SERVER-MODIFIER"]);
   });
 
   test("s454: a payload enum has a wire form (§57.8, S451 R8) — clean as a parameter and as the return type", () => {
-    expect(sorted(P("", `${T}\n    server function f(s: Shape) {\n        return\n    }`))).toEqual(["W-DEPRECATED-SERVER-MODIFIER"]);
-    expect(sorted(P("", `${T}\n    server function g(s: Shape) -> Shape | not {\n        return s\n    }`))).toEqual(["W-DEPRECATED-SERVER-MODIFIER"]);
+    expect(sorted(P("", `${T}\n    server function f(s: Shape) {\n        return;\n    }`))).toEqual(["W-DEPRECATED-SERVER-MODIFIER"]);
+    expect(sorted(P("", `${T}\n    server function g(s: Shape) -> Shape | not {\n        return s;\n    }`))).toEqual(["W-DEPRECATED-SERVER-MODIFIER"]);
   });
 });
 
 describe("§13.7 (S451 R1) — a value position that would wait is E-VALUE-SERVER-CALL", () => {
   // s454: label()'s call of count() is a CLIENT call (label is client-placed), so it is handled (§19.9.10)
-  const S = `    let <n:int=0/>\n    server function count() -> int {\n        return 3\n    }\n    function label() -> int {\n        const c = count() !{ .Transport(t) :> 0 }\n        return c + 1\n    }`;
+  const S = `    let <n:int=0/>\n    server function count() -> int {\n        return 3;\n    }\n    function label() -> int {\n        const c = count() !{ .Transport(t) :> 0 };\n        return c + 1;\n    }`;
   const ok = (c) => c.filter((x) => x !== "W-DEPRECATED-SERVER-MODIFIER" && x !== "E-BOOTSTRAP-UNSUPPORTED");
 
   test("item 1 — an initializer calls a server function", () => {
@@ -343,21 +343,21 @@ describe("§13.7 (S451 R1) — a value position that would wait is E-VALUE-SERVE
   });
 
   test("twin: a pure function in the same positions is clean", () => {
-    expect(codes(P("", `    let <n:int=0/>\n    fn three() -> int { return 3 }\n    let <m:int=(three())/>`, `        <p>\${three()}</p>`))).toEqual([]);
+    expect(codes(P("", `    let <n:int=0/>\n    fn three() -> int { return 3; }\n    let <m:int=(three())/>`, `        <p>\${three()}</p>`))).toEqual([]);
   });
 });
 
 describe("refusals at the edge of U1a — each names the slice that lifts it", () => {
   // s454 (U1b lifted these): an unhandled client call of a server function is E-ERROR-002 (§19.9.10)
   test("a client function calling a server function, unhandled → E-ERROR-002 (§19.9.10), no U1b refusal", () => {
-    const src = P("", `    let <n:int=0/>\n    server function count() -> int {\n        return 3\n    }\n    function go() {\n        @n = count()\n    }`, `        <button onclick=go()>go</button>`);
+    const src = P("", `    let <n:int=0/>\n    server function count() -> int {\n        return 3;\n    }\n    function go() {\n        @n = count();\n    }`, `        <button onclick=go()>go</button>`);
     const c = codes(src).filter((x) => x !== "W-DEPRECATED-SERVER-MODIFIER");
     expect(c).toEqual(["E-ERROR-002"]);
     expect(diag(src, "E-ERROR-002").message).toContain("§19.9.10");
   });
 
   test("a handler calling a server function, unhandled → E-ERROR-002 (§19.9.10), no U1b refusal", () => {
-    const src = P("", `    server function ping() {\n        return\n    }`, `        <button onclick=ping()>go</button>`);
+    const src = P("", `    server function ping() {\n        return;\n    }`, `        <button onclick=ping()>go</button>`);
     expect(codes(src).filter((x) => x !== "W-DEPRECATED-SERVER-MODIFIER")).toEqual(["E-ERROR-002"]);
     expect(diag(src, "E-ERROR-002").message).toContain("event handler");
   });
@@ -374,8 +374,8 @@ describe("refusals at the edge of U1a — each names the slice that lifts it", (
   });
 
   test("a `?{}` in an imported module (a module-with-db-context, §44.7.1) is refused", () => {
-    const lib = { path: "lib.scrml", src: `\${\n    export function load(id: int) -> int {\n        const r = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get()\n        return 1\n    }\n}\n` };
-    const app = { path: "app.scrml", src: P(DB, `    import { load } from "./lib.scrml"`) };
+    const lib = { path: "lib.scrml", src: `\${\n    export function load(id: int) -> int {\n        const r = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get()\n        return 1;\n    }\n}\n` };
+    const app = { path: "app.scrml", src: P(DB, `    import { load } from "./lib.scrml";`) };
     const c = frontEnd(mods, [lib, app]).diags.map((d) => d.code);
     expect(c).toContain("E-BOOTSTRAP-UNSUPPORTED");
     expect(c).not.toContain("E-SQL-004");
@@ -383,7 +383,7 @@ describe("refusals at the edge of U1a — each names the slice that lifts it", (
 
   // s454 (U1b): the client artifact of a program with server functions is printed (design Item 4)
   test("the printer prints the CLIENT artifact of a program with a server function — the server function is not in it", () => {
-    const r = run(P("", `    server function bump(n: int) -> int {\n        return n + 1\n    }`));
+    const r = run(P("", `    server function bump(n: int) -> int {\n        return n + 1;\n    }`));
     const out = mods.print.printProgram(r.core, "t.client.js", "scrml-runtime.js");
     expect(out.refused).toEqual([]);
     expect(out.js.length).toBeGreaterThan(0);
@@ -542,7 +542,7 @@ describe("the lowered query in Core (s451 Ue: handled in the source; s468 U1c: a
   });
 
   test("s454: the printer prints the client artifact — no SQL text reaches it", () => {
-    const core = lowerClean(run(P(DB, `    function f() -> int {\n        const r = ${SQ}\`SELECT a FROM t\`}.get() !{ _ :> not }\n        return 1\n    }`)));
+    const core = lowerClean(run(P(DB, `    function f() -> int {\n        const r = ${SQ}\`SELECT a FROM t\`}.get() !{ _ :> not }\n        return 1;\n    }`)));
     const out = mods.print.printProgram(core, "t.client.js", "scrml-runtime.js");
     expect(out.refused).toEqual([]);
     expect(out.js).not.toContain("SELECT");
@@ -551,7 +551,7 @@ describe("the lowered query in Core (s451 Ue: handled in the source; s468 U1c: a
 });
 
 describe("check — the server boundary in Core (C-SQL1, C-S1..C-S4)", () => {
-  const base = () => lowerClean(run(P(DB, `    let <n:int=0/>\n    function find(id: int) -> int {\n        const row = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get() !{ _ :> not }\n        return 1\n    }\n    function cli() {\n        @n = 2\n    }`)));
+  const base = () => lowerClean(run(P(DB, `    let <n:int=0/>\n    function find(id: int) -> int {\n        const row = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get() !{ _ :> not }\n        return 1;\n    }\n    function cli() {\n        @n = 2;\n    }`)));
   const issues = (core, tag) => mods.check.checkCore(core).filter((s) => s.startsWith(tag));
 
   test("the lowered program is well-formed", () => {

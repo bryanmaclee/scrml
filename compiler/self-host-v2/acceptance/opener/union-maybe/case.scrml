@@ -4,8 +4,8 @@
     <g:Guess | not=.Yes/>
     let <h:Guess|not=.No/>
     let <name:string | not=not/>
-    function setIt() { @name = "bryan" }
-    function clear() { @h = not }
+    function setIt() { @name = "bryan"; }
+    function clear() { @h = not; }
     <main>
         <p id="a" if=(@name is given)>given</p>
         <p id="b" if=(@h is given)>h</p>

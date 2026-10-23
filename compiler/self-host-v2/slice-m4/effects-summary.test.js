@@ -90,15 +90,15 @@ describe("dpa-066 G7 — a value-position arm calling a wrapper of a no-value ca
     "    let <log:string=\"init\"/>",
     `    ${I}`,
     "        type LoadError:enum = { Missing }",
-    "        function nothing() { @n = 1 }",
+    "        function nothing() { @n = 1; }",
     `        ${wrapDecl}`,
     "        function load(k: string)! LoadError {",
-    "            if (k == \"x\") fail LoadError.Missing",
-    "            return k",
+    "            if (k == \"x\") fail LoadError.Missing;",
+    "            return k;",
     "        }",
     "        function go() {",
     `            const r = load("x") !{ _ :> ${armCall} }`,
-    "            @log = r",
+    "            @log = r;",
     "        }",
     "    }",
     "    <button onclick=go()>go</button>",
@@ -123,8 +123,8 @@ describe("dpa-066 G7 — a value-position arm calling a wrapper of a no-value ca
   });
 
   test("two wrappers deep, and through recursion", () => {
-    expect(codes(prog("function h() { return nothing() }\n        function g() { return h() }"))).toEqual(["E-ERROR-012"]);
-    expect(codes(prog("function g() {\n            if (@n == 1) { return g() }\n            return nothing()\n        }"))).toEqual(["E-ERROR-012"]);
+    expect(codes(prog("function h() { return nothing() }\n        function g() { return h(); }"))).toEqual(["E-ERROR-012"]);
+    expect(codes(prog("function g() {\n            if (@n == 1) { return g() }\n            return nothing();\n        }"))).toEqual(["E-ERROR-012"]);
   });
 
   // r2 LOW-1: the s452 r3 rule — an earlier unconditional return decides; a
@@ -132,14 +132,14 @@ describe("dpa-066 G7 — a value-position arm calling a wrapper of a no-value ca
   test("a `return nothing()` after an unconditional return is dead code for the arm rule (clean there) — but it is still `void` (E-TYPE-001)", () => {
     // s469 (#1471 r3): the dead `return nothing()` is still type-checked — `g` returns values, so
     // returning a `void` there is E-TYPE-001 (the arm rule stays clean: the live return decides)
-    expect(codes(prog("function g() {\n            return \"x\"\n            return nothing()\n        }"))).toEqual(["E-TYPE-001"]);
-    expect(codes(prog("function g() {\n            if (@n == 1) { return \"a\" } else { return \"b\" }\n            return nothing()\n        }"))).toEqual(["E-TYPE-001"]);
+    expect(codes(prog("function g() {\n            return \"x\";\n            return nothing();\n        }"))).toEqual(["E-TYPE-001"]);
+    expect(codes(prog("function g() {\n            if (@n == 1) { return \"a\" } else { return \"b\" }\n            return nothing();\n        }"))).toEqual(["E-TYPE-001"]);
     // twin: reachable, it still counts
-    expect(codes(prog("function g() {\n            if (@n == 1) { return \"a\" }\n            return nothing()\n        }")).slice().sort()).toEqual(["E-ERROR-012", "E-TYPE-001"]);
+    expect(codes(prog("function g() {\n            if (@n == 1) { return \"a\" }\n            return nothing();\n        }")).slice().sort()).toEqual(["E-ERROR-012", "E-TYPE-001"]);
   });
 
   test("negative twins: a wrapper that returns a value is clean", () => {
-    expect(codes(prog("function v() -> string { return \"v\" }\n        function g() { return v() }"))).toEqual([]);
+    expect(codes(prog("function v() -> string { return \"v\" }\n        function g() { return v(); }"))).toEqual([]);
     expect(codes(prog("function g() { return \"x\" }"))).toEqual([]);
   });
 });
@@ -160,13 +160,13 @@ describe("dpa-066 — the clock follows calls (§48.6 / the bootstrap's host-cal
   const clockRefusals = (src) => run(src).diags.filter((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED" && d.message.includes("reads the clock"));
 
   test("a call of a function that reads the clock through a call, in markup, is refused", () => {
-    const ds = clockRefusals(prog("    function direct() -> number { return ping() }", `        <p>${I}direct()}</p>`));
+    const ds = clockRefusals(prog("    function direct() -> number { return ping(); }", `        <p>${I}direct()}</p>`));
     expect(ds.length).toBe(1);
     expect(ds[0].message).toContain("`direct()` reads the clock");
   });
 
   test("a function that only HANDS a clock reader on as a value does not read the clock", () => {
-    const ds = clockRefusals(prog("    function viaValue() -> number {\n        const g = ping\n        return 1\n    }", `        <p>${I}viaValue()}</p>`));
+    const ds = clockRefusals(prog("    function viaValue() -> number {\n        const g = ping;\n        return 1;\n    }", `        <p>${I}viaValue()}</p>`));
     expect(ds).toEqual([]);
   });
 });
@@ -176,10 +176,10 @@ describe("dpa-066 M3 — the binder's summary decisions keep their place in the 
     const src = [
       "<program>",
       `    ${I}`,
-      "        function a() { const x = nope1 }",
-      "        function b() { const z = 1 }",
-      "        function c() { b() !{ _ :> 1 } }",
-      "        function d() { const y = nope2 }",
+      "        function a() { const x = nope1; }",
+      "        function b() { const z = 1; }",
+      "        function c() { b() !{ _ :> 1 }; }",
+      "        function d() { const y = nope2; }",
       "    }",
       "</program>",
     ].join("\n");

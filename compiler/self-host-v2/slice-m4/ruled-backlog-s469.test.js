@@ -39,9 +39,9 @@ const S = `    let <s:string="Hi"/>`;
 const show = `
     function showI(x: int | not) -> string {
         return match x {
-            not :> "not"
+            not :> "not",
             else :> "int"
-        }
+        };
     }`;
 
 // ---------------------------------------------------------------------------
@@ -52,8 +52,8 @@ describe("P — `T.parse(s)` (§14.13.4)", () => {
   });
   test("the result may be `not`: a plain `int` cell is refused (the failure is visible at the call site)", () => {
     expect(codes(prog(S + `\n    <a:int=(int.parse(@s))/>`, `        <p>\${@a}</p>`))).toEqual(["E-TYPE-031"]);
-    expect(codes(prog(S + `\n    function f() -> int { return int.parse(@s) }`, `        <p>\${f()}</p>`))).toEqual(["E-TYPE-031"]);
-    expect(codes(prog(S + `\n    function f() -> bool | not { return int.parse(@s) }`, `        <p>x</p>`))).toEqual(["E-TYPE-031"]);
+    expect(codes(prog(S + `\n    function f() -> int { return int.parse(@s); }`, `        <p>\${f()}</p>`))).toEqual(["E-TYPE-031"]);
+    expect(codes(prog(S + `\n    function f() -> bool | not { return int.parse(@s); }`, `        <p>x</p>`))).toEqual(["E-TYPE-031"]);
   });
   test("the argument is a string (E-TYPE-031) and there is exactly one (E-CALL-ARITY)", () => {
     expect(codes(prog(`    let <n:int=1/>\n    <a:int | not=(int.parse(@n))/>`, `        <p>x</p>`))).toEqual(["E-TYPE-031"]);
@@ -121,9 +121,9 @@ describe("P — the runtime's parses, every edge (one grammar per type)", () => 
 describe("T — `integer` / `boolean` are `int` / `bool` (§14.13.6)", () => {
   test("accepted in every type position, meaning exactly `int` / `bool`, with no warning yet", () => {
     expect(codes(prog(`    let <n:integer=3/>\n    let <b:boolean=true/>`, `        <p>\${@n + 1}</p>`))).toEqual([]);
-    expect(codes(prog(`    function f(x: integer) -> integer { return x * 2 }`, `        <p>\${f(2)}</p>`))).toEqual([]);
+    expect(codes(prog(`    function f(x: integer) -> integer { return x * 2; }`, `        <p>\${f(2)}</p>`))).toEqual([]);
     expect(codes(prog(`    let <n:integer=1.5/>`, `        <p>\${@n}</p>`))).toEqual(["E-TYPE-031"]);
-    expect(codes(prog(`    function f(x: int) -> int { return x }\n    let <n:integer=3/>`, `        <p>\${f(@n)}</p>`))).toEqual([]);
+    expect(codes(prog(`    function f(x: int) -> int { return x; }\n    let <n:integer=3/>`, `        <p>\${f(@n)}</p>`))).toEqual([]);
     expect(codes(prog(`    <xs:integer[]=([1, 2])/>`, `        <p>\${@xs.length}</p>`))).toEqual([]);
   });
 });
@@ -168,10 +168,10 @@ describe("S — the admitted string methods (Appendix D.1)", () => {
     expect(codes(prog(S, `        <p>\${@s.trim().substr(1)}</p>`))).toEqual(["E-STRING-METHOD-UNKNOWN"]);
   });
   test("review F2: a string the binder knows only through a function's return type, or as `string | not`, is still D.1's refusal", () => {
-    expect(codes(prog(S + `\n    function g() -> string { return "a" }`, `        <p>\${g().normalize()}</p>`))).toEqual(["E-STRING-METHOD-UNKNOWN"]);
-    expect(codes(prog(`    function h(x: string | not) -> string {\n        if (x is given) { return x.normalize() }\n        return ""\n    }`, `        <p>\${h("a")}</p>`))).toEqual(["E-STRING-METHOD-UNKNOWN"]);
-    expect(codes(prog(`    function h(x: string | not) -> string {\n        if (x is given) { return x.sort() }\n        return ""\n    }`, `        <p>\${h("a")}</p>`))).toEqual(["E-STRING-METHOD-UNKNOWN"]);
-    expect(codes(prog(`    function g() -> int { return 1 }`, `        <p>\${g().normalize()}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(prog(S + `\n    function g() -> string { return "a"; }`, `        <p>\${g().normalize()}</p>`))).toEqual(["E-STRING-METHOD-UNKNOWN"]);
+    expect(codes(prog(`    function h(x: string | not) -> string {\n        if (x is given) { return x.normalize(); }\n        return "";\n    }`, `        <p>\${h("a")}</p>`))).toEqual(["E-STRING-METHOD-UNKNOWN"]);
+    expect(codes(prog(`    function h(x: string | not) -> string {\n        if (x is given) { return x.sort(); }\n        return "";\n    }`, `        <p>\${h("a")}</p>`))).toEqual(["E-STRING-METHOD-UNKNOWN"]);
+    expect(codes(prog(`    function g() -> int { return 1; }`, `        <p>\${g().normalize()}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("a receiver that is not provably a string keeps the bootstrap's own refusal (no guess)", () => {
     expect(codes(prog(`    let <n:int=1/>`, `        <p>\${@n.substring(1)}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
@@ -318,44 +318,44 @@ describe("A — block arms yield with `lift` (§18.5); the value-form `if` branc
   const L = `    type LoadError:enum = { NotFound(id: string), Timeout }
     let <out:string=""/>
     function load(id: string)! LoadError {
-        if (id == "x") fail LoadError.NotFound(id)
-        return id
+        if (id == "x") fail LoadError.NotFound(id);
+        return id;
     }`;
   const fn = (body) => prog(L + `\n    function pick(id: string) -> string {\n${body}\n    }`, `        <p>x</p>`);
   test("a value-position arm (a failable `match`, a `!{}`) with statements and a bare last expression is E-ARM-TAIL-VALUE", () => {
-    expect(codes(fn(`        return match load(id) {\n            .Ok(v) :> {\n                @out = v\n                v\n            }\n            _ :> "e"\n        }`))).toEqual(["E-ARM-TAIL-VALUE"]);
-    expect(codes(fn(`        return match load(id) {\n            .Ok(v) :> {\n                @out = v\n                lift v\n            }\n            _ :> "e"\n        }`))).toEqual([]);
-    expect(codes(fn(`        const r = load(id) !{ _ :> {\n            @out = "e"\n            "e"\n        } }\n        return r`))).toEqual(["E-ARM-TAIL-VALUE"]);
-    expect(diag(fn(`        const r = load(id) !{ _ :> {\n            @out = "e"\n            "e"\n        } }\n        return r`), "E-ARM-TAIL-VALUE")?.message).toContain("`lift <expr>`");
+    expect(codes(fn(`        return match load(id) {\n            .Ok(v) :> {\n                @out = v;\n                v;\n            },\n            _ :> "e"\n        };`))).toEqual(["E-ARM-TAIL-VALUE"]);
+    expect(codes(fn(`        return match load(id) {\n            .Ok(v) :> {\n                @out = v;\n                lift v;\n            },\n            _ :> "e"\n        };`))).toEqual([]);
+    expect(codes(fn(`        const r = load(id) !{ _ :> {\n            @out = "e";\n            "e";\n        } };\n        return r;`))).toEqual(["E-ARM-TAIL-VALUE"]);
+    expect(diag(fn(`        const r = load(id) !{ _ :> {\n            @out = "e";\n            "e";\n        } };\n        return r;`), "E-ARM-TAIL-VALUE")?.message).toContain("`lift <expr>`");
   });
   test("unchanged: `.A :> expr`, a single-expression `{ e }`, `{ lift e }`, a leaving arm, a statement-position arm without `lift`", () => {
-    expect(codes(fn(`        const r = load(id) !{ _ :> "e" }\n        return r`))).toEqual([]);
-    expect(codes(fn(`        const r = load(id) !{ _ :> { "e" } }\n        return r`))).toEqual([]);
-    expect(codes(fn(`        const r = load(id) !{ _ :> { lift "e" } }\n        return r`))).toEqual([]);
-    expect(codes(fn(`        const r = load(id) !{ _ :> {\n            @out = "e"\n            return "L"\n        } }\n        return r`))).toEqual([]);
-    expect(codes(fn(`        load(id) !{ _ :> {\n            @out = "e"\n            @out = "f"\n        } }\n        return "s"`))).toEqual([]);
+    expect(codes(fn(`        const r = load(id) !{ _ :> "e" };\n        return r;`))).toEqual([]);
+    expect(codes(fn(`        const r = load(id) !{ _ :> { "e"; } };\n        return r;`))).toEqual([]);
+    expect(codes(fn(`        const r = load(id) !{ _ :> { lift "e"; } };\n        return r;`))).toEqual([]);
+    expect(codes(fn(`        const r = load(id) !{ _ :> {\n            @out = "e";\n            return "L";\n        } };\n        return r;`))).toEqual([]);
+    expect(codes(fn(`        load(id) !{ _ :> {\n            @out = "e";\n            @out = "f";\n        } };\n        return "s";`))).toEqual([]);
   });
   test("`lift` anywhere but an arm block's last statement is refused by name; so is one in a statement-position arm", () => {
-    expect(diag(fn(`        const r = load(id) !{ _ :> {\n            lift "a"\n            @out = "b"\n        } }\n        return r`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("`lift`");
-    expect(diag(fn(`        load(id) !{ _ :> {\n            @out = "e"\n            lift "e"\n        } }\n        return "s"`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("yields to nothing");
-    expect(diag(fn(`        lift "x"\n        return "s"`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("`lift`");
+    expect(diag(fn(`        const r = load(id) !{ _ :> {\n            lift "a"\n            @out = "b";\n        } };\n        return r;`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("`lift`");
+    expect(diag(fn(`        load(id) !{ _ :> {\n            @out = "e";\n            lift "e";\n        } };\n        return "s";`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("yields to nothing");
+    expect(diag(fn(`        lift "x"\n        return "s";`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("`lift`");
   });
   test("a `lift` block arm runs its statements, then yields (runtime)", async () => {
-    const src = prog(L + `\n    function pick2(id: string) -> string {\n        const r = load(id) !{ _ :> {\n            const t: string = "lifted:"\n            lift t + id\n        } }\n        return r\n    }`, `        <p id="r">\${pick2("x")}</p>`);
+    const src = prog(L + `\n    function pick2(id: string) -> string {\n        const r = load(id) !{ _ :> {\n            const t: string = "lifted:";\n            lift t + id;\n        } };\n        return r;\n    }`, `        <p id="r">\${pick2("x")}</p>`);
     await load(src);
     expect($("#r").textContent).toBe("lifted:x");
   });
   test("review F4: an arm ending in a write falls through (E-ERROR-012) — never E-ARM-TAIL-VALUE, whose fix-it would be `lift @n = 7`", () => {
-    expect(codes(fn(`        const r = load(id) !{ _ :> {\n            @out = "a"\n            @out = "b"\n        } }\n        return r`))).toEqual(["E-ERROR-012"]);
+    expect(codes(fn(`        const r = load(id) !{ _ :> {\n            @out = "a";\n            @out = "b";\n        } };\n        return r;`))).toEqual(["E-ERROR-012"]);
   });
   test("review F5: a `lift` operand is resolved as a value even where its arm is refused — a nested `match` there is not a statement-position one", () => {
     const K = L + `\n    type K:enum = { A, B }\n    let <k:K=.A/>`;
-    const src = prog(K + `\n    function go() -> int {\n        return match @k {\n            .A :> {\n                const t: int = 1\n                lift match @k { .A :> {\n                    @out = "x"\n                    lift 2\n                }, .B :> 3, }\n            }\n            .B :> 2\n        }\n    }`, `        <p>x</p>`);
+    const src = prog(K + `\n    function go() -> int {\n        return match @k {\n            .A :> {\n                const t: int = 1;\n                lift match @k { .A :> {\n                    @out = "x";\n                    lift 2;\n                }, .B :> 3, };\n            },\n            .B :> 2\n        };\n    }`, `        <p>x</p>`);
     const msgs = run(src).diags.map((d) => d.message);
     expect(msgs.filter((m) => m.includes("yields to nothing"))).toEqual([]);
   });
   test("the value-form `if` is not in the bootstrap: refused by name (never read as a name `if`)", () => {
-    expect(codes(prog(`    let <b:bool=true/>`, `        <p>\${if (@b) { "y" } else { "n" }}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(diag(prog(`    let <b:bool=true/>`, `        <p>\${if (@b) { "y" } else { "n" }}</p>`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("an `if` used as a value");
+    expect(codes(prog(`    let <b:bool=true/>`, `        <p>\${if (@b) { "y"; } else { "n"; }}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(diag(prog(`    let <b:bool=true/>`, `        <p>\${if (@b) { "y"; } else { "n"; }}</p>`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("an `if` used as a value");
   });
 });

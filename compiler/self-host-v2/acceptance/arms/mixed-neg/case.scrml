@@ -3,15 +3,15 @@
     type LoadError:enum = { NotFound(id: string), Timeout, Gone }
     let <out:string=""/>
     function load(id: string)! LoadError {
-        if (id == "x") fail LoadError.NotFound(id)
-        return id
+        if (id == "x") fail LoadError.NotFound(id);
+        return id;
     }
     function f() {
         @out = load("x") !{
             .NotFound(m) :> "nf",
-            .Timeout :> "to"
+            .Timeout :> "to",
             .Gone :> "g"
-        }
+        };
     }
     <main><p>${@out}</p></main>
 </program>

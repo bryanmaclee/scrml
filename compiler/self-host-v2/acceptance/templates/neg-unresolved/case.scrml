@@ -1,8 +1,8 @@
 // §14.13.2: a slot of unresolved type is refused (fail closed).
 <program>
-    fn one() { return 1 }
+    fn one() { return 1; }
     fn show() -> string {
-        return `v=${one()}`
+        return `v=${one()}`;
     }
     <main>
         <p>${show()}</p>

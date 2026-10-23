@@ -4,18 +4,18 @@
     let <out:string=""/>
     let <n:int=0/>
     function load(id: string)! LoadError {
-        if (id == "x") fail LoadError.NotFound(id)
-        if (id == "y") fail LoadError.Timeout
-        return id
+        if (id == "x") fail LoadError.NotFound(id);
+        if (id == "y") fail LoadError.Timeout;
+        return id;
     }
     function blk() {
         load("y") !{
-            .NotFound(m) :> { @out = m },
+            .NotFound(m) :> { @out = m; },
             .Timeout :> {
-                @n = @n + 1
-                lift "to"
+                @n = @n + 1;
+                lift "to";
             },
-        }
+        };
     }
     <main>
         <button id="blk" onclick=blk()>blk</button>

@@ -130,7 +130,7 @@ describe("§66.19.5 — a snapshot is a value (§66.10), on the verbatim source 
   let program;
   beforeAll(async () => {
     Date.now = () => 7;
-    const src = replaceLine(SRC(), "let snapshot = @audit", "function probe() -> int {\n        let snapshot = @audit\n        record(\"probe\")\n        return snapshot.length\n    }");
+    const src = replaceLine(SRC(), "let snapshot = @audit", "function probe() -> int {\n        let snapshot = @audit;\n        record(\"probe\");\n        return snapshot.length;\n    }");
     const core = compileClean(mods, [{ path: "audit.scrml", src }], "§66.19.5 + probe").core;
     ({ program } = await loadProgram(core, "audit-probe", ["record", "probe"]));
   });

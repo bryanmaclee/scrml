@@ -556,25 +556,24 @@ ${
     //
     // s469 — the arm list is a COMMA list (dpa-073 F2 (iii) + F2 (i), S469):
     // `match x { .A :> 1, .B :> 2, }` — a `,` after every arm, block arms
-    // included, the trailing one optional. The newline-separated list is still
-    // read during the migration (dpa-073 F5: enforcement comes after the
-    // `scrml fix` codemod; the bootstrap's own source is newline-separated, and
-    // impl#1, which builds it, does not read arm commas yet). ONE list takes ONE
-    // spelling: a list with a `,` between two arms and a boundary without one is
-    // E-MATCH-ARM-SEPARATOR, once, at the first arm that has no `,` before it.
+    // included, the trailing one optional. The bootstrap ENFORCES it (dpa-073
+    // F5 (4)): every arm after the first that does not follow a `,` is
+    // E-MATCH-ARM-SEPARATOR (missingArmComma), so a newline-separated list is
+    // refused, not read. (impl#1 keeps reading newline-separated arms — a
+    // carried divergence; the bootstrap's OWN source is compiled by impl#1 and
+    // stays in impl#1's dialect.)
     fn parseArms(tp: TP, guard: boolean) -> RArms {
         let t: TP = expectP(tp, "{")
         let arms: AArm[] = []
-        let commas: int = 0
         let lastComma = false
-        let bareAt: int = -1
+        let prevEnd: int = 0
         while (!isP(t, "}") && !atEnd(t)) {
             if (isP(t, ",")) {
                 // a `,` with no arm before it (`{ , .A :> 1 }`, `.A :> 1,, .B …`):
                 // one report, then the list goes on
                 t = adv(diagAt(t, "E-PARSE-ARM", "a `,` with no arm before it — an arm list puts one `,` after each arm (dpa-073 F2)", cur(t)))
             } else {
-                if (arms.length > 0 && !lastComma && bareAt < 0) bareAt = t.i
+                if (arms.length > 0 && !lastComma) t = missingArmComma(t, prevEnd)
                 const before: int = t.i
                 let piped = false
                 const pipe: PTok = cur(t)
@@ -620,22 +619,26 @@ ${
                 arms = arms.concat([arm])
                 t = bumpId(t)
                 lastComma = false
+                if (t.i > 0) prevEnd = t.toks[t.i - 1].end
                 if (isP(t, ",")) {
-                    commas = commas + 1
                     lastComma = true
                     t = adv(t)
                 }
                 if (t.i == before) t = adv(t)
             }
         }
-        if (commas > 0 && bareAt >= 0) t = diagAt(t, "E-MATCH-ARM-SEPARATOR", mixedArmsReason(), t.toks[bareAt])
         return { arms: arms, tp: expectP(t, "}") }
     }
 
-    // (No `match` keyword followed by a subject and `{` inside this string: impl#1,
-    // which compiles this file, rewrites that shape even inside a literal.)
-    fn mixedArmsReason() -> string {
-        return "this arm list mixes `,` and newline separators — one list takes one spelling: write a `,` after every arm, the trailing one optional (`{ .A :> 1, .B :> 2, }`, dpa-073 F2). The newline-separated list is still read until `scrml fix` migrates the corpus (dpa-073 F5)."
+    // s469 — E-MATCH-ARM-SEPARATOR (its dpa-073 F2 meaning, SPEC §18.2): an arm
+    // that does not follow a `,`. One report per missing `,`, its span the empty
+    // span at the end of the arm before — where the `,` goes. (No `match`
+    // keyword followed by a subject and `{` inside this string: impl#1, which
+    // compiles this file, rewrites that shape even inside a literal.)
+    fn missingArmComma(tp: TP, at: int) -> TP {
+        const msg: string = "Expected `,` between two arms — insert `,` after the arm before this one. An arm list is a comma list: a `,` after every arm, block arms included, the trailing one optional (`{ .A :> 1, .B :> 2, }`); a newline does not separate arms (dpa-073 F2, §18.2)."
+        const d: Diag = newDiag("E-MATCH-ARM-SEPARATOR", msg, tp.file, mkSpan(at, at))
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
     }
 
     // s452 — W-ARM-PIPE-LEGACY (§19.4.5, Info; one per arm): the `|`-led `!{}`
@@ -804,8 +807,13 @@ ${
             // `{ foo: foo }` and as a block whose result is `foo`
             const sh: PTok = peekAt(tp, 1)
             if (sh.cls == TC.Ident && sh.v != "not" && tk(peekAt(tp, 2), "}")) {
-                const rs: RBlock = parseBlock(diagAt(tp, "E-MATCH-ARM-SHORTHAND-AMBIGUOUS", shorthandArmReason(sh.v), sh))
-                return { body: AArmBody.ArmBlock(rs.b), lifted: false, tp: rs.tp }
+                // (read as the one-statement block, with no E-STMT-MISSING-SEMICOLON
+                // beside the one report: the shape, not its terminator, is the error)
+                const bstart: int = cur(tp).start
+                const rs: RStmt = parseStmt(adv(diagAt(tp, "E-MATCH-ARM-SHORTHAND-AMBIGUOUS", shorthandArmReason(sh.v), sh)))
+                const close: TP = expectP(rs.tp, "}")
+                const sb: ABlock = { nid: close.nid, span: spanFrom(close, bstart), stmts: [rs.s] }
+                return { body: AArmBody.ArmBlock(sb), lifted: false, tp: bumpId(close) }
             }
             const rb: RArmBlock = parseArmBlock(tp)
             return { body: AArmBody.ArmBlock(rb.b), lifted: rb.lifted, tp: rb.tp }
@@ -861,6 +869,7 @@ ${
             let done = false
             if (isWord(t, "lift")) {
                 const kw: PTok = cur(t)
+                const ld0: int = errorCount(t.diags)
                 const v: RExpr = parseAssign(adv(t))
                 let t2: TP = v.tp
                 if (isP(t2, ";")) t2 = adv(t2)
@@ -868,16 +877,24 @@ ${
                     const ls: RStmt = mkS(v.tp, kw.start, AStmtK.Eval(v.e))
                     stmts = stmts.concat([ls.s])
                     t = ls.tp
-                    if (isP(t, ";")) t = adv(t)
+                    // s469 — `lift <expr>` is a statement: it takes its `;` (dpa-073 F3 (i), F6)
+                    if (isP(t, ";")) {
+                        t = adv(t)
+                    } else if (errorCount(t.diags) == ld0) {
+                        t = missingSemi(t)
+                    }
                     lifted = true
                     done = true
                 }
             }
+            if (!done && isP(t, ";")) {
+                t = adv(t)
+                done = true
+            }
             if (!done) {
-                const r: RStmt = parseStmt(t)
+                const r: RStmt = parseTermStmt(t)
                 stmts = stmts.concat([r.s])
                 t = r.tp
-                if (isP(t, ";")) t = adv(t)
                 if (t.i == before) t = adv(t)
             }
         }
@@ -1635,15 +1652,119 @@ ${
         let stmts: AStmt[] = []
         while (!isP(t, "}") && !atEnd(t)) {
             const before: int = t.i
-            const r: RStmt = parseStmt(t)
-            stmts = stmts.concat([r.s])
-            t = r.tp
-            if (isP(t, ";")) t = adv(t)
+            if (isP(t, ";")) {
+                // an empty statement (a `;` after a block-like statement, `;;`)
+                t = adv(t)
+            } else {
+                const r: RStmt = parseTermStmt(t)
+                stmts = stmts.concat([r.s])
+                t = r.tp
+            }
             if (t.i == before) t = adv(t)
         }
         t = expectP(t, "}")
         const b: ABlock = { nid: t.nid, span: spanFrom(t, start), stmts: stmts }
         return { b: b, tp: bumpId(t) }
+    }
+
+    // s469 — dpa-073 F1 (a) "`;` terminates" + F3 (i) "Every statement": `;`
+    // ends every statement that is not block-like, the last one before a `}`
+    // included (`onclick={ @n = @n + 1; }`). Block-like statements, whose own
+    // `{ … }` (or closer) ends them, take none: `if` / `else`, `for`, a
+    // statement `match`, `given`, `when … changes { … }` / `<effect>`, and
+    // `defer { … }`. A statement with no `;` after it is
+    // E-STMT-MISSING-SEMICOLON ("Expected `;` to end the statement", the
+    // dpa-073 F6 code), its span the empty span at the statement's end — where
+    // the `;` goes. A statement that already reported an error is not also
+    // reported for its terminator. (impl#1 keeps reading newline-terminated
+    // statements — a carried divergence, dpa-073 F5.)
+    fn parseTermStmt(tp: TP) -> RStmt {
+        const d0: int = errorCount(tp.diags)
+        const r: RStmt = parseStmt(tp)
+        return { s: r.s, tp: termAfter(r.tp, r.s, d0) }
+    }
+
+    // After statement `s` (parsed from a TP whose error count was `d0`): its `;`.
+    fn termAfter(tp: TP, s: AStmt, d0: int) -> TP {
+        if (isP(tp, ";")) return adv(tp)
+        if (!needsSemi(s)) return tp
+        if (errorCount(tp.diags) > d0) return tp
+        return missingSemi(tp)
+    }
+
+    // E-STMT-MISSING-SEMICOLON at the end of the last token consumed.
+    fn missingSemi(tp: TP) -> TP {
+        let at: int = cur(tp).start
+        let after: string = ""
+        if (tp.i > 0) {
+            const last: PTok = tp.toks[tp.i - 1]
+            at = last.end
+            if (last.text.length <= 24 && last.text.indexOf("\n") < 0) after = " after `" + last.text + "`"
+        }
+        const msg: string = "Expected `;` to end the statement — insert `;`" + after + ". A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3)."
+        const d: Diag = newDiag("E-STMT-MISSING-SEMICOLON", msg, tp.file, mkSpan(at, at))
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
+    }
+
+    // Does statement `s` end with a `;` (dpa-073 F3 (i))? A block-like statement
+    // does not: its `{ … }` ends it. A braceless body (`if (c) x = 1;`, `defer
+    // f();`) took its own `;` when it was parsed (parseBlockOrStmt, parseDefer).
+    fn needsSemi(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> !blockLikeExpr(e.k)
+            .Local(name: n) :> true
+            .Return(e: e) :> true
+            .If(cond: c) :> false
+            .Given(name: n) :> false
+            .EffectStmt(w: w) :> false
+            .Defer(body: b) :> false
+            .Fail(f: x) :> true
+            .For(f: x) :> false
+            .Break(label: x) :> true
+            .Continue(label: x) :> true
+        }
+    }
+
+    // An expression statement that is block-like: a statement `match` (the
+    // whole statement is the `match`, so its arms' `}` ends it). A `!{}`
+    // handler statement (`load() !{ … }`) is not in dpa-073 F3's block-like
+    // list, so it takes a `;` (PA reading, fail closed — S469). A parse-error
+    // placeholder takes none (its error was reported).
+    fn blockLikeExpr(k: AExprK) -> boolean {
+        return match k {
+            .Handled(h: h) :> isMatchHow(h.how)
+            .Recovered :> true
+            .Sql(q: q) :> false
+            .Template(quasis: qs) :> false
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps) :> false
+        }
+    }
+
+    fn isMatchHow(how: AHow) -> boolean {
+        return match how {
+            .MatchOn(arms: a) :> true
+            .Propagate :> false
+            .Guard(arms: a) :> false
+        }
     }
 
     // A block's statements when the region holds them WITHOUT braces (an
@@ -2396,7 +2517,7 @@ ${
     fn parseBlockOrStmt(tp: TP) -> RBlock {
         if (isP(tp, "{")) return parseBlock(tp)
         const start: int = cur(tp).start
-        const s: RStmt = parseStmt(tp)
+        const s: RStmt = parseTermStmt(tp)
         const b: ABlock = { nid: s.tp.nid, span: spanFrom(s.tp, start), stmts: [bareDefer(s.s)] }
         return { b: b, tp: bumpId(s.tp) }
     }
@@ -2466,7 +2587,7 @@ ${
         }
         const arrayLead: boolean = isP(t, "[")
         const bodyStart: int = cur(t).start
-        const r: RStmt = parseStmt(t)
+        const r: RStmt = parseTermStmt(t)
         const b: ABlock = { nid: r.tp.nid, span: spanFrom(r.tp, bodyStart), stmts: [r.s] }
         return mkS(bumpId(r.tp), start, AStmtK.Defer(b, arrayLead, false))
     }
@@ -2809,6 +2930,7 @@ ${
     }
 
     fn parseImport(tp: TP, start: int) -> RItems {
+        const d0: int = errorCount(tp.diags)
         let t: TP = expectP(adv(tp), "{")
         let names: AImportName[] = []
         while (!isP(t, "}") && !atEnd(t)) {
@@ -2827,6 +2949,14 @@ ${
         const src: PTok = cur(t)
         if (src.cls != TC.Str) t = diagAt(t, "E-PARSE-IMPORT", "expected the import source string", src)
         t = adv(t)
+        // s469 — an `import` is a statement, not a closer-delimited item: it ends
+        // with `;` (dpa-073 F3 (i); the DD's open question "are `import … from
+        // \"x\"` … statements (`;`) or items? F3 (i) says statements")
+        if (isP(t, ";")) {
+            t = adv(t)
+        } else if (errorCount(t.diags) == d0) {
+            t = missingSemi(t)
+        }
         const imp: AImport = { nid: t.nid, span: spanFrom(t, start), names: names, from: src.v }
         return mkItem(bumpId(t), start, AItemK.ImportItem(imp))
     }

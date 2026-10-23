@@ -152,17 +152,17 @@ describe("P — parse", () => {
     expect(d.message).toContain("cannot be read one way");
   });
   test("a tagged template is refused by name (E-BOOTSTRAP-UNSUPPORTED), not read as a call or a name", () => {
-    const r = run(fnProg("    fn tag(s: string) -> string { return s }", "n: int", "tag`a${n}`"));
+    const r = run(fnProg("    fn tag(s: string) -> string { return s; }", "n: int", "tag`a${n}`"));
     const d = r.diags.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED");
     expect(d.message).toContain("tagged template");
   });
   test("a template is ONE operand of a match arm, across lines and holding `,` / `|`", () => {
     const src = fnProg("    type C:enum = { A, B }", "c: C, n: int",
-      "match c {\n            .A :> `a, ${n}\n| x`\n            .B :> `b`\n        }");
+      "match c {\n            .A :> `a, ${n}\n| x`,\n            .B :> `b`\n        };");
     expect(codes(src)).toEqual([]);
   });
   test("a closer with no opener in a slot is named — it does not pop the brackets around the template", () => {
-    const src = fnProg("    fn g(t: string) -> string { return t }", "a: int", "g(`${ a ) }`)");
+    const src = fnProg("    fn g(t: string) -> string { return t; }", "a: int", "g(`${ a ) }`)");
     const d = diag(src, "E-PARSE-TEMPLATE");
     expect(d.message).toContain("with no opener inside the slot");
     expect(codes(src)).toEqual(["E-PARSE-TEMPLATE"]);
@@ -203,7 +203,7 @@ describe("T — a slot is a text sink (§14.13.2)", () => {
     });
   }
   test("E-TEXT-NON-PRIMITIVE — a value of unresolved type (fail closed); its message names the fixes", () => {
-    const src = fnProg("    fn g(a) { return a }", "n: int", "`v=${g(n)}`");
+    const src = fnProg("    fn g(a) { return a; }", "n: int", "`v=${g(n)}`");
     const d = diag(src, "E-TEXT-NON-PRIMITIVE");
     expect(d).toBeDefined();
     expect(d.message).toContain("cannot resolve");
@@ -213,7 +213,7 @@ describe("T — a slot is a text sink (§14.13.2)", () => {
   });
   test("E-OPERAND-NOT-NARROWED — a `T | not` slot; narrowed, it is text", () => {
     expect(codes(fnProg(D, "m: int | not", "`v=${m}`"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
-    const narrowed = `<program>\n    fn f(m: int | not) -> string {\n        if (m is given) {\n            return \`v=\${m}\`\n        }\n        return "none"\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
+    const narrowed = `<program>\n    fn f(m: int | not) -> string {\n        if (m is given) {\n            return \`v=\${m}\`\n        };\n        return "none"\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
     expect(codes(narrowed)).toEqual([]);
   });
   test("an undeclared name in a slot is reported once (E-SCOPE-001), not again as text", () => {
@@ -224,7 +224,7 @@ describe("T — a slot is a text sink (§14.13.2)", () => {
     expect(codes(fnProg(D, "n: int", "`typed ${n}`"))).toEqual([]);
   });
   test("a slot's reads are tracked: a template in markup re-renders when the cell changes", () => {
-    const src = `<program>\n    let <n:int=1/>\n    fn label(k: int) -> string {\n        return \`n=\${k}\`\n    }\n    <main>\n        <p>\${\`[\${@n}]\`}</p>\n    </main>\n</program>\n`;
+    const src = `<program>\n    let <n:int=1/>\n    fn label(k: int) -> string {\n        return \`n=\${k}\`;\n    }\n    <main>\n        <p>\${\`[\${@n}]\`}</p>\n    </main>\n</program>\n`;
     expect(codes(src)).toEqual([]);
   });
 });
@@ -348,13 +348,13 @@ describe("BACKSTOP — a Recovered node never reaches the printer when the file 
 
 describe("found by the end-to-end fuzz — a call of a value is never silently `not`", () => {
   test("`total()` on a `number` parameter is refused (it printed `null === 1`)", () => {
-    const src = "<program>\n    fn f(total: number) -> bool {\n        return total() == 1\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
+    const src = "<program>\n    fn f(total: number) -> bool {\n        return total() == 1;\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
     const d = diag(src, "E-BOOTSTRAP-UNSUPPORTED");
     expect(d.message).toContain("only a declared scrml function is callable");
     expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("r3 F2: not piled onto a parse error in the file (the parse error is the report)", () => {
-    const src = "<program>\n    fn f(total: number) -> bool {\n        return total() == 1\n    }\n    fn g() -> string {\n        return `a${}`\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
+    const src = "<program>\n    fn f(total: number) -> bool {\n        return total() == 1;\n    }\n    fn g() -> string {\n        return `a${}`\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
     expect(codes(src)).toEqual(["E-PARSE-TEMPLATE"]);
   });
   test("r3 F2: E-EQ-001 is not piled onto a parse error inside the comparison", () => {
@@ -405,7 +405,7 @@ describe("M1 — a backslash before U+2028 / U+2029 is a line continuation", () 
 
 describe("L1 — a template on the line after an expression reads two ways", () => {
   test("refused by name (E-PARSE-TEMPLATE), never dropped as a second statement", () => {
-    const src = "<program>\n    fn f(s: string, n: int) -> string {\n        const t: string = s\n        `x${n}`\n        return t\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
+    const src = "<program>\n    fn f(s: string, n: int) -> string {\n        const t: string = s\n        `x${n}`\n        return t;\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
     expect(diag(src, "E-PARSE-TEMPLATE").message).toContain("line after an expression");
     expect(codes(src)).toEqual(["E-PARSE-TEMPLATE"]);
   });

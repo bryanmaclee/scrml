@@ -93,7 +93,7 @@ describe("the PROVISIONAL table's guards", () => {
 
 describe("every diagnostic carries its §34 severity", () => {
   test("Error: E-SCOPE-001", () => {
-    const r = run(P(``, `    let <n:int=0/>\n    function go() { @n = nope + 1 }`, `        <button onclick=go()>go</button>`));
+    const r = run(P(``, `    let <n:int=0/>\n    function go() { @n = nope + 1; }`, `        <button onclick=go()>go</button>`));
     expect(r.diags.map((d) => [d.code, d.severity])).toEqual([["E-SCOPE-001", "Error"]]);
   });
 

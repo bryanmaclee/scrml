@@ -3,8 +3,8 @@
     type Color:enum = { Red, Green, Blue }
     let <c:Color=.Red/>
     <main>
-        <button id="g" onclick={ @c = .Green }>g</button>
-        <button id="b" onclick={ @c = .Blue }>b</button>
+        <button id="g" onclick={ @c = .Green; }>g</button>
+        <button id="b" onclick={ @c = .Blue; }>b</button>
         <p id="out">${match @c { .Red :> "r", .Green :> "g", .Blue :> "b", }}</p>
         <p id="op">${"is " + match @c { .Red :> "red", .Green :> "green", .Blue :> "blue", }}</p>
     </main>
