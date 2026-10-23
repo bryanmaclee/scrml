@@ -485,7 +485,9 @@ describe("G — `<each in=>` literals, row-scoped handles, exclusive arms", () =
 // day nested functions parse. The let / const twin still fires.
 describe("§7.3.3 ruling B1 — a nested function over a parameter", () => {
   test("no E-SCOPE-REDECLARE — `function f(x: int) { function x() { } }`", () => {
-    expect(inApp("    function f(x: int) { function; x(); { }; }")).not.toContain("E-SCOPE-REDECLARE");
+    expect(inApp("    function f(x: int) { function x() { } }")).not.toContain("E-SCOPE-REDECLARE");
+    // s469: the shape as written (a nested declaration, which the bootstrap does not parse) — pinned whole
+    expect(inApp("    function f(x: int) { function x() { } }")).toEqual(["E-STMT-MISSING-SEMICOLON", "E-STMT-MISSING-SEMICOLON", "E-STMT-MISSING-SEMICOLON", "E-SCOPE-001", "E-TYPE-STRUCT-CONTEXT"]);
   });
   test("twin fires — `let x` / `const x` over parameter `x`", () => {
     expect(inApp("    function f(x: int) { let x = 1; }")).toEqual(["E-SCOPE-REDECLARE"]);

@@ -196,6 +196,9 @@ describe("`defer` is a contextual keyword (§19.16.1) — everywhere else an ide
   });
 
   test("the deferred statement must start on the SAME line — a lone `defer` is a read (here: undeclared)", () => {
-    expect(codes(P(`    function go() {\n        defer;\n        @n = 1;\n    }`, ["go"]))).toEqual(["E-SCOPE-001"]);
+    expect(codes(P(`    function go() {\n        defer\n        @n = 1;\n    }`, ["go"]))).toEqual(["E-STMT-MISSING-SEMICOLON", "E-SCOPE-001"]);
+    // (s469: dpa-073 F1 would read `defer⏎@n = 1;` as one defer statement; the bootstrap still decides the
+    // contextual keyword by line (route-to-PA R8) — the lone `defer` stays a read, and the missing `;`
+    // after it is reported, so the split form fails closed rather than meaning two things)
   });
 });

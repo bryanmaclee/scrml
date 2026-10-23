@@ -183,7 +183,9 @@ describe("S460 — `x is given` / `x is not`: the explicit pair (parsed, typed `
     expect(codes(O + "    function f() { if (@o.n is given) { if (@b) { @m = 2; }\n @m = @o.n + 1; } }")).toEqual([]);
   });
   test("a newline before `is` does not continue the line (§7.2.2)", () => {
-    expect(codes(O + "    function f() { const q: bool = @o.n;\n        is; given }").some((c) => c.startsWith("E-PARSE-"))).toBe(true);
+    expect(codes(O + "    function f() { const q: bool = @o.n\n        is given }").some((c) => c.startsWith("E-PARSE-"))).toBe(true);
+    // s469: the split shape as written — pinned whole (the bootstrap still decides `is given` by line)
+    expect(codes(O + "    function f() { const q: bool = @o.n\n        is given }")).toEqual(["E-STMT-MISSING-SEMICOLON", "E-STMT-MISSING-SEMICOLON", "E-SYNTAX-044", "E-PARSE-EXPECTED", "E-SCOPE-001"]);
   });
 });
 

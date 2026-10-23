@@ -585,8 +585,10 @@ describe("S452 ruling c — `!{}` arms take the `match` arm grammar; the leading
   // r2 (review LOW): the lint names a rewrite, so it fires only for an arm that PARSED — never
   // during error recovery, never with an empty or truncated pattern. The errors are unchanged.
   test("r2: no lint during recovery — a bitwise `|` in a pipe-less arm's body (empty pattern)", () => {
-    const src = fnH(`            .NotFound(m) :> @n = @n, | 2,\n            _ :> @n = 2`);
-    expect(codes(src)).toEqual(["E-PARSE-ARM", "E-PARSE-ARM", "E-SYNTAX-010"]);
+    // (s469: kept in its pre-dpa-073 shape on purpose — the arms are not comma-separated, so the two
+    // arm boundaries are also E-MATCH-ARM-SEPARATOR; the recovery under test is unchanged)
+    const src = fnH(`            .NotFound(m) :> @n = @n | 2\n            _ :> @n = 2`);
+    expect(codes(src)).toEqual(["E-MATCH-ARM-SEPARATOR", "E-PARSE-ARM", "E-PARSE-ARM", "E-MATCH-ARM-SEPARATOR", "E-SYNTAX-010"]);
     expect(wMsgs(src)).toEqual([]);
   });
 
