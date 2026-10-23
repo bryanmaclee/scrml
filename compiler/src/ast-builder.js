@@ -12749,6 +12749,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // binds an explicit `const` binder immutable (E-ASSIGN-004 on a write in ANY
       // loop). A keywordless (and `var`) head carries neither flag.
       let _binderKw = null;
+      let _ruledHead = null; // S469 — "condition" | "infinite" (E-IMPL1-RULED-FORM-UNSUPPORTED)
       let iterable;
       if (peek().kind === "PUNCT" && peek().text === "(") {
         // JS-style: for (const|let|var x of|in iterable) or C-style: for (init; cond; update)
@@ -12798,6 +12799,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             // variable name
             variable = consume().text;
           }
+          // S469 — impl#1 does not implement the ruled `for (cond)` / `for { … }` heads (§49); record the
+          // shape so the type system refuses it (E-IMPL1-RULED-FORM-UNSUPPORTED, impl1-ruled-form-refusal.ts).
+          if (!(peek().kind === "KEYWORD" && (peek().text === "in" || peek().text === "of"))) _ruledHead = "condition";
           // Accept `of` (scrml canonical); reject `in` (JS-reflex).
           if (peek().kind === "KEYWORD" && peek().text === "in") {
             const inTok = peek();
@@ -12839,6 +12843,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // (E-FOR-UNPARENTHESIZED-HEAD) and recover by consuming `of` + collecting
         // the real iterable, so no broken loop is emitted and downstream analysis
         // does not cascade. The `in` legacy form is left unchanged.
+        const _braceHead = peek().kind === "PUNCT" && peek().text === "{";
         if (peek().kind === "PUNCT" && (peek().text === "[" || peek().text === "{")) {
           // Destructuring LHS in a braceless head (`for [a,b] of xs`): consume the
           // pattern so the `of` after it is detected and rejected below — otherwise
@@ -12847,6 +12852,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         } else if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
           variable = consume().text;
         }
+        // S469 — impl#1 does not implement the ruled `for (cond)` / `for { … }` heads (§49); record the
+        // shape so the type system refuses it (E-IMPL1-RULED-FORM-UNSUPPORTED, impl1-ruled-form-refusal.ts).
+        if (_braceHead && !(peek().kind === "KEYWORD" && (peek().text === "in" || peek().text === "of"))) _ruledHead = "infinite";
         if (peek().kind === "KEYWORD" && peek().text === "in") {
           consume(); // legacy scrml English form — value-iteration, unchanged
         } else if (peek().kind === "KEYWORD" && peek().text === "of") {
@@ -12893,6 +12901,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         ...(isForAwait ? { isAwait: true } : {}),
         ...(_binderKw === "let" ? { letBinder: true } : {}),
         ...(_binderKw === "const" ? { constBinder: true } : {}),
+        ...(_ruledHead ? { ruledHead: _ruledHead } : {}),
         variable,
         iterable,
         body,
@@ -15366,6 +15375,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     let variable = 'item';
     let iterable;
     let _binderKw = null; // s427 round 4 — see the statement-parser for-stmt sites
+    let _ruledHead = null; // S469 — 'condition' | 'infinite' (E-IMPL1-RULED-FORM-UNSUPPORTED)
     if (peek().kind === 'PUNCT' && peek().text === '(') {
       consume(); // consume `(`
       // Detect C-style: look for `;` at paren depth 1 before closing `)`
@@ -15405,8 +15415,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         } else if (peek().kind === 'IDENT' || peek().kind === 'KEYWORD') {
           variable = consume().text;
         }
+        // S469 — impl#1 does not implement the ruled `for (cond)` / `for { … }` heads (§49); record the
+        // shape so the type system refuses it (E-IMPL1-RULED-FORM-UNSUPPORTED, impl1-ruled-form-refusal.ts).
         if (peek().kind === 'KEYWORD' && (peek().text === 'of' || peek().text === 'in')) {
           consume();
+        } else {
+          _ruledHead = 'condition';
         }
         let { expr: iterExpr } = collectExpr(')');
         // S455 (§19.8.3) — a handled `?{}` iterable, `for (r of ?{…}.all() !{ … })`:
@@ -15431,6 +15445,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // §17.4a/§17.4b mandate a parenthesized `of` head. Reject the braceless `of`
       // form and recover by consuming `of` + collecting the real iterable. The
       // `in` legacy form is left unchanged.
+      const _braceHead = peek().kind === 'PUNCT' && peek().text === '{';
       if (peek().kind === 'PUNCT' && (peek().text === '[' || peek().text === '{')) {
         // Destructuring LHS in a braceless head (`for [a,b] of xs`): consume the
         // pattern so the `of` after it is detected and rejected below — otherwise
@@ -15439,6 +15454,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       } else if (peek().kind === 'IDENT' || peek().kind === 'KEYWORD') {
         variable = consume().text;
       }
+      if (_braceHead && !(peek().kind === 'KEYWORD' && (peek().text === 'in' || peek().text === 'of'))) _ruledHead = 'infinite';
       if (peek().kind === 'KEYWORD' && peek().text === 'in') {
         consume(); // legacy scrml English form — value-iteration, unchanged
       } else if (peek().kind === 'KEYWORD' && peek().text === 'of') {
@@ -15466,6 +15482,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       kind: 'for-stmt',
       ...(_binderKw === 'let' ? { letBinder: true } : {}),
       ...(_binderKw === 'const' ? { constBinder: true } : {}),
+      ...(_ruledHead ? { ruledHead: _ruledHead } : {}),
       variable,
       iterable,
       iterExpr: safeParseExprToNode(iterable, 0),
@@ -18205,6 +18222,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // binds an explicit `const` binder immutable (E-ASSIGN-004 on a write in ANY
       // loop). A keywordless (and `var`) head carries neither flag.
       let _binderKw = null;
+      let _ruledHead = null; // S469 — "condition" | "infinite" (E-IMPL1-RULED-FORM-UNSUPPORTED)
       let iterable;
       if (peek().kind === "PUNCT" && peek().text === "(") {
         // JS-style: for (const|let|var x of|in iterable) or C-style: for (init; cond; update)
@@ -18253,6 +18271,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             // variable name
             variable = consume().text;
           }
+          // S469 — impl#1 does not implement the ruled `for (cond)` / `for { … }` heads (§49); record the
+          // shape so the type system refuses it (E-IMPL1-RULED-FORM-UNSUPPORTED, impl1-ruled-form-refusal.ts).
+          if (!(peek().kind === "KEYWORD" && (peek().text === "in" || peek().text === "of"))) _ruledHead = "condition";
           // Accept `of` (scrml canonical); reject `in` (JS-reflex).
           if (peek().kind === "KEYWORD" && peek().text === "in") {
             const inTok = peek();
@@ -18294,6 +18315,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // (E-FOR-UNPARENTHESIZED-HEAD) and recover by consuming `of` + collecting
         // the real iterable, so no broken loop is emitted and downstream analysis
         // does not cascade. The `in` legacy form is left unchanged.
+        const _braceHead = peek().kind === "PUNCT" && peek().text === "{";
         if (peek().kind === "PUNCT" && (peek().text === "[" || peek().text === "{")) {
           // Destructuring LHS in a braceless head (`for [a,b] of xs`): consume the
           // pattern so the `of` after it is detected and rejected below — otherwise
@@ -18302,6 +18324,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         } else if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
           variable = consume().text;
         }
+        // S469 — impl#1 does not implement the ruled `for (cond)` / `for { … }` heads (§49); record the
+        // shape so the type system refuses it (E-IMPL1-RULED-FORM-UNSUPPORTED, impl1-ruled-form-refusal.ts).
+        if (_braceHead && !(peek().kind === "KEYWORD" && (peek().text === "in" || peek().text === "of"))) _ruledHead = "infinite";
         if (peek().kind === "KEYWORD" && peek().text === "in") {
           consume(); // legacy scrml English form — value-iteration, unchanged
         } else if (peek().kind === "KEYWORD" && peek().text === "of") {
@@ -18342,6 +18367,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         ...(isForAwait ? { isAwait: true } : {}),
         ...(_binderKw === "let" ? { letBinder: true } : {}),
         ...(_binderKw === "const" ? { constBinder: true } : {}),
+        ...(_ruledHead ? { ruledHead: _ruledHead } : {}),
         variable,
         iterable,
         body,
