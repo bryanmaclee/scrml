@@ -83,10 +83,13 @@ describe("g-each-peritem-if §1 — compiles + lowers the predicate (was E-CODEG
     expect(/\bis some\b/.test(clientJs)).toBe(false);             // predicate lowered
   });
 
-  test("the element append is GATED on the condition", () => {
+  test("the element is GATED on the condition (the reactive element/comment swap)", () => {
     const { clientJs } = compileCase();
-    // `if (<cond>) <frag>.appendChild(<el>)` — the conditional mount.
-    expect(/if \(.*\)\s*\w+\.appendChild\(/.test(clientJs)).toBe(true);
+    // S469 — every per-row if= is the structural swap: the element OR its placeholder
+    // comment is appended (`let _cur = (<cond>) ? <el> : <ph>`), and a per-row effect keeps
+    // it in step (`_scrml_ifrow_apply`). Was a create-time `if (<cond>) <frag>.appendChild(<el>)`.
+    expect(/let _scrml_cur_\d+ = \(.*\) \? _scrml_el_\d+ : _scrml_ph_\d+;/.test(clientJs)).toBe(true);
+    expect(clientJs).toContain("_scrml_ifrow_apply(");
   });
 
   test("(C1) a §42 predicate in a per-item INTERPOLATION lowers (was raw `is some`)", () => {
