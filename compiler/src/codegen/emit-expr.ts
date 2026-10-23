@@ -115,6 +115,7 @@ import { srcmapMark } from "./srcmap-provenance.ts";
 import { iterDestructuredNames } from "../type-system.ts";
 import { lowerPresenceCheck, lowerAbsenceCheck, lowerVariantCheck } from "./is-predicate-lowering.ts";
 import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw, droppedStatementTextOf, hasLostTrailingContent, rawArmHasStrayComma } from "../expression-parser.ts";
+import { armHasDivisionSlash } from "../arm-list-split.ts";
 import { sqlQueryExprShape, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { emitSqlQueryShape, emitNestedGuardExpr, emitServerFnValueFromText, emitServerFnValue } from "./emit-logic.js";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
@@ -5110,7 +5111,12 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
       `E-PARSE-001: the \`match\` arm \`${excerptRaw(arm)}\` holds a \`,\` that separates no two arms. ` +
         "An arm list puts one `,` after each arm, the trailing one optional (`{ .A :> 1, .B :> 2, }`); " +
         "a leading `,`, a doubled `,,`, or a comma sequence inside an arm body (scrml has no comma " +
-        "operator, §40.8) is not an arm list. Remove the `,` (§18.2).",
+        "operator, §40.8) is not an arm list. Remove the `,` (§18.2)." +
+        (armHasDivisionSlash(arm)
+          ? " If the `,` is inside a regular expression written after `+`, `-`, `*` or `%`, impl#1 reads that " +
+            "`/` as division (g-impl1-regex-after-binary-operator-lexed-as-division-s469): wrap the regular " +
+            "expression in parentheses — `(/a,b/)`."
+          : ""),
       (node as { span?: object }).span ?? {},
     ), node as object);
     return "null /* E-PARSE-001 */";

@@ -26,6 +26,7 @@ import { ScrmlParser } from "./scrml-acorn.ts";
 import { sliceTemplateText } from "./interpolation-extent.ts";
 import type { TemplateSegment } from "./interpolation-extent.ts";
 import { boundNamesOf } from "./binding-names.ts";
+import { splitArmSeparatorCommas } from "./arm-list-split.ts";
 // GITI-017 (S125): shared regex/comment/string fence. preprocessForAcorn's
 // `not `→`!` lowering must skip regex-literal / comment / string interiors or
 // it corrupts `/not a jj repo/i` → `/!a jj repo/i` (silent-corruption class).
@@ -2676,68 +2677,10 @@ function splitMatchArms(content: string): string[] {
   return arms.flatMap(splitArmSeparatorCommas);
 }
 
-/**
- * S469 (dpa-073 F2 / F5(1)) — the arm list is a comma list (§18.2: a `,` between
- * every pair of arms, the trailing one optional). impl#1 accepts the `,` and keeps
- * reading newline-separated arms. Split one line-joined arm string at its depth-0
- * `,` separators (strings, templates, `( )` `[ ]` `{ }` respected — a `,` inside a
- * call, an object or a product pattern is the arm's own) and drop the trailing one.
- *
- * Fail closed: the split is taken only when EVERY piece is an arm — it carries a
- * depth-0 arm arrow (`:>` / `=>` / `->`) — and only the LAST piece may be empty (the
- * trailing `,`). Anything else (a `,` in markup text, an empty arm `,,`) is left
- * exactly as written, for the stage that reads the arm to refuse.
- */
-function splitArmSeparatorCommas(arm: string): string[] {
-  if (!arm.includes(",")) return [arm];
-  const pieces = splitTopLevelCommas(arm);
-  // splitTopLevelCommas drops a trailing empty piece (the trailing `,`) but keeps
-  // interior ones; an interior empty piece (`,,`) is not a separator list.
-  if (pieces.some((p) => p.length === 0)) return [arm];
-  if (pieces.length <= 1) {
-    const only = pieces[0] ?? "";
-    // `arm,` — a single arm with its trailing separator.
-    return only && only !== arm.trim() && hasTopLevelArmArrow(only) ? [only] : [arm];
-  }
-  if (!pieces.every(hasTopLevelArmArrow)) return [arm];
-  return pieces;
-}
-
-/**
- * S469 — does a raw arm string still hold a depth-0 `,` (outside strings, templates
- * and `( )` `[ ]` `{ }`)? After `splitArmSeparatorCommas` every separator is gone, so
- * one that remains separates nothing an arm can be read from — `,,`, a leading `,`,
- * or a comma sequence in the body (`.A :> f(x), 2`; scrml has no comma operator,
- * §40.8). The match lowering refuses such an arm rather than emit a JS comma operator.
- */
-export function rawArmHasStrayComma(arm: string): boolean {
-  let depth = 0;
-  let str: string | null = null;
-  for (let i = 0; i < arm.length; i++) {
-    const c = arm[i];
-    if (str) { if (c === "\\") i++; else if (c === str) str = null; continue; }
-    if (c === '"' || c === "'" || c === "`") { str = c; continue; }
-    if (c === "(" || c === "[" || c === "{") { depth++; continue; }
-    if (c === ")" || c === "]" || c === "}") { depth--; continue; }
-    if (depth === 0 && c === ",") return true;
-  }
-  return false;
-}
-
-/** Does `s` carry an arm arrow (`:>` / `=>` / `->`) at bracket depth 0, outside strings? */
-function hasTopLevelArmArrow(s: string): boolean {
-  let depth = 0;
-  let str: string | null = null;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (str) { if (c === "\\") i++; else if (c === str) str = null; continue; }
-    if (c === '"' || c === "'" || c === "`") { str = c; continue; }
-    if (c === "(" || c === "[" || c === "{") { depth++; continue; }
-    if (c === ")" || c === "]" || c === "}") { depth--; continue; }
-    if (depth === 0 && s[i + 1] === ">" && (c === ":" || c === "=" || c === "-")) return true;
-  }
-  return false;
-}
+// S469 (dpa-073 F2 / F5(1)) — the arm-separator `,` split (`splitArmSeparatorCommas`) and the
+// stray-`,` guard (`rawArmHasStrayComma`) read the arm text with the LEXER (arm-list-split.ts):
+// a `,` or a quote inside a regular-expression literal is the regex's own (S469 r2, F1 / F2).
+export { rawArmHasStrayComma } from "./arm-list-split.ts";
 
 // ---------------------------------------------------------------------------
 // esTreeToExprNode — convert Acorn ESTree to ExprNode

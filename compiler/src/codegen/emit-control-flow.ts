@@ -18,6 +18,7 @@ import { tenantFloorTouchesSql } from "./rewrite.js";
 import { SQL_ERROR_VARIANT_FIELDS, sqlQueryExprShape, unhandledFailureThrow, handledSqlGuardInner, SQL_ATTEMPT_FN } from "./sql-attempt.ts";
 import { HOIST_VALUES_PLACEHOLDER } from "../hoist-sql-shape.ts";
 import { programStatementRefusal, sqlHoldsOneStatement } from "./sql-one-statement-guard.ts";
+import { literalSpans } from "../arm-list-split.ts";
 
 // ---------------------------------------------------------------------------
 // Module-level Tier 2 hoist registry (§8.10)
@@ -2313,9 +2314,27 @@ export function splitMultiArmString(s: string): string[] {
   let inString: string | null = null;
   let braceDepth = 0; // skip arm detection inside nested { } blocks
   let i = 0;
+  // S469 r2 (F2) — the literals as the LEXER reads them (arm-list-split.ts): a quoted string,
+  // a template, a regular expression. Each is skipped whole, so a quote inside `/"/` or a
+  // brace inside `"}"` can no longer flip the scan and hide the next arm head (an arm was
+  // silently dropped). `null` (the text does not lex) keeps the character scan below.
+  const lits = literalSpans(s);
 
   while (i < s.length) {
     const ch = s[i];
+
+    const lit = inString === null && lits ? lits.get(i) : undefined;
+    if (lit) {
+      if (lit.kind === "string" && braceDepth === 0) {
+        // String literal arm: "..." :> / => / -> — an arm head when an arrow follows.
+        let k = lit.end;
+        while (k < s.length && /\s/.test(s[k])) k++;
+        const strArrow = s.slice(k, k + 2);
+        if (strArrow === "=>" || strArrow === ":>" || strArrow === "->") armStartPositions.push(i);
+      }
+      i = lit.end;
+      continue;
+    }
 
     // Track string literal boundaries (skip content inside strings)
     if (inString !== null) {
