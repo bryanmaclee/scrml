@@ -78,7 +78,7 @@ const SIGNUP = `<program>
 const calls = () => $("p.calls").textContent;
 
 describe("§55.17.3 — the gate is FAIL-CLOSED", () => {
-  beforeAll(async () => { await loadProgram(clean(SIGNUP), "gate-signup"); });
+  beforeAll(async () => { await loadProgram(clean(SIGNUP), "gate-signup"); }, { timeout: 60000 }); // each loadProgram compiles via the bootstrap (~4s idle)
 
   test("the form keeps `novalidate` (S442 (3)) and carries the §55.17.6 marker", () => {
     expect($("main form").hasAttribute("novalidate")).toBe(true);
@@ -153,7 +153,7 @@ const errs = () => [...document.querySelectorAll("main p.scrml-error")].map((p) 
 const clickEl = (el) => el.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 
 describe("§55.5.1 / §55.17 — a validated TOP-LEVEL value: lowered, surfaced, gated", () => {
-  beforeAll(async () => { await loadProgram(clean(TOP), "gate-top"); });
+  beforeAll(async () => { await loadProgram(clean(TOP), "gate-top"); }, { timeout: 60000 }); // each loadProgram compiles via the bootstrap (~4s idle)
 
   test("its validators lower onto the bound control (§55.17.1); the form is gated + `novalidate`", () => {
     expect($("main input").getAttribute("required")).toBe("");
@@ -228,7 +228,7 @@ const COMPOUND = `<program>
 const comp = () => $("p.c").textContent;
 
 describe("§55.5 / §55.6 — a declaration's compound and per-field surface", () => {
-  beforeAll(async () => { await loadProgram(clean(COMPOUND), "gate-compound"); });
+  beforeAll(async () => { await loadProgram(clean(COMPOUND), "gate-compound"); }, { timeout: 60000 }); // each loadProgram compiles via the bootstrap (~4s idle)
 
   test("`data-scrml-gated` names the child fields by compound path, in source order (§55.17.6)", () => {
     expect($("main form").getAttribute("data-scrml-gated")).toBe("signup.email signup.password");

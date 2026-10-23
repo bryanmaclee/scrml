@@ -15,7 +15,7 @@ const buttons = () => [...document.querySelectorAll("main > button")];
 
 describe("§66.19.1 counter — behaviour", () => {
   let rt;
-  beforeAll(async () => { ({ rt } = await loadProgram(cores.counter(), "counter")); });
+  beforeAll(async () => { ({ rt } = await loadProgram(cores.counter(), "counter")); }, { timeout: 60000 }); // each loadProgram compiles via the bootstrap (~4s idle)
 
   test("renders the initial state", () => {
     expect(p().textContent).toBe("Count 0 (doubled 0)");
