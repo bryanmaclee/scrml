@@ -2320,17 +2320,53 @@ export function splitMultiArmString(s: string): string[] {
   // silently dropped). `null` (the text does not lex) keeps the character scan below.
   const lits = literalSpans(s);
 
+  // S469 r3 (g-impl1-expr-match-literal-alternation-first-alternate-dropped-s469) — a
+  // LITERAL arm head is a literal, then any `| literal` alternates, then the arm arrow
+  // (§18.2, §18.16). Before, a string / number head counted only when the arrow followed it
+  // directly, so in `1 | 2 :> r` the LAST alternate (`2 :>`) was taken as the arm start and
+  // the text before it — the other alternates — was sliced off: `@k = 1` fell through to
+  // the next arm, silently. The variant branch below already guards this (`isAlternate`).
+  const LIT_RE = /^(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|-?\s*(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)(?![\w$])|true(?![\w$])|false(?![\w$]))/;
+  const literalEndAt = (p: number): number => {
+    const sp = lits ? lits.get(p) : undefined;
+    if (sp) return sp.kind === "string" ? sp.end : -1;
+    const m = LIT_RE.exec(s.slice(p));
+    return m ? p + m[0].length : -1;
+  };
+  /** From just past a literal: skip `| literal` alternates, then is an arm arrow next? */
+  const literalChainArrowAt = (p: number): boolean => {
+    let k = p;
+    for (;;) {
+      while (k < s.length && /\s/.test(s[k])) k++;
+      if (s[k] === "|" && s[k + 1] !== "|") {
+        k++;
+        while (k < s.length && /\s/.test(s[k])) k++;
+        const e = literalEndAt(k);
+        if (e < 0) return false;
+        k = e;
+        continue;
+      }
+      break;
+    }
+    const a = s.slice(k, k + 2);
+    return a === "=>" || a === ":>" || a === "->";
+  };
+  /** Is position `p` an ALTERNATE (the previous non-space char is a lone `|`)? */
+  const isAlternateAt = (p: number): boolean => {
+    let b = p - 1;
+    while (b >= 0 && /\s/.test(s[b])) b--;
+    return b >= 0 && s[b] === "|" && s[b - 1] !== "|";
+  };
+
   while (i < s.length) {
     const ch = s[i];
 
     const lit = inString === null && lits ? lits.get(i) : undefined;
     if (lit) {
       if (lit.kind === "string" && braceDepth === 0) {
-        // String literal arm: "..." :> / => / -> — an arm head when an arrow follows.
-        let k = lit.end;
-        while (k < s.length && /\s/.test(s[k])) k++;
-        const strArrow = s.slice(k, k + 2);
-        if (strArrow === "=>" || strArrow === ":>" || strArrow === "->") armStartPositions.push(i);
+        // String literal arm: "..." :> / => / -> (or `"a" | "b" :>`) — an arm head when an
+        // arrow follows its alternate chain, and it is not itself an alternate.
+        if (!isAlternateAt(i) && literalChainArrowAt(lit.end)) armStartPositions.push(i);
       }
       i = lit.end;
       continue;
@@ -2428,10 +2464,8 @@ export function splitMultiArmString(s: string): string[] {
         j++;
       }
       if (j < s.length) {
-        let k = j + 1;
-        while (k < s.length && /\s/.test(s[k])) k++;
-        const strArrow2 = s.slice(k, k + 2);
-        if (strArrow2 === "=>" || strArrow2 === ":>" || strArrow2 === "->") {
+        // S469 r3 — through a `| literal` alternate chain, and never at an alternate.
+        if (!isAlternateAt(i) && literalChainArrowAt(j + 1)) {
           armStartPositions.push(i);
           inString = q;
           i++;
@@ -2466,10 +2500,8 @@ export function splitMultiArmString(s: string): string[] {
         let k = i;
         if (ch === "-") { k = i + 1; while (k < s.length && /\s/.test(s[k])) k++; }
         while (k < s.length && /[0-9a-fA-FxXbBoO._]/.test(s[k])) k++;
-        let a = k;
-        while (a < s.length && /\s/.test(s[a])) a++;
-        const numArrow = s.slice(a, a + 2);
-        if (numArrow === "=>" || numArrow === ":>" || numArrow === "->") {
+        // S469 r3 — through a `| literal` alternate chain, and never at an alternate.
+        if (!isAlternateAt(i) && literalChainArrowAt(k)) {
           armStartPositions.push(i);
           i = k;
           continue;
