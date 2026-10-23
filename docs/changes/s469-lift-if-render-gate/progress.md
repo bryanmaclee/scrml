@@ -76,3 +76,15 @@ the one mechanism `<each>` rows use) instead of a `style.display` toggle. Primar
 - [x] ifrow runtime chunk; ratchet §4 three shapes (lift if 4,186 / each row if 8,245 / lift no-if 4,016 = main).
 - [x] stale-on-main positions: browser test.failing (21), pack KNOWN_FAIL (36); gap g-lift-gate-placement-inherits-main-staleness-s469.
 - [x] H1–H3 + M1b visible sets equal main's at every step (hidden absent); H4 refused as on main; M1a ReferenceError (main too).
+
+## Round 6 (review of 3214a9a60)
+
+- [x] F1: an escaped (ambient-target) lift inside a row keeps main's plain subscriptions (_withLiftTarget); 18-shape
+      while-in-row oracle block (head visible == main visible at every step; 16 fail on 3214a9a60). Gap text corrected.
+- [x] F3: arm-run helper is main's byte-for-byte unless the file has owner-tracked content (scoped variant, no comments);
+      ifrow chunk keeps its own separator (lift chunk identical to main); ratchet §4 comment fixed.
+- [x] F2: one-line note on the staleness gap.
+- [x] reviewer differential (cases/cases2/cases3 + 18 while-in-row, 954 cases vs main e09b7be97): equal 618, head-hides-more 264,
+      both-error 32, error-diff 20 (E-CG-003 bare if; show= shapes main refused), BOTH 20 (main crashes at mount: component @,
+      lifted <each> root; markup_fn_row: main renders the hidden element's HTML as text, head a placeholder);
+      HEAD-SHOWS-MORE 0.
