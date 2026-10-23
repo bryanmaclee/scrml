@@ -9,7 +9,7 @@ the one mechanism `<each>` rows use) instead of a `style.display` toggle. Primar
 ## Log
 
 - [x] startup: worktree clean, bun install (puppeteer postinstall fails — not needed, happy-dom), pretest.
-- [x] probe family `security-failable-pack/shapes/n22.js`; base: every display-toggle position FAILs (textContent
+- [x] probe family `security-failable-pack/shapes/n23.js`; base: every display-toggle position FAILs (textContent
       still LOGGED IN after revoke); call-ref / quoted `if=` not gated at all (written as an attribute); the
       lifted `<each>` root CRASHES the harness (`ReferenceError: y is not defined`). The inline
       `${ for x of @xs lift … }` form is refused today (E-FOR-UNPARENTHESIZED-HEAD) — dropped from the family.
@@ -21,7 +21,7 @@ the one mechanism `<each>` rows use) instead of a `style.display` toggle. Primar
 - [x] emit-client.ts: `_scrml_ifrow_apply(` ships the `reconciliation` chunk (post-emit gate).
 - [x] value-indexed predicate reading the row: live-keyed effect follows the row's value + moves the bucket;
       cell untracked (O(2) kept — measured by swap count).
-- [x] tests: unit `lift-if-render-gate-s469`, browser `lift-if-render-gate-s469` (all fail on base), pack n22
+- [x] tests: unit `lift-if-render-gate-s469`, browser `lift-if-render-gate-s469` (all fail on base), pack n23
       (62 shapes, base 59 FAIL + 3 crashes → 61 PASS + 1 PASS-REFUSED); select-row + todomvc-fixture updated.
 - [x] SPEC §17.1 exception sentence replaced; §17.1.2.3 note updated; SPEC-INDEX regen (no line shift).
 - [x] known-gaps entries + count hunk (`bun scripts/state.ts --write`).

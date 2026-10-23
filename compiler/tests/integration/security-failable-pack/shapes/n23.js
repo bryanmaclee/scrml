@@ -1,4 +1,4 @@
-// Probe family `n22` — S469 (g-lift-row-if-is-display-toggle-not-a-render-gate-s462 and its cluster): a
+// Probe family `n23` — S469 (g-lift-row-if-is-display-toggle-not-a-render-gate-s462 and its cluster): a
 // markup `if=` authorization guard inside LIFTED markup — a `for … lift` row (nested element, multi-root
 // root, value-indexed sole root), a non-loop `if … lift` / bare `lift`, a
 // markup value (a function returning markup, a ternary, a markup-typed `const`), and an `<each>` that IS

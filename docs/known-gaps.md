@@ -8527,7 +8527,7 @@ out of scope). — `NEW S297; LOW; deferred (create-time gate + comment signal; 
 takes the same swap as the sole root: the lift reconciler is the `<each>` one, so the S469 `_scrml_group_of`
 back-pointer #1502 added lets `_scrml_ifrow_apply` replace the node in the group's array — reorder / delete /
 replace act on the node in the DOM. The `// W-LIFT-TIER0-IF-MULTIROOT-DEFERRED` comment is gone. Pinned by the
-browser test's multi-root case (keyed reorder + delete keep `B/I` order) and pack `n22` multi-root head / tail.
+browser test's multi-root case (keyed reorder + delete keep `B/I` order) and pack `n23` multi-root head / tail.
 
 **NEW S297 (Tier-0 for-lift sibling of [[g-each-peritem-if-multiroot-deferred]]).** The SINGLE-root
 Tier-0 `${for…lift}` per-item `if=` is now REACTIVE + STRUCTURAL (SPEC §17.1), mirroring the Tier-1
@@ -11884,7 +11884,7 @@ Surfaced while scoping [[g-item-derived-local-stale-in-per-item-effect-paths]]. 
 **S469 — the narrower deferred sub-gap (the value-indexed predicate's ITEM side stale after a same-key REPLACE)
 is RESOLVED** (branch `s469-lift-if-render-gate`): on a render gate it had become fail-OPEN (a row whose own key revoked the gate kept the
 element). A live-keyed render-gate effect now re-reads the row's value and moves the `subscribe_when` bucket;
-the updater re-resolves the row. Pinned by pack `n22` "value-indexed row side" (4) and the browser test.
+the updater re-resolves the row. Pinned by pack `n23` "value-indexed row side" (4) and the browser test.
 `tryEmitLiftIfReactive` (named below) is gone — `emitLiftIfGate` is the one lowering.
 
 **RESOLVED S335-peter** — re-verified vs HEAD `cdf19c01`: a Tier-1 `<each key= as r>` per-row `if=(r.active)` emits a reconcile-reactive effect that re-resolves the item and re-applies on reconcile (`_scrml_mount_track(_scrml_effect(...))`); the buggy once-called create-time closure is absent. The Tier-1 each path now shares the Tier-0 fix.
@@ -16454,7 +16454,7 @@ Pre-existing (reproduced with the #699 change stashed), orthogonal to the prop l
 > path a nested lifted `<each>` takes (`emitCreateElementFromMarkup` → `tryEmitNestedLiftEach`): it iterates, its
 > alias binds, and its `if=` is the row-scoped gate. It was a literal `<each>` element (body rendered once, alias
 > unbound — `ReferenceError: y is not defined` crashed the pack harness — and the `if=` a display toggle). Pack
-> `n22` "lifted each root" (plain / call: PASS; quoted: PASS-REFUSED, E-CG-003 — the `<each>` reader refuses a
+> `n23` "lifted each root" (plain / call: PASS; quoted: PASS-REFUSED, E-CG-003 — the `<each>` reader refuses a
 > quoted `if=`), browser test "an <each> that IS the lifted root".
 >
 > **⛑ S469 — NARROWED, mostly stale after #1491 (re-measured on `s469-match-if-in-row` round 2, through the
@@ -26127,7 +26127,7 @@ Reproduced on the S462 head (round 8): both handler forms exit 0 with no diagnos
 Closing it is newly-rejecting (measure the corpus). ~~When it closes, an `if=` inside a `for … lift` row must NOT narrow (its children or its handlers): it is a display toggle, not a render gate — `g-lift-row-if-is-display-toggle-not-a-render-gate-s462`.~~ **S469:** that entry is resolved — every lifted `if=` is now a render gate (element⇄comment swap, ordered before the write's ordinary effects), so when this hole closes a lifted `if=` narrows its children and handlers like any render gate (the Q18 rule applies). Re-measured S469 on `s469-lift-if-render-gate`: the walk still does not descend into explicit `lift` markup (both forms above compile clean) — this entry stays open.
 
 ### g-lift-row-if-is-display-toggle-not-a-render-gate-s462 — an `if=` inside a `for … lift` row lowers to a `style.display` toggle (the element stays mounted and its listeners reachable), so it is NOT a render gate: the §42.3.5 Q18 exemption (a gated handler keeps the gate's narrowing) must not apply there, and its children are not unmounted either — `NEW S462; MED; RESOLVED S469`
-<!-- @gap id=g-lift-row-if-is-display-toggle-not-a-render-gate-s462 sev=MED status=resolved locus=compiler/src/codegen/emit-lift.js(LIFT-3 per-item if= display toggle ~:1547, `_scrml_if__…` + `_scrml_reactive_subscribe`);compiler/src/presence-narrowing.ts(walkNodeNarrowed — does not descend into a lift-expr's markup) prov=empirical:s462-narrowing-round7;empirical:S469(pack n22 on main 29b6320ad: 59 FAIL + 3 harness crashes of 62) -->
+<!-- @gap id=g-lift-row-if-is-display-toggle-not-a-render-gate-s462 sev=MED status=resolved locus=compiler/src/codegen/emit-lift.js(LIFT-3 per-item if= display toggle ~:1547, `_scrml_if__…` + `_scrml_reactive_subscribe`);compiler/src/presence-narrowing.ts(walkNodeNarrowed — does not descend into a lift-expr's markup) prov=empirical:s462-narrowing-round7;empirical:S469(pack n23 on main 29b6320ad: 59 FAIL + 3 harness crashes of 62) -->
 
 **RESOLVED S469** (branch `s469-lift-if-render-gate`). Every `if=` in lifted markup is now the element⇄comment render gate `<each>` rows use
 (`_scrml_ifrow_apply`), through ONE lowering, `emit-lift.js` `emitLiftIfGate` — the AST path
@@ -26141,7 +26141,7 @@ value-indexed predicate — now following the row's live value when it reads the
 otherwise the cell subscriptions). Also closed on the way: a call-ref `if=allowed(@pw)` and a quoted
 `if="…"` in lifted markup were written as a plain `if` ATTRIBUTE (no gate at all); a bare `if` / an unreadable
 value kind is now E-CG-003 (gated false); `_scrml_ifrow_apply(` ships the `reconciliation` chunk for a non-loop
-lift (emit-client.ts post-emit gate). Pins: `compiler/tests/browser/lift-if-render-gate-s469.browser.test.js`, `compiler/tests/unit/lift-if-render-gate-s469.test.js`, the security-failable-pack `n22` family (62 shapes: 59 FAIL + 3 crashes on main → 61 PASS + 1
+lift (emit-client.ts post-emit gate). Pins: `compiler/tests/browser/lift-if-render-gate-s469.browser.test.js`, `compiler/tests/unit/lift-if-render-gate-s469.test.js`, the security-failable-pack `n23` family (62 shapes: 59 FAIL + 3 crashes on main → 61 PASS + 1
 PASS-REFUSED). SPEC §17.1's "Exception, Tier-0 lifted markup" sentence is replaced by the rule it now meets.
 **Q18 (§42.3.5):** the premise this entry denied — a gated lifted handler is unreachable while the gate is
 false — now holds: the swap runs in a render-gate effect, or (subscriptions / value-indexed fan-out) inside

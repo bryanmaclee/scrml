@@ -8,7 +8,7 @@
  * and built a lifted `<each>` root as a literal `<each>` element. Now every lifted `if=` is the
  * element⇄comment swap (`_scrml_ifrow_apply`, the helper `<each>` rows use). The executed
  * behaviour is pinned in compiler/tests/browser/lift-if-render-gate-s469.browser.test.js and
- * the security-failable-pack n22 family; this file pins the emitted shape and the refusals.
+ * the security-failable-pack n23 family; this file pins the emitted shape and the refusals.
  */
 
 import { describe, test, expect } from "bun:test";
