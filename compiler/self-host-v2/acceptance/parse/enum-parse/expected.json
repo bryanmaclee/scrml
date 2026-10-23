@@ -1,0 +1,20 @@
+{
+  "id": "acceptance-parse-enum-parse",
+  "description": "`Guess.parse(\"Yes\")` is `.Yes`; a name that is not a variant (case-sensitive, a prototype key) is `not`; `Guess.toEnum` answers the same.",
+  "language-version": "1.0",
+  "spec": "§14.13.4, §14.4.1",
+  "rationale": "Ruled S469 \"conversions: parse spelling `T.parse(s)`\": \"`Enum.toEnum` folds into `Enum.parse` (a migration window is owed)\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#a",
+        "text": "Yes No not not"
+      },
+      {
+        "selector": "#b",
+        "text": "No not"
+      }
+    ]
+  }
+}

@@ -10,6 +10,6 @@
     <main>
         <p id="out">${@n}</p>
         <p id="seen">${@seen}</p>
-        <button id="go" onclick={ @n = count() !{ .Transport(t) :> { @seen = "failed"; 0 } } }>go</button>
+        <button id="go" onclick={ @n = count() !{ .Transport(t) :> { @seen = "failed"; lift 0 } } }>go</button>
     </main>
 </program>

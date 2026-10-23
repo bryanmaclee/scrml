@@ -152,10 +152,11 @@ describe("index reads — `xs[i]` traps out of range, `xs.at(i)` is `T | not` (�
   test("the trap is not a `!` error: a function holding an index read is not failable, and the read is not `T | not`", () => {
     expect(codes(prog(`    function g(xs: int[]) -> int { return xs[0] + 1 }`, `        <p>\${g([1])}</p>`))).toEqual([]);
   });
-  test("the index is an `int` (E-TYPE-031); a string index / an un-narrowed tape are refused", () => {
+  test("the index is an `int` (E-TYPE-031); an un-narrowed tape is refused; `s[i]` on a string is ruled (S469, §66.12.8 rule 6)", () => {
     expect(codes(prog(`    function g(xs: int[], s: string) -> int { return xs[s] }`, `        <p>x</p>`))).toEqual(["E-TYPE-031"]);
     expect(codes(prog(`    function g(xs: int[]) -> int { return xs[0.5] }`, `        <p>x</p>`))).toEqual(["E-TYPE-031"]);
-    expect(codes(prog(`    function g(s: string) -> string { return s[0] }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(prog(`    function g(s: string) -> string { return s[0] }`, `        <p>x</p>`))).toEqual([]);
+    expect(codes(prog(`    function g(s: string) -> string { return s["a"] }`, `        <p>x</p>`))).toEqual(["E-TYPE-031"]);
     expect(codes(prog(`    function g(xs: int[] | not) -> int { return xs[0] }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("a field of an index read is refused, never lowered to a placeholder", () => {

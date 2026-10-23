@@ -1,0 +1,5 @@
+// Appendix D.1 (S469 "no negative positions anywhere"): a negative literal slice position is refused.
+<program>
+    let <s:string="hello"/>
+    <main><p>${@s.slice(-1)}</p></main>
+</program>

@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-parse-neg-plain-cell",
+  "description": "E-TYPE-031: `int.parse(…)` is `int | not`, and the cell is `int`.",
+  "language-version": "1.0",
+  "spec": "§14.13.4",
+  "rationale": "Ruled S469 \"a failed parse is `T | not`\" — the failure is visible at the call site.",
+  "expect": {
+    "codes": [
+      "E-TYPE-031"
+    ],
+    "codeCounts": {
+      "E-TYPE-031": 1
+    }
+  }
+}

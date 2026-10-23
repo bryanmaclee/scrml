@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-parse-bool-exact",
+  "description": "`bool.parse` reads exactly `true` / `false`; `True`, `1`, `\"\"` and `\"true \"` are `not`.",
+  "language-version": "1.0",
+  "spec": "§14.13.4",
+  "rationale": "Ruled S469 \"strict whole-string parse\"; the §14.13.4 table: `bool.parse(s)` accepts `\"true\"`, `\"false\"`.",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#t",
+        "text": "true"
+      },
+      {
+        "selector": "#f",
+        "text": "false"
+      },
+      {
+        "selector": "#x",
+        "text": "not not not not"
+      }
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "acceptance-positions-neg-slice-computed-traps",
+  "description": "`#ok` writes `slice(1)` (`ello`); `#go`'s computed negative position then traps, so the write never happens — nothing is counted from the end (`@out` is never `\"o\"`).",
+  "language-version": "1.0",
+  "spec": "Appendix D.1, §19.17",
+  "rationale": "Ruled S469: \"a computed one traps at run time, the PA reading\".",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#ok"
+      },
+      {
+        "wait": "settle"
+      },
+      {
+        "click": "#go"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "ello"
+      }
+    ]
+  }
+}

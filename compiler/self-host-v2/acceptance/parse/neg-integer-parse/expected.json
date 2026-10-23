@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-parse-neg-integer-parse",
+  "description": "E-SCOPE-001: `integer.parse` does not exist — write `int.parse`.",
+  "language-version": "1.0",
+  "spec": "§14.13.4, §14.13.6",
+  "rationale": "\"the spellings `integer.parse` and `boolean.parse` do not exist (§14.13.6)\".",
+  "expect": {
+    "codes": [
+      "E-SCOPE-001"
+    ],
+    "codeCounts": {
+      "E-SCOPE-001": 1
+    }
+  }
+}

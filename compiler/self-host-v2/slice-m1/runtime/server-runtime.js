@@ -35,6 +35,8 @@
 
 import { encode, decode, failure, failed, runDefers, eq, indexRead, atRead, CodecDefect, CSRF_COOKIE, CSRF_HEADER,
   strSlice, strCharAt, strSplit, strLength, strIncludes, strStartsWith, strEndsWith,
+  strIndexOf, strLastIndexOf, strReplace, strReplaceAll, strPadStart, strPadEnd, strRepeat,
+  parseIntText, parseNumText, parseBoolText,
   sortNum, sortStr, sortBy, reversed, joinStr } from "./runtime.js";
 
 // What printed server bodies call through `rt.` (print.scrml prints them for
@@ -43,6 +45,10 @@ import { encode, decode, failure, failed, runDefers, eq, indexRead, atRead, Code
 // the typed string / tape built-ins.
 export { failure, failed, runDefers, eq, indexRead, atRead };
 export { strSlice, strCharAt, strSplit, strLength, strIncludes, strStartsWith, strEndsWith, sortNum, sortStr, sortBy, reversed, joinStr };
+// s469 — the admitted string additions (Appendix D.1) and the strict parses (§14.13.4): the SAME
+// function objects the client runtime exports (one definition, never a server copy)
+export { strIndexOf, strLastIndexOf, strReplace, strReplaceAll, strPadStart, strPadEnd, strRepeat };
+export { parseIntText, parseNumText, parseBoolText };
 
 // ---------------------------------------------------------------------------
 // SQL text. A query site's literal runs, frozen once at module load, in the

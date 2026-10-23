@@ -21,7 +21,6 @@
 #   - checkout has scripts/git-merge-generated.sh → run it (the crash-safe wrapper; fails closed);
 #   - otherwise (the attribute without the script — never shipped, but possible mid-revert) → git's
 #     own text merge, exactly what git does with no driver: `git merge-file` with markers.
-# git sq-quotes each %-placeholder; the inner sh receives them as "$1".."$8".
 #
 # --uninstall removes the config section, plus anything an earlier version of this installer wrote
 # (the info/attributes managed block and the <git-common-dir>/scrml-generated-driver/ copy).
@@ -62,7 +61,13 @@ if [ "$MODE" = uninstall ]; then
 fi
 
 NAME='scrml @generated-aware merge (scripts/git-merge-generated.sh)'
-DRIVER='sh -c '\''if [ -f scripts/git-merge-generated.sh ]; then exec sh scripts/git-merge-generated.sh "$@"; fi; exec git merge-file --marker-size="$5" -L "$7" -L "$6" -L "$8" "$2" "$1" "$3"'\'' scrml-generated %O %A %B %P %L %S %X %Y'
+# ⚑ No `sh` is looked up on PATH (S469 windows): git already runs this line in ITS shell, and the
+# wrapper is started as /bin/sh — an absolute path every POSIX system and Git for Windows' MSYS
+# runtime resolve. The first cut nested `sh -c '…'` and `exec sh …`: with no `sh` on PATH (a Windows
+# PATH that names Git\cmd but not Git\usr\bin, or any stripped PATH) both lookups failed, exit 127,
+# and git kept %A as PURE OURS with no markers — the silent drop the wrapper exists to prevent.
+# git sq-quotes %P %S %X %Y itself; %O %A %B are its own `.merge_file_XXXXXX` temp names, %L a number.
+DRIVER='s=/bin/sh; [ -x "$s" ] || s=sh; if [ -f scripts/git-merge-generated.sh ]; then exec "$s" scripts/git-merge-generated.sh %O %A %B %P %L %S %X %Y; fi; exec git merge-file --marker-size=%L -L %X -L %S -L %Y %A %O %B'
 
 if [ "$(git config --get merge.scrml-generated.name || true)" != "$NAME" ]; then
   git config merge.scrml-generated.name "$NAME"; changed="$changed name"

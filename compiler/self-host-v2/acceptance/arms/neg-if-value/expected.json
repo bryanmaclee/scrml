@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-arms-neg-if-value",
+  "description": "E-BOOTSTRAP-UNSUPPORTED: an `if` used as a value.",
+  "language-version": "1.0",
+  "spec": "§17.6, §17.6.10",
+  "rationale": "Ruled S469 \"three spec-follow-up opens\" (if-branch) — the bootstrap has no value-form `if`; it is refused, never read as a name.",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

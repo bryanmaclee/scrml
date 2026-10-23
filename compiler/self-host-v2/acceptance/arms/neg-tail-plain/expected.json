@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-arms-neg-tail-plain",
+  "description": "E-ARM-TAIL-VALUE: the `.No` arm ends in the bare `t`.",
+  "language-version": "1.0",
+  "spec": "§18.5",
+  "rationale": "Ruled S469: \"A bare last expression in a block arm is an error.\"",
+  "expect": {
+    "codes": [
+      "E-ARM-TAIL-VALUE"
+    ],
+    "codeCounts": {
+      "E-ARM-TAIL-VALUE": 1
+    }
+  }
+}

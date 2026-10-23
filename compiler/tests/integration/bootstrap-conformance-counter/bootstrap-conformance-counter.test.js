@@ -227,7 +227,7 @@ describe("§66 twins (S449 dialect rulings 1 + 5)", () => {
     expect(v.reason).toBe("twin-extra-error");
     expect(v.failures).toEqual(["twin emitted unasserted error(s): E-TYPE-UNKNOWN"]);
     // the same source graded as written (not a twin) keeps the old rule: unasserted codes are reported, not failed
-    const native = await classifyCase(boot, { ...get("twins/extra-error"), source: "<program>\n<n:integer=5/>\n<p id=\"n\">${@n}</p>\n</program>\n" });
+    const native = await classifyCase(boot, { ...get("twins/extra-error"), source: "<program>\n<n:Undeclared=5/>\n<p id=\"n\">${@n}</p>\n</program>\n" });
     expect(native.twin).toBe(false);
     expect(native.bucket).toBe("PASS");
   }, { timeout: 60000 });

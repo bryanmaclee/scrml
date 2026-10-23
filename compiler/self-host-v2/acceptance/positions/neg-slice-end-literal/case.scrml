@@ -1,0 +1,5 @@
+// Appendix D.1: the end position too.
+<program>
+    let <s:string="hello"/>
+    <main><p>${@s.slice(0, -2)}</p></main>
+</program>

@@ -416,8 +416,13 @@ ${
     }
 
     // s469 — a typed built-in method (the binder's VMethod): Core Prim(op,
-    // [receiver, …arguments]).
+    // [receiver, …arguments]). s469: a parse (`int.parse(s)`, §14.13.4) has no
+    // receiver VALUE — its "receiver" names a type — so it is Prim(op, [s]).
     fn methodExpr(c: LC, o: PrimOp, cal: AExpr, args: AExpr[]) -> Expr {
+        if (o == PrimOp.ParseInt || o == PrimOp.ParseNum || o == PrimOp.ParseBool) {
+            if (args.length != 1) return missing()
+            return Expr.Prim(o, lowerExprs(c, args))
+        }
         const obj: AExpr | not = calleeObj(cal)
         if (obj is not) return missing()
         return Expr.Prim(o, [lowerExpr(c, obj)].concat(lowerExprs(c, args)))

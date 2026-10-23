@@ -1,0 +1,17 @@
+// §14.13.4: `number.parse(s)` adds a `.` fraction and an exponent; only a FINITE value parses.
+<program>
+    let <a:number | not=(number.parse("-1.5e2"))/>
+    let <b:number | not=(number.parse(".5"))/>
+    function show(x: number | not) -> string {
+        return match x {
+            not :> "not"
+            else :> "num"
+        }
+    }
+    <main>
+        <p id="a">${@a}</p>
+        <p id="b">${@b}</p>
+        <p id="c">${show(number.parse("NaN"))} ${show(number.parse("Infinity"))} ${show(number.parse("-Infinity"))} ${show(number.parse("1e400"))}</p>
+        <p id="d">${show(number.parse("1."))} ${show(number.parse("."))} ${show(number.parse(" 1"))} ${show(number.parse("+1"))} ${show(number.parse("1e"))}</p>
+    </main>
+</program>

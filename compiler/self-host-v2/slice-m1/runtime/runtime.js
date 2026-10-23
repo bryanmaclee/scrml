@@ -1015,6 +1015,13 @@ export class ScrmlTrap extends Error {
 
 /** `xs[i]` (§49.13): the element when `0 <= i < xs.length`; otherwise the E-INDEX-OUT-OF-RANGE-RT trap — never `undefined`. */
 export function indexRead(xs, i, at) {
+  // s469 — `s[i]` on a string (§66.12.8 rule 6): the code point at position `i`, positions in code
+  // points; out of range (a negative `i` included, rule 7) the same trap, naming the code-point length
+  if (typeof xs === "string") {
+    const cps = codePoints(xs);
+    if (Number.isInteger(i) && i >= 0 && i < cps.length) return cps[i];
+    throw new ScrmlTrap("E-INDEX-OUT-OF-RANGE-RT", "index " + i + " is out of range for a string of length " + cps.length + " (" + at + ")", { index: i, length: cps.length, at });
+  }
   if (Number.isInteger(i) && i >= 0 && i < xs.length) return xs[i];
   throw new ScrmlTrap("E-INDEX-OUT-OF-RANGE-RT", "index " + i + " is out of range for a tape of length " + xs.length + " (" + at + ")", { index: i, length: xs.length, at });
 }
@@ -1073,19 +1080,24 @@ function requireInt(i, what) {
   if (!Number.isInteger(i)) throw new Error(`${what}: position ${JSON.stringify(i)} is not an int`);
 }
 
-/** A position `i` against a length `n`: a negative position counts from the end; the result is clamped to [0, n]. */
-function clampPosition(i, n) {
-  if (i < 0) return Math.max(0, n + i);
-  return Math.min(i, n);
+/**
+ * No negative positions (S469 "No negatives anywhere"): a negative position, count or width is out of
+ * range — never counted from the end, never clamped to 0. A negative LITERAL is refused at compile time
+ * (E-POSITION-NEGATIVE); a negative COMPUTED one reaches here and traps (E-INDEX-OUT-OF-RANGE-RT, §19.17).
+ */
+function requireNonNegative(i, what, length) {
+  if (i < 0) throw new ScrmlTrap("E-INDEX-OUT-OF-RANGE-RT", what + " " + i + " is negative — out of range for a string of length " + length + " (no position counts from the end)", { index: i, length });
 }
 
-/** `s.slice(from)` / `s.slice(from, to)`, positions in code points. */
+/** `s.slice(from)` / `s.slice(from, to)`, positions in code points: past the end clamps to the end, `to < from` is `""`, a negative position traps. */
 export function strSlice(s, from, to) {
   requireInt(from, "slice");
   if (to !== undefined) requireInt(to, "slice");
   const cps = codePoints(s);
-  const a = clampPosition(from, cps.length);
-  const b = to === undefined ? cps.length : clampPosition(to, cps.length);
+  requireNonNegative(from, "slice: position", cps.length);
+  if (to !== undefined) requireNonNegative(to, "slice: position", cps.length);
+  const a = Math.min(from, cps.length);
+  const b = to === undefined ? cps.length : Math.min(to, cps.length);
   let out = "";
   for (let i = a; i < b; i++) out += cps[i];
   return out;
@@ -1209,6 +1221,164 @@ export function joinStr(xs, sep) {
   let out = "";
   for (let i = 0; i < xs.length; i++) out += (i > 0 ? sep : "") + xs[i];
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// s469 — the admitted additions (S469 "more string methods admitted"; SPEC Appendix D.1), still
+// CODE POINTS everywhere: a match counts only where it starts AND ends on a code-point boundary, a
+// position returned is a code-point position, and a width is a number of code points. Matching uses
+// the host's own search (linear) and steps past a candidate that would cut a surrogate pair.
+// ---------------------------------------------------------------------------
+
+/** The UTF-16 index of the first occurrence of `t` in `s` at or after UTF-16 index `from` on code-point boundaries, or -1. */
+function findOnBoundary(s, t, from) {
+  let i = s.indexOf(t, from);
+  while (i >= 0 && !(atBoundary(s, i) && atBoundary(s, i + t.length))) i = s.indexOf(t, i + 1);
+  return i;
+}
+
+/** The UTF-16 index of the last occurrence of `t` in `s` on code-point boundaries, or -1. */
+function findLastOnBoundary(s, t) {
+  let i = s.lastIndexOf(t);
+  while (i >= 0 && !(atBoundary(s, i) && atBoundary(s, i + t.length))) i = i === 0 ? -1 : s.lastIndexOf(t, i - 1);
+  return i;
+}
+
+/** `s.indexOf(t)`: the code-point position of the first occurrence of `t`, or `not` — never -1. */
+export function strIndexOf(s, t) {
+  const i = findOnBoundary(s, t, 0);
+  return i < 0 ? null : strLength(s.slice(0, i));
+}
+
+/** `s.lastIndexOf(t)`: the code-point position of the last occurrence of `t`, or `not` — never -1. */
+export function strLastIndexOf(s, t) {
+  const i = findLastOnBoundary(s, t);
+  return i < 0 ? null : strLength(s.slice(0, i));
+}
+
+/** `s.replace(find, with)`: the first occurrence of `find` replaced by `with` — plain strings; `with` is literal text (no `$&` patterns). */
+export function strReplace(s, find, withText) {
+  const i = findOnBoundary(s, find, 0);
+  if (i < 0) return s;
+  return s.slice(0, i) + withText + s.slice(i + find.length);
+}
+
+/** `s.replaceAll(find, with)`: every occurrence replaced, left to right, never overlapping; `find` `""` puts `with` between code points (and at both ends). */
+export function strReplaceAll(s, find, withText) {
+  if (find === "") {
+    const cps = codePoints(s);
+    if (cps.length === 0) return withText;
+    requireFits((cps.length + 1) * withText.length + s.length, "replaceAll: the insertions", cps.length + 1);
+    return withText + cps.join(withText) + withText;
+  }
+  let out = "";
+  let pos = 0;
+  let i = findOnBoundary(s, find, 0);
+  while (i >= 0) {
+    requireFits(out.length + (i - pos) + withText.length + (s.length - i), "replaceAll: the replacements", out.length);
+    out += s.slice(pos, i) + withText;
+    pos = i + find.length;
+    i = findOnBoundary(s, find, pos);
+  }
+  return out + s.slice(pos);
+}
+
+/**
+ * The longest string a result may be, in UTF-16 units: the smallest host limit among the engines the
+ * output runs on (V8's 2^29 − 24; JavaScriptCore's is larger), so every host refuses the same widths.
+ * A `repeat` / `padStart` / `padEnd` whose result would be longer is checked UP FRONT — before any text
+ * is built — and traps (E-INDEX-OUT-OF-RANGE-RT, the count or width out of range), never a raw host
+ * RangeError after the memory is spent (review s469-boot-ruled-backlog F1: a server DoS).
+ */
+const MAX_TEXT_UNITS = 2 ** 29 - 24;
+
+function requireFits(units, what, count) {
+  if (units > MAX_TEXT_UNITS) {
+    throw new ScrmlTrap("E-INDEX-OUT-OF-RANGE-RT", what + " " + count + " is out of range — the result would be " + units + " UTF-16 units, past the longest string (" + MAX_TEXT_UNITS + ")", { index: count, length: MAX_TEXT_UNITS });
+  }
+}
+
+/** `fill` repeated to exactly `n` code points (the last repeat cut on a code-point boundary): built natively, length checked first. */
+function fillTo(fill, n, extraUnits, what, width) {
+  const f = codePoints(fill);
+  const q = Math.floor(n / f.length);
+  const r = n % f.length;
+  let prefix = "";
+  for (let k = 0; k < r; k++) prefix += f[k];
+  requireFits(q * fill.length + prefix.length + extraUnits, what + ": width", width);
+  return fill.repeat(q) + prefix;
+}
+
+/** The padding `padStart` / `padEnd` put on: `fill` repeated until `s` is `width` code points, or "" when it already is. */
+function padding(s, width, fill, what) {
+  requireInt(width, what);
+  const n = strLength(s);
+  requireNonNegative(width, what + ": width", n);
+  if (fill === undefined) fill = " ";
+  if (width <= n || fill === "") return "";
+  return fillTo(fill, width - n, s.length, what, width);
+}
+
+/** `s.padStart(width, fill?)`: `fill` (default " ") before `s` until it is `width` code points long. */
+export function strPadStart(s, width, fill) {
+  return padding(s, width, fill, "padStart") + s;
+}
+
+/** `s.padEnd(width, fill?)`: `fill` (default " ") after `s` until it is `width` code points long. */
+export function strPadEnd(s, width, fill) {
+  return s + padding(s, width, fill, "padEnd");
+}
+
+/** `s.repeat(n)`: `s` written `n` times; a negative `n` traps. */
+export function strRepeat(s, n) {
+  requireInt(n, "repeat");
+  requireNonNegative(n, "repeat: count", strLength(s));
+  if (s.length > 0 && n > MAX_TEXT_UNITS / s.length) requireFits(s.length * n, "repeat: count", n);
+  return s.repeat(n);
+}
+
+// ---------------------------------------------------------------------------
+// s469 — `T.parse(s)` (SPEC §14.13.4; ruled S469: spelling `T.parse(s)`, a failure is `T | not`, strict
+// whole-string, finite only). ONE grammar per type, matched against the WHOLE text — no trim, no `+`, no
+// `0x` / `0o` / `0b`, no `_`, ASCII digits only — and only then handed to the host's `Number`, which can
+// no longer see anything it would read loosely (`" 42"`, `""`, `"0x1F"`, `"Infinity"`). A value the text
+// spells but the type cannot hold is `not`: an int beyond ±(2^53−1), a number that overflows to ±∞.
+// ---------------------------------------------------------------------------
+
+const INT_TEXT = /^-?[0-9]+$/;
+const NUMBER_TEXT = /^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
+
+/** The text a parse reads must be a string (the typer guarantees it; this keeps a defect loud, never a guess). */
+function requireText(s, what) {
+  if (typeof s !== "string") throw new Error(`${what}: the text ${JSON.stringify(s)} is not a string`);
+}
+
+/** `int.parse(s)`: an optional `-`, then ASCII digits (leading zeros allowed), within ±(2^53−1); else `not`. */
+export function parseIntText(s) {
+  requireText(s, "int.parse");
+  if (!INT_TEXT.test(s)) return null;
+  const n = Number(s);
+  if (!Number.isSafeInteger(n)) return null;
+  return n === 0 ? 0 : n; // `-0` spells the int 0
+}
+
+/** `number.parse(s)`: an optional `-`, digits with an optional `.` fraction, an optional exponent; a FINITE result only; else `not`. */
+export function parseNumText(s) {
+  requireText(s, "number.parse");
+  if (!NUMBER_TEXT.test(s)) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  // PA default (review F3): a parse never yields -0 — `"-0"` and an underflow like `"-1e-400"` read as 0,
+  // as `int.parse` does; §14.13.4's round trip already reads the text of -0 back as 0
+  return n === 0 ? 0 : n;
+}
+
+/** `bool.parse(s)`: exactly `"true"` or `"false"`; else `not`. */
+export function parseBoolText(s) {
+  requireText(s, "bool.parse");
+  if (s === "true") return true;
+  if (s === "false") return false;
+  return null;
 }
 
 // ---------------------------------------------------------------------------

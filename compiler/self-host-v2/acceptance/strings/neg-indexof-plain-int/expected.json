@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-strings-neg-indexof-plain-int",
+  "description": "E-TYPE-031: `indexOf` is `int | not`, and the cell is `int`.",
+  "language-version": "1.0",
+  "spec": "Appendix D.1",
+  "rationale": "Ruled S469: \"`indexOf`/`lastIndexOf` return `int | not` (no -1).\"",
+  "expect": {
+    "codes": [
+      "E-TYPE-031"
+    ],
+    "codeCounts": {
+      "E-TYPE-031": 1
+    }
+  }
+}
