@@ -9176,6 +9176,8 @@ function fireComponentEngineScope(
       : (typeof engineDecl.governedType === "string" && engineDecl.governedType.length > 0)
         ? `\`<engine for=${engineDecl.governedType} ...>\``
         : "`<engine ...>`";
+  // One diagnostic per engine (§51.0.K): codegen's engine-in-row backstops skip a marked engine.
+  engineDecl[ENGINE_IN_ROW_REFUSED] = true;
   errors.push({
     code: "E-COMPONENT-ENGINE-SCOPE",
     message:

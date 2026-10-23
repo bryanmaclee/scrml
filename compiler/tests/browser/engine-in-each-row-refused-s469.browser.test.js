@@ -188,6 +188,18 @@ describe("an <engine> in an <each> row is refused (§51.0.K, S439 #10)", () => {
 `);
   });
 
+  // One diagnostic per outermost engine (§51.0.K): a component that holds an engine, used in a row,
+  // is reported ONCE — by CE ("inside the body of component `Row`"); the row backstop sees CE's mark.
+  for (const [label, uses] of [["used once", "<Row/>"], ["used twice in the row", "<Row/><Row/>"]]) {
+    test(`a component holding an engine, ${label} in a row, is reported exactly once (by CE)`, () => {
+      const err = expectRefused(T + `const Row = <li class="r">${ENGINE}</li>
+<groups> = [{ id: 1 }, { id: 2 }]
+<ul id="out"><each in=@groups key=@.id as g>${uses}</each></ul>
+`);
+      expect(err.message).toContain("inside the body of component `Row`");
+    });
+  }
+
   test("two row engines are two errors", () => {
     const { errors } = compile(T + `<groups> = [{ id: 1 }]
 <div id="out"><each in=@groups key=@.id as g>${ENGINE}</each><each in=@groups key=@.id as h><b>\${h.id}</b>${ENGINE}</each></div>
