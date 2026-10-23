@@ -37,36 +37,36 @@
     }
     function getFailed() {
         const row = ?{`SELECT id, body FROM gone`}.get() !{
-            .QueryFailed(m) :> { return "failed" }
+            .QueryFailed(m) :> { return "failed"; }
             _               :> not
         }
         return row is not ? "none" : row.body
     }
     function countHit() {
-        const rows = ?{`SELECT id FROM notes`}.all() !{ _ :> [] }
+        const rows = ?{`SELECT id FROM notes`}.all() !{ _ :> [] };
         return rows.length
     }
     function countFailed() {
-        const rows = ?{`SELECT id FROM gone`}.all() !{ _ :> [] }
+        const rows = ?{`SELECT id FROM gone`}.all() !{ _ :> [] };
         return rows.length
     }
     function reassign() {
-        let row = not
-        row = ?{`SELECT id, body FROM notes`}.get() !{ _ :> not }
+        let row = not;
+        row = ?{`SELECT id, body FROM notes`}.get() !{ _ :> not };
         return row is not ? "none" : row.body
     }
     function parenthesized() {
-        const row = (?{`SELECT id, body FROM gone`}.get() !{ _ :> not })
+        const row = (?{`SELECT id, body FROM gone`}.get() !{ _ :> not });
         return row is not ? "none" : row.body
     }
     function go() {
-        @hit = getHit() !{ .Transport(_) :> return }
-        @miss = getMiss() !{ .Transport(_) :> return }
-        @failed = getFailed() !{ .Transport(_) :> return }
-        @allHit = countHit() !{ .Transport(_) :> return }
-        @allFailed = countFailed() !{ .Transport(_) :> return }
-        @reassigned = reassign() !{ .Transport(_) :> return }
-        @paren = parenthesized() !{ .Transport(_) :> return }
+        @hit = getHit() !{ .Transport(_) :> return };
+        @miss = getMiss() !{ .Transport(_) :> return };
+        @failed = getFailed() !{ .Transport(_) :> return };
+        @allHit = countHit() !{ .Transport(_) :> return };
+        @allFailed = countFailed() !{ .Transport(_) :> return };
+        @reassigned = reassign() !{ .Transport(_) :> return };
+        @paren = parenthesized() !{ .Transport(_) :> return };
     }
     <button id="go" onclick=go()>go</button>
     <p id="hit">${@hit}</p>

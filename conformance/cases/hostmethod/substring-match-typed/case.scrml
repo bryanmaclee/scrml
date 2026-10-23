@@ -1,11 +1,11 @@
 ${
     type Cursor:struct = { source: string, pos: int }
     fn classify(c: Cursor) -> string {
-        const ch = c.source.substring(c.pos, c.pos + 1)
+        const ch = c.source.substring(c.pos, c.pos + 1);
         return match ch {
             "a" :> "vowel"
             _ :> "other"
-        }
+        };
     }
     <firstKind>: string = classify({ source: "abc", pos: 0 })
 }

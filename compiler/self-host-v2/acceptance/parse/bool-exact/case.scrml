@@ -2,9 +2,9 @@
 <program>
     function show(x: bool | not) -> string {
         return match x {
-            not :> "not"
+            not :> "not",
             else :> "bool"
-        }
+        };
     }
     let <t:bool | not=(bool.parse("true"))/>
     let <f:bool | not=(bool.parse("false"))/>

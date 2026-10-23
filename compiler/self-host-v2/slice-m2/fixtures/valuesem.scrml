@@ -2,9 +2,9 @@
     <audit:string[free, append]=([])/>      // append-only (grant spelling ruled O10 S469; ⚑ O32: `([])`)
     let <seen:int=0/>
     function log() {
-        let before = @audit              // a snapshot (§66.10)
-        @audit.append("x")                 // an end-append edit, granted by [free, end]
-        @seen = before.length            // the snapshot did not grow
+        let before = @audit;              // a snapshot (§66.10)
+        @audit.append("x");                 // an end-append edit, granted by [free, end]
+        @seen = before.length;            // the snapshot did not grow
     }
     <main>
         <button onclick=log()>log</button>

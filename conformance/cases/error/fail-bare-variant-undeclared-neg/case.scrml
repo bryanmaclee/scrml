@@ -2,7 +2,7 @@ ${
     type MyError:enum = { NotFound(id: string), Timeout }
 
     function f()! MyError {
-        fail .Nonexistent("x")
+        fail .Nonexistent("x");
     }
 }
 <p>x</>

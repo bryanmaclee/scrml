@@ -10,21 +10,21 @@ ${
     <trace> = ""
 
     server function release(id: number)! -> RelError {
-        ?{`UPDATE locks SET held = 0 WHERE id = ${id}`}.run()
-        return 1
+        ?{`UPDATE locks SET held = 0 WHERE id = ${id}`}.run();
+        return 1;
     }
 
     function work() {
-        @trace = @trace + "work;"
+        @trace = @trace + "work;";
         release(1) !{
             ::Busy :> @trace = @trace + "busy;"
             _ :> @trace = @trace + "release-failed;"
-        }
-        return "OK"
+        };
+        return "OK";
     }
 
     function go() {
-        @out = work()
+        @out = work();
     }
 }
 <button id="go" onclick=go()>go</button>

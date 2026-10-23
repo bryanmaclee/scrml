@@ -1,11 +1,11 @@
 ${
     type K:enum = { A, B }
     <v> : number = 0
-    function f(x: number) -> number { return x }
+    function f(x: number) -> number { return x; }
     function go() {
-        let n: number | not = 5
-        let obj = { f: 1 }
-        let c = 1
+        let n: number | not = 5;
+        let obj = { f: 1 };
+        let c = 1;
         @v = match K.A {
             given obj.f :> 1
             .A :> 2

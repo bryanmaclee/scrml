@@ -1,0 +1,12 @@
+{
+  "id": "acceptance-arms-neg-newline-list",
+  "description": "dpa-073 F2 + F5 (4): a newline-separated arm list is refused by the bootstrap — E-MATCH-ARM-SEPARATOR at the missing `,` (was acceptance-arms-newline-still-read, the case its own description named as the one to flip when the bootstrap enforced commas).",
+  "language-version": "1.0",
+  "spec": "dpa-073 F2 / F5 (S469); SPEC §18.2 (comma-list amendment, s469-spec-catchup)",
+  "rationale": "user-voice-scrml.md S469 dpa-073 F2 (iii): \"the arm list is a comma list … one spelling\"; F2 (i): \"a `,` between every pair of arms, block arms included, trailing `,` optional\"; F5: \"(4) the BOOTSTRAP enforces `;` + commas by construction. impl#1 does NOT enforce `;`/commas\".",
+  "expect": {
+    "codes": ["E-MATCH-ARM-SEPARATOR"],
+    "codeCounts": { "E-MATCH-ARM-SEPARATOR": 1 },
+    "severity": { "E-MATCH-ARM-SEPARATOR": "error" }
+  }
+}

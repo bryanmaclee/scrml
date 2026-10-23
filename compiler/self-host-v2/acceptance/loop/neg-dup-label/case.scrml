@@ -4,7 +4,7 @@
     function f() -> int {
         a: for (i of 0..2) { }
         a: for (j of 0..2) { }
-        return 1
+        return 1;
     }
     <main>
         <p id="o">${f()}</p>

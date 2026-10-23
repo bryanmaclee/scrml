@@ -4,9 +4,9 @@
     let <out:string=""/>
     let <n:int=0/>
     function load(id: string)! LoadError {
-        if (id == "x") fail LoadError.NotFound(id)
-        if (id == "y") fail LoadError.Timeout
-        return id
+        if (id == "x") fail LoadError.NotFound(id);
+        if (id == "y") fail LoadError.Timeout;
+        return id;
     }
     function v() {
         @out = load("x") !{
@@ -14,7 +14,7 @@
                 if (m == "x") {
                     lift "x"
                 }
-                lift m
+                lift m;
             },
             .Timeout :> "to",
         }

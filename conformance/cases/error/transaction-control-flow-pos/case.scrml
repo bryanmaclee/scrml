@@ -9,12 +9,12 @@
     function loopInside(a: number)! -> E {
         transaction {
             for (let i = 0; i < 3; i++) {
-                if (a > i) { continue }
-                if (i == 2) { break }
-                ?{`UPDATE orders SET name = 'y' WHERE id = ${i}`}.run()
+                if (a > i) { continue; }
+                if (i == 2) { break; }
+                ?{`UPDATE orders SET name = 'y' WHERE id = ${i}`}.run();
             }
             if (a > 10) {
-                fail E::Bad
+                fail E::Bad;
             }
         }
         return 1
@@ -22,24 +22,24 @@
     function early(a: number)! -> E {
         transaction {
             if (a > 1) {
-                return 5
+                return 5;
             }
-            ?{`UPDATE orders SET name = 'x' WHERE id = ${a}`}.run()
+            ?{`UPDATE orders SET name = 'x' WHERE id = ${a}`}.run();
         }
     }
     function leaveLoop(a: number)! -> E {
         for (let i = 0; i < 3; i++) {
             transaction {
-                if (a > i) { break }
-                ?{`UPDATE orders SET name = 'y' WHERE id = ${i}`}.run()
+                if (a > i) { break; }
+                ?{`UPDATE orders SET name = 'y' WHERE id = ${i}`}.run();
             }
         }
     }
     function skipPass(a: number)! -> E {
         for (let i = 0; i < 3; i++) {
             transaction {
-                if (a > i) { continue }
-                ?{`UPDATE orders SET name = 'z' WHERE id = ${i}`}.run()
+                if (a > i) { continue; }
+                ?{`UPDATE orders SET name = 'z' WHERE id = ${i}`}.run();
             }
         }
     }

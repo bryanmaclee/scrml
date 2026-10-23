@@ -5,14 +5,14 @@ ${
     <ls>: number(>0)[] = [1, 2, 3]
     <gone>: number = 0
     function trim() {
-        @rows.length = 2
-        @ls.length = 0
+        @rows.length = 2;
+        @ls.length = 0;
     }
     function removeThenWrite() {
-        const r = @rows[0]
-        @rows.shift()
-        r.n = @m
-        @gone = r.n
+        const r = @rows[0];
+        @rows.shift();
+        r.n = @m;
+        @gone = r.n;
     }
 }
 <program>

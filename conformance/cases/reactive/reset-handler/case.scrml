@@ -1,10 +1,10 @@
 ${
     <count> = 0
     function inc() {
-        @count = @count + 1
+        @count = @count + 1;
     }
     function clearCount() {
-        @count = 0
+        @count = 0;
     }
 }
 <button id="inc" onclick=inc()>+</>

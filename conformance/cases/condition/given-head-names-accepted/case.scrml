@@ -3,9 +3,9 @@
 // is soft-deprecated, so each surfaces W-GIVEN-PRESENCE-DEPRECATED.
 ${
     function pick(a: string | not, b: int | not) -> string {
-        given a :> { return "a" }
-        given a, b => { return "ab" }
-        return "none"
+        given a :> { return "a"; }
+        given a, b => { return "ab"; }
+        return "none";
     }
 }
 <p>${pick("x", 1)}</p>

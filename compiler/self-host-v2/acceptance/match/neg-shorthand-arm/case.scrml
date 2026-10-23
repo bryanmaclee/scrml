@@ -4,7 +4,7 @@
     let <c:Color=.Red/>
     function pick(ok: string) -> string {
         return match @c {
-            .Red :> { ok }
+            .Red :> { ok },
             .Green :> "g"
         }
     }

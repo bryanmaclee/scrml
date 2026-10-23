@@ -1,7 +1,7 @@
 ${
     type LoadError:enum = { Empty }
-    function risky(n: number)! -> LoadError { if (n == 0) { fail LoadError::Empty } return n }
-    function caller() { const r = risky(0)?; return r }
+    function risky(n: number)! -> LoadError { if (n == 0) { fail LoadError::Empty; } return n; }
+    function caller() { const r = risky(0)?; return r; }
 }
 <program>
 <p id="s">propagate</p>

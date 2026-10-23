@@ -1,4 +1,4 @@
 ${
-    import { missing } from './m.scrml'
+    import { missing } from './m.scrml';
 }
 <p>${missing}</>

@@ -1,10 +1,10 @@
 // §42.4 / §49.2.3 — a bare `T | not` `while` condition is a presence test.
 <program>
     function count(a: int | not) -> int {
-        let n: int = 0
+        let n: int = 0;
         while (a) {
-            n = n + 1
-            break
+            n = n + 1;
+            break;
         }
         return n
     }

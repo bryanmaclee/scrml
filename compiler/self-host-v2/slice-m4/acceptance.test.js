@@ -23,7 +23,7 @@ const STATUS = {
   "arms/comma-guard": ["PASS", []],
   "arms/comma-match": ["PASS", []],
   "arms/mixed-neg": ["PASS", ["E-MATCH-ARM-SEPARATOR"]],
-  "arms/newline-still-read": ["PASS", []],
+  "arms/neg-newline-list": ["PASS", ["E-MATCH-ARM-SEPARATOR"]],
   // s469-boot-ruled-backlog — §18.5 block arms yield with `lift` (S469); the value-form `if` refused by name
   "arms/lift-guard-value": ["PASS", []],
   "arms/single-expr-block": ["PASS", []],
@@ -216,7 +216,7 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
     });
   }
   test("the runtime halves executed where the case has one", () => {
-    for (const rel of ["arms/comma-guard", "arms/comma-match", "arms/newline-still-read", "opener/union-maybe"]) {
+    for (const rel of ["arms/comma-guard", "arms/comma-match", "opener/union-maybe"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });

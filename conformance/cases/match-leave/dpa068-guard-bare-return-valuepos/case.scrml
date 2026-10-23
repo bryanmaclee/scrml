@@ -6,18 +6,18 @@ ${
     <seen> : string = "none"
     <after> : string = "not-run"
     function risky(n: number)! E {
-        if (n < 0) { fail E.Boom("neg") }
-        return n
+        if (n < 0) { fail E.Boom("neg"); }
+        return n;
     }
     function calc(n: number) -> string {
         const v = risky(n) !{
             .Boom(m) :> return "early:" + m
             .Other :> 0
-        }
-        return "got:" + v
+        };
+        return "got:" + v;
     }
     function go() {
-        @out = calc(-1)
+        @out = calc(-1);
     }
 }
 <button id="go" onclick=go()>go</>

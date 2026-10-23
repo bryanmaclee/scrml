@@ -34,7 +34,7 @@ describe("O19 — an own TYPE without an initializer, plus typed attributes, is 
 });
 
 describe("a removal on a SUB-field sequence names the place (`@r.xs`) and is refused like `.push`", () => {
-  const prog = (t) => `<program>\n type R:struct = { xs: ${t} }\n let <r:R=({ xs: [] })/>\n function f() { @r.xs.pop() }\n <main><p>x</p></main>\n</program>\n`;
+  const prog = (t) => `<program>\n type R:struct = { xs: ${t} }\n let <r:R=({ xs: [] })/>\n function f() { @r.xs.pop(); }\n <main><p>x</p></main>\n</program>\n`;
   test("`@r.xs.pop()` → E-BOOTSTRAP-UNSUPPORTED naming `@r.xs.pop()` (never judged by `r`'s own `let`)", () => {
     for (const t of ["string[free, pop]", "string[free, append]"]) {
       const d = run(prog(t)).diags;
@@ -44,7 +44,7 @@ describe("a removal on a SUB-field sequence names the place (`@r.xs`) and is ref
     }
   });
   test("twin: a removal on a whole cell still names `@xs`", () => {
-    const d = run(`<program>\n <xs:string[free, append]=([])/>\n function f() { @xs.pop() }\n <main><p>x</p></main>\n</program>\n`).diags;
+    const d = run(`<program>\n <xs:string[free, append]=([])/>\n function f() { @xs.pop(); }\n <main><p>x</p></main>\n</program>\n`).diags;
     expect(d.map((x) => x.code)).toEqual(["E-WRITE-NOT-GRANTED"]);
     expect(d[0].message).toContain("`@xs.pop()`");
   });

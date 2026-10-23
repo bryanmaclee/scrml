@@ -4,21 +4,21 @@
     let <out:string=""/>
     let <n:int=0/>
     function load(id: string)! LoadError {
-        if (id == "x") fail LoadError.NotFound(id)
-        if (id == "y") fail LoadError.Timeout
-        return id
+        if (id == "x") fail LoadError.NotFound(id);
+        if (id == "y") fail LoadError.Timeout;
+        return id;
     }
-    function v() { @out = load("x") !{ .NotFound(m) :> "nf:" + m, .Timeout :> "to", } }
+    function v() { @out = load("x") !{ .NotFound(m) :> "nf:" + m, .Timeout :> "to", }; }
     function blk() {
         load("y") !{
             .NotFound(m) :> {
-                @out = m
+                @out = m;
             },
             .Timeout :> {
-                @n = @n + 1
-                @out = "to"
+                @n = @n + 1;
+                @out = "to";
             },
-        }
+        };
     }
     <main>
         <button id="v" onclick=v()>v</button>

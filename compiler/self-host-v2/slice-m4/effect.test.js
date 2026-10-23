@@ -67,7 +67,7 @@ function runsOn(label) {
   return spy.calls;
 }
 
-const PING = `    function ping() {\n        const t = Date.now()\n    }`;
+const PING = `    function ping() {\n        const t = Date.now();\n    }`;
 
 // ===========================================================================
 // The empirical programs (also pasted, with their output, in
@@ -78,10 +78,10 @@ export const TOP_PROGRAM = `<program>
     let <qty:int=2/>
     <total:int=(@price * @qty)/>
     function ping() {
-        const t = Date.now()
+        const t = Date.now();
     }
 
-    <effect deps=[@price]>\${ ping() }</>
+    <effect deps=[@price]>\${ ping(); }</>
 
     <main>
         <p class="out">\${@total}</p>
@@ -96,11 +96,11 @@ export const SCOPED_PROGRAM = `<program>
     let <n:int=0/>
     let <show:bool=true/>
     function ping() {
-        const t = Date.now()
+        const t = Date.now();
     }
 
     <main>
-        <section if=@show><effect deps=[@n]>\${ ping() }</><b>mounted</b></section>
+        <section if=@show><effect deps=[@n]>\${ ping(); }</><b>mounted</b></section>
         <p class="out">\${@n}</p>
         <button onclick=(@n = @n + 1)>inc</button>
         <button onclick=(@show = !@show)>toggle</button>
@@ -160,7 +160,7 @@ describe("§6.7.4 Scope and teardown — an `<effect>` inside an `if=` element",
 
 describe("§6.7.4 — forms", () => {
   test("two dependencies; one handler batch writing both runs the body once", async () => {
-    const src = P(`    let <a:int=0/>\n    let <b:int=0/>\n${PING}\n    function both() {\n        @a = @a + 1\n        @b = @b + 1\n    }\n    <effect deps=[@a, @b]>\${ ping() }</>`,
+    const src = P(`    let <a:int=0/>\n    let <b:int=0/>\n${PING}\n    function both() {\n        @a = @a + 1;\n        @b = @b + 1;\n    }\n    <effect deps=[@a, @b]>\${ ping(); }</>`,
       `        <button onclick=(@a = @a + 1)>a</button>\n        <button onclick=(@b = @b + 10)>b</button>\n        <button onclick=both()>both</button>`);
     const core = coreOf(src);
     expect(effects(core)[0].deps.length).toBe(2);
@@ -171,8 +171,8 @@ describe("§6.7.4 — forms", () => {
   });
 
   test("an `<effect>` in an <each> row is one effect per row, unregistered with its row", async () => {
-    const src = P(`    type Row:struct = { id: int }\n    <rows:Row[replace]=([{ id: 1 }, { id: 2 }])/>\n    let <n:int=0/>\n${PING}\n    function drop() { @rows = [{ id: 1 }] }`,
-      `        <ul><each in=@rows key=@.id as r><li class="row">\${r.id}<effect deps=[@n]>\${ ping() }</></li></each></ul>\n        <button onclick=(@n = @n + 1)>inc</button>\n        <button onclick=drop()>drop</button>`);
+    const src = P(`    type Row:struct = { id: int }\n    <rows:Row[replace]=([{ id: 1 }, { id: 2 }])/>\n    let <n:int=0/>\n${PING}\n    function drop() { @rows = [{ id: 1 }]; }`,
+      `        <ul><each in=@rows key=@.id as r><li class="row">\${r.id}<effect deps=[@n]>\${ ping(); }</></li></each></ul>\n        <button onclick=(@n = @n + 1)>inc</button>\n        <button onclick=drop()>drop</button>`);
     const { rt } = await loadProgram(coreOf(src), "effect-each");
     expect(rt.stats.depEffects).toBe(2);
     expect(runsOn("inc")).toBe(2);
@@ -184,8 +184,8 @@ describe("§6.7.4 — forms", () => {
   test("fix round MEDIUM-1: one batch that changes the dep AND removes a row runs only the surviving row's effect — either order, survivor same object or new", async () => {
     // mutation RED: flush() without its `flushing` guard (reconcile sets the survivor's item cell before
     // disposing removed rows; that write's nested flush drained the effect queue mid-run → 2 runs)
-    const src = P(`    type Row:struct = { id: int }\n    <rows:Row[replace, free, remove]=([{ id: 1 }, { id: 2 }])/>\n    let <n:int=0/>\n${PING}\n    function bumpThenNew() {\n        @n = @n + 1\n        @rows = [{ id: 1 }]\n    }\n    function newThenBump() {\n        @rows = [{ id: 1 }]\n        @n = @n + 1\n    }\n    function bumpThenKeep() {\n        @n = @n + 1\n        @rows = @rows.filter(r => r.id == 1)\n    }\n    function keepThenBump() {\n        @rows = @rows.filter(r => r.id == 1)\n        @n = @n + 1\n    }\n    function reset2() { @rows = [{ id: 1 }, { id: 2 }] }`,
-      `        <ul><each in=@rows key=@.id as r><li class="row">\${r.id}<effect deps=[@n]>\${ ping() }</></li></each></ul>\n        <button onclick=bumpThenNew()>a</button>\n        <button onclick=newThenBump()>b</button>\n        <button onclick=bumpThenKeep()>c</button>\n        <button onclick=keepThenBump()>d</button>\n        <button onclick=reset2()>reset</button>`);
+    const src = P(`    type Row:struct = { id: int }\n    <rows:Row[replace, free, remove]=([{ id: 1 }, { id: 2 }])/>\n    let <n:int=0/>\n${PING}\n    function bumpThenNew() {\n        @n = @n + 1;\n        @rows = [{ id: 1 }];\n    }\n    function newThenBump() {\n        @rows = [{ id: 1 }];\n        @n = @n + 1;\n    }\n    function bumpThenKeep() {\n        @n = @n + 1;\n        @rows = @rows.filter(r => r.id == 1);\n    }\n    function keepThenBump() {\n        @rows = @rows.filter(r => r.id == 1);\n        @n = @n + 1;\n    }\n    function reset2() { @rows = [{ id: 1 }, { id: 2 }]; }`,
+      `        <ul><each in=@rows key=@.id as r><li class="row">\${r.id}<effect deps=[@n]>\${ ping(); }</></li></each></ul>\n        <button onclick=bumpThenNew()>a</button>\n        <button onclick=newThenBump()>b</button>\n        <button onclick=bumpThenKeep()>c</button>\n        <button onclick=keepThenBump()>d</button>\n        <button onclick=reset2()>reset</button>`);
     const { rt } = await loadProgram(coreOf(src), "effect-each-remove");
     for (const label of ["a", "b", "c", "d"]) {
       runsOn("reset");
@@ -196,7 +196,7 @@ describe("§6.7.4 — forms", () => {
   });
 
   test("the body may read row bindings, read unlisted cells, call write-free functions and the host", async () => {
-    const src = P(`    let <n:int=0/>\n    let <k:int=5/>\n    fn dbl(x: int) -> int { return x * 2 }\n    function stamp(v: int) {\n        const t = Date.now()\n        const w = dbl(v)\n    }\n    <effect deps=[@n]>\${\n        const sum = @n + @k\n        stamp(sum)\n    }</>`,
+    const src = P(`    let <n:int=0/>\n    let <k:int=5/>\n    fn dbl(x: int) -> int { return x * 2; }\n    function stamp(v: int) {\n        const t = Date.now();\n        const w = dbl(v);\n    }\n    <effect deps=[@n]>\${\n        const sum = @n + @k;\n        stamp(sum);\n    }</>`,
       `        <button onclick=(@n = @n + 1)>inc</button>`);
     await loadProgram(coreOf(src), "effect-calls");
     expect(runsOn("inc")).toBe(1);
@@ -210,13 +210,13 @@ describe("§6.7.4 — forms", () => {
 });
 
 describe("§6.7.4 the retiring keyword form — `when … changes { }` parses identically (§63 Stage 1)", () => {
-  const KEYWORD = `<program>\n    let <n:int=0/>\n    let <show:bool=true/>\n${PING}\n    <main>\n        <section if=@show>\${ when @n changes { ping() } }</section>\n        <button onclick=(@n = @n + 1)>inc</button>\n        <button onclick=(@show = !@show)>toggle</button>\n    </main>\n</program>\n`;
+  const KEYWORD = `<program>\n    let <n:int=0/>\n    let <show:bool=true/>\n${PING}\n    <main>\n        <section if=@show>\${ when @n changes { ping(); } }</section>\n        <button onclick=(@n = @n + 1)>inc</button>\n        <button onclick=(@show = !@show)>toggle</button>\n    </main>\n</program>\n`;
 
   test("W-WHEN-EFFECT-DEPRECATED at every site, naming the canonical `<effect>` spelling", () => {
     const ds = diagsOf(KEYWORD);
     expect(ds.map((d) => d.code)).toEqual(["W-WHEN-EFFECT-DEPRECATED"]);
     expect(ds[0].message).toContain("`<effect deps=[@n]>");
-    expect(codes(P(`    let <a:int=0/>\n    let <b:int=0/>\n${PING}\n    when (@a, @b) changes {\n        ping()\n    }`, ""))).toEqual(["W-WHEN-EFFECT-DEPRECATED"]);
+    expect(codes(P(`    let <a:int=0/>\n    let <b:int=0/>\n${PING}\n    when (@a, @b) changes {\n        ping();\n    }`, ""))).toEqual(["W-WHEN-EFFECT-DEPRECATED"]);
   });
 
   test("same Core, same runtime: no mount run, teardown with the `if=` region", async () => {
@@ -235,29 +235,29 @@ describe("§6.7.4 the retiring keyword form — `when … changes { }` parses id
   });
 
   test("the SAME no-write rule — a writing keyword body is E-EFFECT-WRITES-STATE now (RULED S447), plus the deprecation", () => {
-    const ds = diagsOf(P(`    let <n:int=0/>\n    let <hits:int=0/>\n    when @n changes {\n        @hits = @hits + 1\n    }`, ""));
+    const ds = diagsOf(P(`    let <n:int=0/>\n    let <hits:int=0/>\n    when @n changes {\n        @hits = @hits + 1;\n    }`, ""));
     expect(ds.map((d) => d.code).sort()).toEqual(["E-EFFECT-WRITES-STATE", "W-WHEN-EFFECT-DEPRECATED"]);
     expect(ds.find((d) => d.code === "E-EFFECT-WRITES-STATE").message).toMatch(/`when … changes` effect writes `@hits`/);
   });
 
   test("syntax: `()`, a missing `changes`, a non-`@` entry, and the retired `reads` clause are parse errors", () => {
     const D = `    let <n:int=0/>\n${PING}`;
-    expect(codes(P(`${D}\n    when () changes {\n        ping()\n    }`, ""))).toContain("E-PARSE-WHEN");
-    expect(codes(P(`${D}\n    when @n {\n        ping()\n    }`, ""))).toContain("E-PARSE-WHEN");
-    expect(codes(P(`${D}\n    when (@n, m) changes {\n        ping()\n    }`, ""))).toContain("E-PARSE-WHEN");
-    const reads = diagsOf(P(`${D}\n    let <q:int=0/>\n    when @n changes reads @q {\n        ping()\n    }`, ""));
+    expect(codes(P(`${D}\n    when () changes {\n        ping();\n    }`, ""))).toContain("E-PARSE-WHEN");
+    expect(codes(P(`${D}\n    when @n {\n        ping();\n    }`, ""))).toContain("E-PARSE-WHEN");
+    expect(codes(P(`${D}\n    when (@n, m) changes {\n        ping();\n    }`, ""))).toContain("E-PARSE-WHEN");
+    const reads = diagsOf(P(`${D}\n    let <q:int=0/>\n    when @n changes reads @q {\n        ping();\n    }`, ""));
     expect(reads.map((d) => d.code)).toContain("E-PARSE-WHEN");
     expect(reads.find((d) => d.code === "E-PARSE-WHEN").message).toMatch(/`reads` clause is retired.*needs no annotation/);
   });
 
   test("`when` stays an ordinary name where it is not a `when … changes` statement", () => {
-    expect(codes(P(`    let <m:int=0/>\n    fn when(x: int) -> int { return x }\n    function g() { @m = when(1) }`, ""))).toEqual([]);
+    expect(codes(P(`    let <m:int=0/>\n    fn when(x: int) -> int { return x; }\n    function g() { @m = when(1); }`, ""))).toEqual([]);
   });
 });
 
 describe("§6.7.4 — codes", () => {
   const D = `    let <n:int=0/>\n    let <m:int=0/>\n    <step=1/>\n    <dbl:int=(@n * 2)/>\n${PING}`;
-  const body = `>\${ ping() }</>`;
+  const body = `>\${ ping(); }</>`;
 
   test("E-EFFECT-NO-DEPS — no `deps=`, or `deps=[]` (an effect never runs on mount, so it would never run)", () => {
     expect(codes(P(D, "") .replace("<main>", `<effect${body}\n    <main>`))).toEqual(["E-EFFECT-NO-DEPS"]);
@@ -278,15 +278,15 @@ describe("§6.7.4 — codes", () => {
   });
 
   test("fix round LOW b: a §66 field path as a dependency (`deps=[@box.k]`, ⚑ OPEN) is refused, not decided", () => {
-    const src = `<program>\n    <box:struct> let <k:int=0/> </>\n    renders <div>\${k}</div>\n${PING}\n    <effect deps=[@box.k]>\${ ping() }</>\n    <main></main>\n</program>\n`;
+    const src = `<program>\n    <box:struct> let <k:int=0/> </>\n    renders <div>\${k}</div>\n${PING}\n    <effect deps=[@box.k]>\${ ping(); }</>\n    <main></main>\n</program>\n`;
     const ds = diagsOf(src);
     expect(ds.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(ds[0].message).toMatch(/field path .* is OPEN/);
   });
 
   test("E-LIFECYCLE-016 — an effect inside another effect's body, in either spelling", () => {
-    expect(codes(P(`${D}\n    <effect deps=[@n]>\${\n        ping()\n        <effect deps=[@m]>\${ ping() }</>\n    }</>`, ""))).toEqual(["E-LIFECYCLE-016"]);
-    expect(codes(P(`${D}\n    <effect deps=[@n]>\${\n        ping()\n        when @m changes { ping() }\n    }</>`, ""))).toEqual(["E-LIFECYCLE-016"]);
+    expect(codes(P(`${D}\n    <effect deps=[@n]>\${\n        ping();\n        <effect deps=[@m]>\${ ping(); }</>\n    }</>`, ""))).toEqual(["E-LIFECYCLE-016"]);
+    expect(codes(P(`${D}\n    <effect deps=[@n]>\${\n        ping();\n        when @m changes { ping(); }\n    }</>`, ""))).toEqual(["E-LIFECYCLE-016"]);
     // negative: two SIBLING effects are fine
     expect(codes(P(`${D}\n    <effect deps=[@n]${body}\n    <effect deps=[@m]${body}`, ""))).toEqual([]);
   });
@@ -301,7 +301,7 @@ describe("§6.7.4 — codes", () => {
     expect(codes(P(`${D}\n    <effect deps=[@n] id="x"${body}`, ""))).toContain("E-PARSE-EFFECT");
     expect(codes(P(`${D}\n    <effect deps=@n${body}`, ""))).toContain("E-PARSE-EFFECT");
     expect(codes(P(`${D}\n    <effect deps=[@n]>hello</>`, ""))).toContain("E-PARSE-EFFECT");
-    expect(codes(P(`${D}\n    <effect deps=[@n]>\${ ping() }<b>x</b></>`, ""))).toContain("E-PARSE-EFFECT");
+    expect(codes(P(`${D}\n    <effect deps=[@n]>\${ ping(); }<b>x</b></>`, ""))).toContain("E-PARSE-EFFECT");
   });
 });
 
@@ -311,37 +311,37 @@ describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive wr
   const W = (src) => src.map((d) => d.code);
 
   test("rule 1: a direct write in the body — assignment, `reset`, an edit call — each is an error", () => {
-    expect(W(writes("", `<effect deps=[@query]>\${ @page = 1 }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
-    expect(W(writes("", `<effect deps=[@query]>\${ reset(@page) }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
-    expect(W(writes("", `<effect deps=[@query]>\${ @xs.append(1) }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
-    expect(W(writes("", `<effect deps=[@query]>\${\n        if (@page > 1) {\n            @hits = @hits + 1\n        }\n    }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(W(writes("", `<effect deps=[@query]>\${ @page = 1; }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(W(writes("", `<effect deps=[@query]>\${ reset(@page); }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(W(writes("", `<effect deps=[@query]>\${ @xs.append(1); }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(W(writes("", `<effect deps=[@query]>\${\n        if (@page > 1) {\n            @hits = @hits + 1;\n        }\n    }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
   });
 
   test("the message names the cell and the fix BY SHAPE (S447 1a): reset → `reset-on=`; a call result → `<request>`; otherwise → the writer / derive", () => {
-    const reset = writes("", `<effect deps=[@query]>\${ @page = 1 }</>`)[0].message;
+    const reset = writes("", `<effect deps=[@query]>\${ @page = 1; }</>`)[0].message;
     expect(reset).toContain("writes `@page`");
     expect(reset).toContain("declare it on the cell: `reset-on=[@query]` (§6.8.4)");
-    expect(writes("", `<effect deps=[@query]>\${ reset(@page) }</>`)[0].message).toContain("`reset-on=[@query]`");
-    const req = writes(`    fn load(q: string) -> int { return 3 }`, `<effect deps=[@query]>\${ @page = load(@query) }</>`)[0].message;
+    expect(writes("", `<effect deps=[@query]>\${ reset(@page); }</>`)[0].message).toContain("`reset-on=[@query]`");
+    const req = writes(`    fn load(q: string) -> int { return 3; }`, `<effect deps=[@query]>\${ @page = load(@query); }</>`)[0].message;
     expect(req).toContain("`<request>`'s job");
-    const other = writes("", `<effect deps=[@query]>\${ @hits = @hits + 1 }</>`)[0].message;
+    const other = writes("", `<effect deps=[@query]>\${ @hits = @hits + 1; }</>`)[0].message;
     expect(other).toContain("Move the write into the code that writes the trigger");
   });
 
   test("rule 2: a write THROUGH a called function — one level and two — names the call chain down to the write", () => {
-    const one = writes(`    function logFilter() {\n        @hits = @hits + 1\n    }`, `<effect deps=[@query]>\${ logFilter() }</>`);
+    const one = writes(`    function logFilter() {\n        @hits = @hits + 1;\n    }`, `<effect deps=[@query]>\${ logFilter(); }</>`);
     expect(W(one)).toEqual(["E-EFFECT-WRITES-STATE"]);
     expect(one[0].message).toContain("`logFilter() → @hits`");
     // mutation RED (bite proof, progress.md): `propagated` returning `s` unchanged — the summary no
     // longer reaches through a call, so `track()` (which writes nothing itself) looks write-free
-    const two = writes(`    function logFilter() {\n        @hits = @hits + 1\n    }\n    function track() {\n        logFilter()\n    }`, `<effect deps=[@query]>\${ track() }</>`);
+    const two = writes(`    function logFilter() {\n        @hits = @hits + 1;\n    }\n    function track() {\n        logFilter();\n    }`, `<effect deps=[@query]>\${ track(); }</>`);
     expect(W(two)).toEqual(["E-EFFECT-WRITES-STATE"]);
     expect(two[0].message).toContain("`track() → logFilter() → @hits`");
   });
 
   test("across a module boundary: a writer imported from a `.scrml` library is summarized too (its body is linked)", () => {
-    const lib = `// lib/log.scrml\nexport <counter:struct> let <n:int=0/> </>\nexport function bumpCount() { @counter.n = @counter.n + 1 }\nexport function readCount() { const c = @counter.n }\n`;
-    const app = (call) => `<program>\n    \${ import { bumpCount, readCount } from "./lib/log.scrml" }\n    let <query:string=""/>\n    <effect deps=[@query]>\${ ${call} }</>\n    <main></main>\n</program>\n`;
+    const lib = `// lib/log.scrml\nexport <counter:struct> let <n:int=0/> </>\nexport function bumpCount() { @counter.n = @counter.n + 1; }\nexport function readCount() { const c = @counter.n; }\n`;
+    const app = (call) => `<program>\n    \${ import { bumpCount, readCount } from "./lib/log.scrml"; }\n    let <query:string=""/>\n    <effect deps=[@query]>\${ ${call}; }</>\n    <main></main>\n</program>\n`;
     const files = (call) => [{ path: "lib/log.scrml", src: lib }, { path: "app.scrml", src: app(call) }];
     const ds = frontEnd(mods, files("bumpCount()")).diags;
     expect(ds.map((d) => d.code)).toEqual(["E-EFFECT-WRITES-STATE"]);
@@ -360,35 +360,35 @@ describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive wr
   test("S449 item 3: a read that CONSTRUCTS a shared instance whose `let` seed calls a writer — rejected at the seed, not at the effect", async () => {
     // Found by measurement (s449): this program compiled clean, and one click wrote `@a` from inside the
     // effect body (`shared_box()` constructed `box` on first read; its seed ran `bumpA()`).
-    const decls = `    let <a:int=0/>\n    function bumpA() -> int {\n        @a = @a + 1\n        return 1\n    }\n    <box:struct> let <k:int=(bumpA())/> </>\n    renders <div>\${k}</div>`;
-    const ds = writes(decls, `<effect deps=[@query]>\${\n        const v = @box.k\n    }</>`);
+    const decls = `    let <a:int=0/>\n    function bumpA() -> int {\n        @a = @a + 1;\n        return 1;\n    }\n    <box:struct> let <k:int=(bumpA())/> </>\n    renders <div>\${k}</div>`;
+    const ds = writes(decls, `<effect deps=[@query]>\${\n        const v = @box.k;\n    }</>`);
     expect(W(ds)).toEqual([SRC]);
     expect(ds[0].message).toContain("the initializer of `@box.k` writes `@a` through a call: `bumpA() → @a`");
     // …read through a function, and through a declaration the constructed one renders: the same one error
-    expect(W(writes(`${decls}\n    function peek() -> int { return @box.k }`, `<effect deps=[@query]>\${\n        const v = peek()\n    }</>`))).toEqual([SRC]);
-    const nested = `    let <a:int=0/>\n    function bumpA() -> int {\n        @a = @a + 1\n        return 1\n    }\n    <inner:struct> let <k:int=(bumpA())/> </>\n    renders <i>\${k}</i>\n    <outer:struct> let <j:int=0/> </>\n    renders <div><inner/></div>`;
-    expect(W(writes(nested, `<effect deps=[@query]>\${\n        const v = @outer.j\n    }</>`))).toEqual([SRC]);
+    expect(W(writes(`${decls}\n    function peek() -> int { return @box.k; }`, `<effect deps=[@query]>\${\n        const v = peek();\n    }</>`))).toEqual([SRC]);
+    const nested = `    let <a:int=0/>\n    function bumpA() -> int {\n        @a = @a + 1;\n        return 1;\n    }\n    <inner:struct> let <k:int=(bumpA())/> </>\n    renders <i>\${k}</i>\n    <outer:struct> let <j:int=0/> </>\n    renders <div><inner/></div>`;
+    expect(W(writes(nested, `<effect deps=[@query]>\${\n        const v = @outer.j;\n    }</>`))).toEqual([SRC]);
     // negative: a shared instance whose initializers write nothing
-    expect(W(writes(`    <box:struct> let <k:int=3/> </>\n    renders <div>\${k}</div>`, `<effect deps=[@query]>\${\n        const v = @box.k\n    }</>`))).toEqual([]);
+    expect(W(writes(`    <box:struct> let <k:int=3/> </>\n    renders <div>\${k}</div>`, `<effect deps=[@query]>\${\n        const v = @box.k;\n    }</>`))).toEqual([]);
   });
 
   test("S449 item 3 (was fix round HIGH-1): a derived cell whose formula calls a writer — rejected at the formula, however the effect reads it", async () => {
     // Reviewer-measured at a92b6251e: this compiled clean and two clicks took @a 0 → 1 → 2 (the lazy pull ran
     // the formula inside the effect body).
-    const decls = `    let <n:int=0/>\n    let <a:int=0/>\n    function g() -> int {\n        @a = @a + 1\n        return 1\n    }\n    <d:int=(@n + g())/>`;
+    const decls = `    let <n:int=0/>\n    let <a:int=0/>\n    function g() -> int {\n        @a = @a + 1;\n        return 1;\n    }\n    <d:int=(@n + g())/>`;
     const eff = (body) => `<effect deps=[@query]>\${\n        ${body}\n    }</>`;
-    const direct = writes(decls, eff("const q = @d"));
+    const direct = writes(decls, eff("const q = @d;"));
     expect(W(direct)).toEqual([SRC]);
     expect(direct[0].message).toContain("the formula of derived `@d` writes `@a` through a call: `g() → @a`");
     // through a write-free function that reads it; through a shared instance whose seed reads it
-    expect(W(writes(`${decls}\n    function peek() -> int { return @d }`, eff("const q = peek()")))).toEqual([SRC]);
-    expect(W(writes(`${decls}\n    <box:struct> let <k:int=(@d)/> </>\n    renders <div>\${k}</div>`, eff("const q = @box.k")))).toEqual([SRC]);
+    expect(W(writes(`${decls}\n    function peek() -> int { return @d; }`, eff("const q = peek();")))).toEqual([SRC]);
+    expect(W(writes(`${decls}\n    <box:struct> let <k:int=(@d)/> </>\n    renders <div>\${k}</div>`, eff("const q = @box.k;")))).toEqual([SRC]);
     // negative: a derived cell whose formula writes nothing
-    expect(W(writes(`    let <n:int=0/>\n    <d:int=(@n * 2)/>`, eff("const q = @d")))).toEqual([]);
+    expect(W(writes(`    let <n:int=0/>\n    <d:int=(@n * 2)/>`, eff("const q = @d;")))).toEqual([]);
   });
 
   test("S449 item 3 (was fix round HIGH-1, runtime): the reviewer's program is rejected at its formula; its write-free twin runs with no write", async () => {
-    const src = (formula) => P(`    let <n:int=0/>\n    let <a:int=0/>\n    function g() -> int {\n        @a = @a + 1\n        return 1\n    }\n    fn h() -> int { return 1 }\n    <d:int=(${formula})/>\n${PING}\n    <effect deps=[@n]>\${\n        const q = @d\n        ping()\n    }</>`,
+    const src = (formula) => P(`    let <n:int=0/>\n    let <a:int=0/>\n    function g() -> int {\n        @a = @a + 1;\n        return 1;\n    }\n    fn h() -> int { return 1; }\n    <d:int=(${formula})/>\n${PING}\n    <effect deps=[@n]>\${\n        const q = @d;\n        ping();\n    }</>`,
       `        <p class="a">\${@a}</p>\n        <button onclick=(@n = @n + 1)>inc</button>`);
     expect(codes(src("@n + g()"))).toEqual([SRC]);
     await loadProgram(coreOf(src("@n + h()")), "effect-derived-clean");
@@ -397,36 +397,36 @@ describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive wr
   });
 
   test("recursion: the summary is a fixed point — mutual recursion that writes is found; that does not, is clean", () => {
-    const rec = `    function a(k: int) {\n        if (k > 0) {\n            b(k - 1)\n        }\n    }\n    function b(k: int) {\n        a(k)\n        @hits = k\n    }`;
-    expect(W(writes(rec, `<effect deps=[@query]>\${ a(3) }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
-    const pure = `    function c(k: int) {\n        if (k > 0) {\n            d(k - 1)\n        }\n    }\n    function d(k: int) {\n        c(k)\n        const t = Date.now()\n    }`;
-    expect(W(writes(pure, `<effect deps=[@query]>\${ c(3) }</>`))).toEqual([]);
+    const rec = `    function a(k: int) {\n        if (k > 0) {\n            b(k - 1);\n        }\n    }\n    function b(k: int) {\n        a(k);\n        @hits = k;\n    }`;
+    expect(W(writes(rec, `<effect deps=[@query]>\${ a(3); }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    const pure = `    function c(k: int) {\n        if (k > 0) {\n            d(k - 1);\n        }\n    }\n    function d(k: int) {\n        c(k);\n        const t = Date.now();\n    }`;
+    expect(W(writes(pure, `<effect deps=[@query]>\${ c(3); }</>`))).toEqual([]);
   });
 
   test("rule 3: a function VALUE counts as called — an arrow function's call inside `.map` reaches a writer", () => {
-    const decls = `    <ids:int[]=([1, 2])/>\n    function bump(x: int) -> int {\n        @hits = @hits + x\n        return x\n    }`;
-    const ds = writes(decls, `<effect deps=[@query]>\${\n        const ys = @ids.map(x => bump(x))\n    }</>`);
+    const decls = `    <ids:int[]=([1, 2])/>\n    function bump(x: int) -> int {\n        @hits = @hits + x;\n        return x;\n    }`;
+    const ds = writes(decls, `<effect deps=[@query]>\${\n        const ys = @ids.map(x => bump(x));\n    }</>`);
     expect(W(ds)).toEqual(["E-EFFECT-WRITES-STATE"]);
     expect(ds[0].message).toContain("`bump() → @hits`");
     // a writer NAMED as a value, never called in scrml — whatever receives it may call it
     // (s451 Ue review HIGH-2: the function value itself is also refused — E-BOOTSTRAP-UNSUPPORTED —
     // as Core has no function value; the no-write rule still reports it, fail-closed twice.)
-    const named = fnValueRefused(writes(`    function logFilter() {\n        @hits = @hits + 1\n    }`, `<effect deps=[@query]>\${\n        const handler = logFilter\n    }</>`));
+    const named = fnValueRefused(writes(`    function logFilter() {\n        @hits = @hits + 1;\n    }`, `<effect deps=[@query]>\${\n        const handler = logFilter;\n    }</>`));
     expect(W(named)).toEqual(["E-EFFECT-WRITES-STATE"]);
     expect(named[0].message).toContain("hands `logFilter` on as a function value");
   });
 
   test("negatives: writing a local, calling a write-free `function` / `fn`, the host — all clean", () => {
-    expect(W(writes(`    fn dbl(x: int) -> int { return x * 2 }\n    function readOnly() {\n        const v = @page + 1\n        const t = Date.now()\n    }`,
-      `<effect deps=[@query]>\${\n        let local = 0\n        local = dbl(@page)\n        readOnly()\n        ping()\n    }</>`))).toEqual([]);
+    expect(W(writes(`    fn dbl(x: int) -> int { return x * 2; }\n    function readOnly() {\n        const v = @page + 1;\n        const t = Date.now();\n    }`,
+      `<effect deps=[@query]>\${\n        let local = 0;\n        local = dbl(@page);\n        readOnly();\n        ping();\n    }</>`))).toEqual([]);
   });
 
   test("a write to a cell an effect LISTS is the same error (E-LIFECYCLE-006 is subsumed)", () => {
-    expect(W(writes("", `<effect deps=[@page]>\${ @page = @page + 1 }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(W(writes("", `<effect deps=[@page]>\${ @page = @page + 1; }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
   });
 
   test("a write the binder refuses (a locked cell) is still a write of the effect", () => {
-    const ds = writes(`    <locked=3/>`, `<effect deps=[@query]>\${ @locked = 4 }</>`);
+    const ds = writes(`    <locked=3/>`, `<effect deps=[@query]>\${ @locked = 4; }</>`);
     expect(W(ds)).toContain("E-EFFECT-WRITES-STATE");
   });
 });
@@ -435,40 +435,40 @@ describe("§6.7.4 rule 4 — E-EFFECT-WRITE-UNPROVEN (fails closed)", () => {
   const D = `    let <query:string=""/>\n${PING}`;
 
   test("a call through a local holding a function value — the compiler cannot resolve it", () => {
-    const ds = fnValueRefused(diagsOf(P(`${D}\n    <effect deps=[@query]>\${\n        const g = ping\n        g()\n    }</>`, "")));
+    const ds = fnValueRefused(diagsOf(P(`${D}\n    <effect deps=[@query]>\${\n        const g = ping;\n        g();\n    }</>`, "")));
     expect(ds.map((d) => d.code)).toEqual(["E-EFFECT-WRITE-UNPROVEN"]);
     expect(ds[0].message).toMatch(/`g\(…\)` calls through `g`.*fails closed/);
   });
 
   test("…reached through a called function: the message names the chain", () => {
-    const ds = fnValueRefused(diagsOf(P(`${D}\n    function viaLocal() {\n        const g = ping\n        g()\n    }\n    <effect deps=[@query]>\${ viaLocal() }</>`, "")));
+    const ds = fnValueRefused(diagsOf(P(`${D}\n    function viaLocal() {\n        const g = ping;\n        g();\n    }\n    <effect deps=[@query]>\${ viaLocal(); }</>`, "")));
     expect(ds.map((d) => d.code)).toEqual(["E-EFFECT-WRITE-UNPROVEN"]);
     expect(ds[0].message).toContain("through `viaLocal()`");
   });
 
   test("negative: the same function called by its name is proven write-free", () => {
-    expect(codes(P(`${D}\n    <effect deps=[@query]>\${ ping() }</>`, ""))).toEqual([]);
+    expect(codes(P(`${D}\n    <effect deps=[@query]>\${ ping(); }</>`, ""))).toEqual([]);
   });
 });
 
 describe("fail closed — forms the bootstrap does not lower are refused, never dropped", () => {
   const D = `    let <n:int=0/>\n    let <m:int=0/>\n${PING}`;
-  const E = `<effect deps=[@n]>\${ ping() }</>`;
+  const E = `<effect deps=[@n]>\${ ping(); }</>`;
 
   test("an effect in a function body / a handler block", () => {
     expect(codes(P(`${D}\n    function f() {\n        ${E}\n    }`, ""))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(P(D, `        <button onclick={ when @n changes { ping() } }>x</button>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(D, `        <button onclick={ when @n changes { ping(); } }>x</button>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 
   test("an effect in a user declaration's renders", () => {
-    const src = `<program>\n    let <n:int=0/>\n    function ping() {\n        const t = Date.now()\n    }\n    <box:struct> let <k:int=0/> </>\n    renders <div><effect deps=[@n]>\${ ping() }</></div>\n    <main><*box/></main>\n</program>\n`;
+    const src = `<program>\n    let <n:int=0/>\n    function ping() {\n        const t = Date.now();\n    }\n    <box:struct> let <k:int=0/> </>\n    renders <div><effect deps=[@n]>\${ ping(); }</></div>\n    <main><*box/></main>\n</program>\n`;
     const r = run(src);
     expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(r.diags[0].message).toMatch(/renders/);
   });
 
   test("a dependency naming a whole instance (`@decl`)", () => {
-    const src = `<program>\n    <box:struct> let <k:int=0/> </>\n    function ping() {\n        const t = Date.now()\n    }\n    <effect deps=[@box]>\${ ping() }</>\n    <main></main>\n</program>\n`;
+    const src = `<program>\n    <box:struct> let <k:int=0/> </>\n    function ping() {\n        const t = Date.now();\n    }\n    <effect deps=[@box]>\${ ping(); }</>\n    <main></main>\n</program>\n`;
     const r = run(src);
     expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(r.diags[0].message).toMatch(/whole instance/);
@@ -501,7 +501,7 @@ describe("fail closed — forms the bootstrap does not lower are refused, never 
   });
 
   test("a `${…}` block in markup holding anything after its `when`", () => {
-    expect(codes(P(D, `        <div>\${ when @n changes {\n            ping()\n        } @m = 3 }</div>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(P(D, `        <div>\${ when @n changes {\n            ping();\n        } @m = 3 }</div>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
 
   test("an effect outside `<program>`", () => {
@@ -511,7 +511,7 @@ describe("fail closed — forms the bootstrap does not lower are refused, never 
 
 describe("Core checks — C11 (Effect) and C12 (Suspend placement)", () => {
   const clone = (x) => JSON.parse(JSON.stringify(x));
-  const src = P(`    let <n:int=0/>\n    let <m:int=0/>\n${PING}\n    function bump() { @m = @m + 1 }`, `        <div><effect deps=[@n]>\${ ping() }</></div>\n        <button onclick=bump()>b</button>`);
+  const src = P(`    let <n:int=0/>\n    let <m:int=0/>\n${PING}\n    function bump() { @m = @m + 1; }`, `        <div><effect deps=[@n]>\${ ping(); }</></div>\n        <button onclick=bump()>b</button>`);
 
   test("C11: an empty dependency list, a dependency without a write capability, a body that writes — directly or through a call", () => {
     const core = coreOf(src);
@@ -547,8 +547,8 @@ describe("Core checks — C11 (Effect) and C12 (Suspend placement)", () => {
   };
 
   test("C11: a body that reads a shared instance whose construction writes (a seed calling a writer) — through a call", () => {
-    const cons = P(`    let <n:int=0/>\n    let <a:int=0/>\n${PING}\n    function bumpA() -> int {\n        @a = @a + 1\n        return 1\n    }\n    function seed() -> int { return 1 }\n    <box:struct> let <k:int=(seed())/> </>\n    renders <div>\${k}</div>\n    function peek() {\n        const v = @box.k\n    }`,
-      `        <div><effect deps=[@n]>\${ ping() }</></div>\n        <button onclick=peek()>p</button>\n        <button onclick=bumpA()>b</button>`);
+    const cons = P(`    let <n:int=0/>\n    let <a:int=0/>\n${PING}\n    function bumpA() -> int {\n        @a = @a + 1;\n        return 1;\n    }\n    function seed() -> int { return 1; }\n    <box:struct> let <k:int=(seed())/> </>\n    renders <div>\${k}</div>\n    function peek() {\n        const v = @box.k;\n    }`,
+      `        <div><effect deps=[@n]>\${ ping(); }</></div>\n        <button onclick=peek()>p</button>\n        <button onclick=bumpA()>b</button>`);
     const core = coreOf(cons);
     const handler = walkCore(core, (n) => n.variant === "On")[0].data.body;
     const grafted = clone(core);
@@ -558,8 +558,8 @@ describe("Core checks — C11 (Effect) and C12 (Suspend placement)", () => {
   });
 
   test("C11 (fix round HIGH-1): a body that reads a derived program cell whose formula writes", () => {
-    const src = P(`    let <n:int=0/>\n    let <a:int=0/>\n${PING}\n    function bumpA() -> int {\n        @a = @a + 1\n        return 1\n    }\n    function g() -> int { return 1 }\n    <d:int=(@n + g())/>\n    function peek() {\n        const v = @d\n    }`,
-      `        <div><effect deps=[@n]>\${ ping() }</></div>\n        <button onclick=peek()>p</button>\n        <button onclick=bumpA()>b</button>`);
+    const src = P(`    let <n:int=0/>\n    let <a:int=0/>\n${PING}\n    function bumpA() -> int {\n        @a = @a + 1;\n        return 1;\n    }\n    function g() -> int { return 1; }\n    <d:int=(@n + g())/>\n    function peek() {\n        const v = @d;\n    }`,
+      `        <div><effect deps=[@n]>\${ ping(); }</></div>\n        <button onclick=peek()>p</button>\n        <button onclick=bumpA()>b</button>`);
     const core = coreOf(src);
     const handler = walkCore(core, (n) => n.variant === "On")[0].data.body;
     const grafted = clone(core);

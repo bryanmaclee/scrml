@@ -54,8 +54,8 @@ let k = 0;
 const load = (src, expose = []) => loadProgram(clean(src).core, "s469-" + k++, expose);
 
 const TYPES = `    type LoadError:enum = { NotFound(id: string), Timeout }`;
-const LOAD = `    function load(id: string)! LoadError {\n        if (id == "x") fail LoadError.NotFound(id)\n        if (id == "y") fail LoadError.Timeout\n        return id\n    }`;
-const JOIN = `    function join2(a: string, b: string) -> string { return a + ":" + b }`;
+const LOAD = `    function load(id: string)! LoadError {\n        if (id == "x") fail LoadError.NotFound(id);\n        if (id == "y") fail LoadError.Timeout;\n        return id;\n    }`;
+const JOIN = `    function join2(a: string, b: string) -> string { return a + ":" + b; }`;
 const P = (decls, buttons = []) =>
   `<program>\n    let <out:string=""/>\n    let <n:int=0/>\n${TYPES}\n${LOAD}\n${JOIN}\n${decls}\n    <main>\n${buttons
     .map((b) => `        <button onclick=${b}()>${b}</button>`)
@@ -67,9 +67,9 @@ describe("dpa-073 F2 — comma-separated arm lists", () => {
   test("`match` over a failable: comma arms, a trailing comma, a `,` inside an arm body (runtime)", async () => {
     const src = P(
       [
-        fn("ok", `        @out = match load("a") { .Ok(v) :> join2("ok", v), .NotFound(m) :> join2("nf", m), .Timeout :> "to", }`),
-        fn("nf", `        @out = match load("x") { .Ok(v) :> join2("ok", v), .NotFound(m) :> join2("nf", m), .Timeout :> "to", }`),
-        fn("to", `        @out = match load("y") { .Ok(v) :> join2("ok", v), .NotFound(m) :> join2("nf", m), .Timeout :> "to" }`),
+        fn("ok", `        @out = match load("a") { .Ok(v) :> join2("ok", v), .NotFound(m) :> join2("nf", m), .Timeout :> "to", };`),
+        fn("nf", `        @out = match load("x") { .Ok(v) :> join2("ok", v), .NotFound(m) :> join2("nf", m), .Timeout :> "to", };`),
+        fn("to", `        @out = match load("y") { .Ok(v) :> join2("ok", v), .NotFound(m) :> join2("nf", m), .Timeout :> "to" };`),
       ].join("\n"),
       ["ok", "nf", "to"],
     );
@@ -85,9 +85,9 @@ describe("dpa-073 F2 — comma-separated arm lists", () => {
   test("`!{}` handler arms: comma arms, block arms, a comma list across lines (runtime)", async () => {
     const src = P(
       [
-        fn("v", `        @out = load("x") !{ .NotFound(m) :> join2("nf", m), .Timeout :> "to", }`),
-        fn("blk", `        load("y") !{\n            .NotFound(m) :> {\n                @out = m\n            },\n            .Timeout :> {\n                @n = @n + 1\n                @out = join2("t", "o")\n            },\n        }`),
-        fn("tail", `        @out = load("x") !{\n            .NotFound(m) :> [m, "b"].map(s => s + "!").length + 40,\n            .Timeout :> 0\n        } + ""`),
+        fn("v", `        @out = load("x") !{ .NotFound(m) :> join2("nf", m), .Timeout :> "to", };`),
+        fn("blk", `        load("y") !{\n            .NotFound(m) :> {\n                @out = m;\n            },\n            .Timeout :> {\n                @n = @n + 1;\n                @out = join2("t", "o");\n            },\n        };`),
+        fn("tail", `        @out = load("x") !{\n            .NotFound(m) :> [m, "b"].map(s => s + "!").length + 40,\n            .Timeout :> 0\n        } + "";`),
       ].join("\n"),
       ["v", "blk"],
     );
@@ -108,7 +108,7 @@ describe("dpa-073 F2 — comma-separated arm lists", () => {
   });
 
   test("a `,` inside an arm body at depth > 0 is the body's; at depth 0 it ends the arm", () => {
-    const ast = parse(`<program>\n${TYPES}\n${LOAD}\n${JOIN}\n    function f() -> string {\n        return load("x") !{ .NotFound(m) :> join2(m, join2("a", "b")), .Timeout :> "t", }\n    }\n</program>\n`);
+    const ast = parse(`<program>\n${TYPES}\n${LOAD}\n${JOIN}\n    function f() -> string {\n        return load("x") !{ .NotFound(m) :> join2(m, join2("a", "b")), .Timeout :> "t", };\n    }\n</program>\n`);
     expect(ast.diags.map((d) => d.code)).toEqual([]);
     // two arms, and the first arm's body is ONE (outer) call
     const guard = find(ast, (x) => x.variant === "Guard");
@@ -121,47 +121,51 @@ describe("dpa-073 F2 — comma-separated arm lists", () => {
   });
 
   test("the `|`-led legacy `!{}` arm takes commas too (still W-ARM-PIPE-LEGACY, one per arm)", () => {
-    const c = codes(P(fn("f", `        @out = load("x") !{ | .NotFound(m) :> m, | .Timeout :> "t", }`)));
+    const c = codes(P(fn("f", `        @out = load("x") !{ | .NotFound(m) :> m, | .Timeout :> "t", };`)));
     expect(c.filter((x) => x === "W-ARM-PIPE-LEGACY").length).toBe(2);
     expect(c.filter((x) => x.startsWith("E-"))).toEqual([]);
   });
 
-  test("newline-separated arms are still read (dpa-073 F5 — enforcement follows the codemod) (runtime)", async () => {
-    const src = P(fn("go", `        @out = load("x") !{\n            .NotFound(m) :> join2("nf", m)\n            .Timeout :> "to"\n        }`), ["go"]);
-    await load(src);
-    click(btn("go"));
-    expect($("#out").textContent).toBe("nf:x");
+  test("a newline-separated arm list is refused — E-MATCH-ARM-SEPARATOR at every missing `,` (dpa-073 F2, enforced by the bootstrap: F5 (4))", () => {
+    const src = P(fn("go", `        @out = load("x") !{\n            .NotFound(m) :> join2("nf", m)\n            .Timeout :> "to"\n            .Other :> "o"\n        };`), ["go"]);
+    const c = codes(src);
+    expect(c.filter((x) => x === "E-MATCH-ARM-SEPARATOR").length).toBe(2);
+    expect(run(src).core == null).toBe(true);
   });
 
-  test("a list that mixes `,` and newline separators is E-MATCH-ARM-SEPARATOR, once, at the first arm with no `,` before it", () => {
-    const body = `        @out = load("x") !{\n            .NotFound(m) :> "nf",\n            .Timeout :> "to"\n            .Other :> "o"\n        }`;
+  test("the report's span is the empty span at the end of the arm before — where the `,` goes", () => {
+    const body = `        @out = load("x") !{\n            .NotFound(m) :> "nf",\n            .Timeout :> "to"\n            .Other :> "o"\n        };`;
     const src = P(fn("f", body));
     const c = codes(src);
     expect(c.filter((x) => x === "E-MATCH-ARM-SEPARATOR").length).toBe(1);
     const d = diag(src, "E-MATCH-ARM-SEPARATOR");
-    expect(src.substring(d.span.start, d.span.start + 6)).toBe(".Other");
-    expect(d.message).toContain("one list takes one spelling");
+    expect(d.span.end).toBe(d.span.start);
+    expect(src.substring(d.span.start - 4, d.span.start)).toBe('"to"');
+    expect(src.substring(0, d.span.start) + "," + src.substring(d.span.start)).toContain('"to",\n            .Other');
+    expect(d.message).toContain("Expected `,` between two arms");
     expect(d.message).toContain("dpa-073 F2");
     expect(run(src).core == null).toBe(true);
   });
 
-  test("a trailing `,` on a newline list is mixed; a newline list with no `,` and a comma list with no trailing `,` are not", () => {
-    const mixed = `        @out = load("x") !{\n            .NotFound(m) :> "nf"\n            .Timeout :> "to",\n        }`;
-    expect(codes(P(fn("f", mixed)))).toEqual(["E-MATCH-ARM-SEPARATOR"]);
-    const commaNoTrail = `        @out = load("x") !{\n            .NotFound(m) :> "nf",\n            .Timeout :> "to"\n        }`;
+  test("a comma list across lines is one list — with or without the trailing `,`; one arm with a trailing `,`", () => {
+    const trail = `        @out = load("x") !{\n            .NotFound(m) :> "nf",\n            .Timeout :> "to",\n        };`;
+    expect(codes(P(fn("f", trail)))).toEqual([]);
+    const commaNoTrail = `        @out = load("x") !{\n            .NotFound(m) :> "nf",\n            .Timeout :> "to"\n        };`;
     expect(codes(P(fn("f", commaNoTrail)))).toEqual([]);
-    const oneArmTrail = `        @out = load("x") !{ _ :> "w", }`;
+    const oneArmTrail = `        @out = load("x") !{ _ :> "w", };`;
     expect(codes(P(fn("f", oneArmTrail)))).toEqual([]);
   });
 
-  test("the same mixing rule for `match` arms", () => {
-    const src = P(fn("f", `        @out = match load("x") {\n            .Ok(v) :> v,\n            .NotFound(m) :> m\n            .Timeout :> "t"\n        }`));
-    expect(codes(src)).toEqual(["E-MATCH-ARM-SEPARATOR"]);
+  test("the same rule for `match` arms, a block arm included (no Rust block-arm exemption, dpa-073 F2 (i))", () => {
+    const src = P(fn("f", `        @out = match load("x") {\n            .Ok(v) :> v\n            .NotFound(m) :> m\n            .Timeout :> "t"\n        };`));
+    expect(codes(src)).toEqual(["E-MATCH-ARM-SEPARATOR", "E-MATCH-ARM-SEPARATOR"]);
+    const blk = P(fn("g", `        load("y") !{\n            .NotFound(m) :> {\n                @out = m;\n            }\n            .Timeout :> "t"\n        };`));
+    expect(codes(blk)).toEqual(["E-MATCH-ARM-SEPARATOR"]);
   });
 
   test("a `,` with no arm before it is one E-PARSE-ARM, and the list goes on (no cascade)", () => {
-    expect(codes(P(fn("f", `        @out = load("x") !{ .NotFound(m) :> "nf",, .Timeout :> "to" }`)))).toEqual(["E-PARSE-ARM"]);
-    expect(codes(P(fn("f", `        @out = load("x") !{ , .NotFound(m) :> "nf", .Timeout :> "to" }`)))).toEqual(["E-PARSE-ARM"]);
+    expect(codes(P(fn("f", `        @out = load("x") !{ .NotFound(m) :> "nf",, .Timeout :> "to" };`)))).toEqual(["E-PARSE-ARM"]);
+    expect(codes(P(fn("f", `        @out = load("x") !{ , .NotFound(m) :> "nf", .Timeout :> "to" };`)))).toEqual(["E-PARSE-ARM"]);
   });
 
   // review r1 (LOW, pinned, not built): armEnd's depth-0 `,` counts TOKEN brackets
@@ -221,7 +225,7 @@ describe("§66.2.4 (S451) — a union type in a declaration opener", () => {
   test("a union followed by attributes / a closer: `|` continues the type, the next word after a member is an attribute", () => {
     // a component's typed attributes, each a union, then a plain typed one
     const lib = `export <box n:string | not=not label:string="x" m:int|not=0/>\nrenders <p>\${label}</p>\n`;
-    const r = frontEnd(mods, [{ path: "lib.scrml", src: lib }, { path: "app.scrml", src: `<program>\n    import { box } from "./lib.scrml"\n    <main><box n=("a") m=(not)/></main>\n</program>\n` }]);
+    const r = frontEnd(mods, [{ path: "lib.scrml", src: lib }, { path: "app.scrml", src: `<program>\n    import { box } from "./lib.scrml";\n    <main><box n=("a") m=(not)/></main>\n</program>\n` }]);
     expect(r.diags.map((d) => d.code)).toEqual([]);
     const j = JSON.stringify(mods.parse.parseFile("lib.scrml", lib, 0));
     expect((j.match(/"variant":"TMaybe"/g) || []).length).toBe(2);
@@ -230,13 +234,13 @@ describe("§66.2.4 (S451) — a union type in a declaration opener", () => {
   });
 
   test("the `| not` cell's value is checked against `Guess | not`: `@g = not` is legal, `@g = 5` is E-TYPE-031", () => {
-    expect(codes(prog(`    let <g:Guess | not=.Yes/>\n    function f() { @g = not }`))).toEqual([]);
-    expect(codes(prog(`    let <g:Guess | not=.Yes/>\n    function f() { @g = 5 }`))).toContain("E-TYPE-031");
+    expect(codes(prog(`    let <g:Guess | not=.Yes/>\n    function f() { @g = not; }`))).toEqual([]);
+    expect(codes(prog(`    let <g:Guess | not=.Yes/>\n    function f() { @g = 5; }`))).toContain("E-TYPE-031");
   });
 
   test("a union cell renders and narrows (runtime): `if=(@name is given)` follows writes of a value and of `not`", async () => {
     const src = prog(
-      `    let <name:string | not=not/>\n    function setIt() { @name = "bryan" }\n    function clear() { @name = not }`,
+      `    let <name:string | not=not/>\n    function setIt() { @name = "bryan"; }\n    function clear() { @name = not; }`,
       `\n        <p id="a" if=(@name is given)>given</p>\n        <button onclick=setIt()>set</button>\n        <button onclick=clear()>clear</button>\n    `,
     );
     await load(src);
@@ -297,7 +301,7 @@ describe("§66.2.4 (S451) — a union type in a declaration opener", () => {
     });
     test("a tape member in a typed attribute (`export <box xs:int[append] | not=[]/>`)", () => {
       const lib = `export <box xs:int[append] | not=[]/>\nrenders <p>x</p>\n`;
-      const r = frontEnd(mods, [{ path: "lib.scrml", src: lib }, { path: "app.scrml", src: `<program>\n    import { box } from "./lib.scrml"\n    <main><box/></main>\n</program>\n` }]);
+      const r = frontEnd(mods, [{ path: "lib.scrml", src: lib }, { path: "app.scrml", src: `<program>\n    import { box } from "./lib.scrml";\n    <main><box/></main>\n</program>\n` }]);
       expect(r.core == null).toBe(true);
       expect(r.diags.some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("sequence in a union type"))).toBe(true);
     });
@@ -318,21 +322,21 @@ describe("§66.2.4 (S451) — a union type in a declaration opener", () => {
       if (text) expect(d.message).toContain("`" + text + "`");
     };
     test("repro A — a return type `-> Entry[free, append] | not` seeding a cell", () => {
-      refusedCode(inProg(`    function mk() -> Entry[free, append] | not { return [] }\n    let <audit=(mk())/>\n    function bad() { @audit.shift(); @audit = []; }`), "Entry[free, append] | not");
+      refusedCode(inProg(`    function mk() -> Entry[free, append] | not { return []; }\n    let <audit=(mk())/>\n    function bad() { @audit.shift(); @audit = []; }`), "Entry[free, append] | not");
     });
     test("repro B — a struct field `xs: Entry[free, append] | not`", () => {
       refusedCode(inProg(`    type Box:struct = { xs: Entry[free, append] | not }\n    let <b:Box=({ xs: [] })/>\n    function bad() { @b.xs = []; @b.xs = not; }`), "Entry[free, append] | not");
     });
     test("a parameter, a local annotation, and `not | T[…]` in a return type", () => {
-      refusedCode(inProg(`    function p(xs: Entry[free, append] | not) -> int { return 1 }`));
-      refusedCode(inProg(`    function q() -> int {\n        let ys: Entry[append] | not = []\n        return 1\n    }`));
-      refusedCode(inProg(`    function r() -> not | Entry[append] { return [] }`), "not | Entry[append]");
+      refusedCode(inProg(`    function p(xs: Entry[free, append] | not) -> int { return 1; }`));
+      refusedCode(inProg(`    function q() -> int {\n        let ys: Entry[append] | not = []\n        return 1;\n    }`));
+      refusedCode(inProg(`    function r() -> not | Entry[append] { return []; }`), "not | Entry[append]");
     });
     test("an UNGRANTED `S | not` (§17.7.2 admits it) parses in every position, and is never writable through `let`", () => {
-      expect(codes(inProg(`    function g(z: int[] | not) -> int[] | not { return z }\n    function f() -> int {\n        let ys: int[] | not = not\n        return 1\n    }`))).toEqual([]);
+      expect(codes(inProg(`    function g(z: int[] | not) -> int[] | not { return z; }\n    function f() -> int {\n        let ys: int[] | not = not;\n        return 1;\n    }`))).toEqual([]);
       // `let` on it is `let` on a sequence — seen through `| not`
       expect(codes(inProg(`    let <xs:int[] | not=not/>`))).toContain("E-GRANT-LET-ON-SEQUENCE");
-      expect(codes(inProg(`    function mk() -> int[] | not { return not }\n    let <xs=(mk())/>`))).toContain("E-GRANT-LET-ON-SEQUENCE");
+      expect(codes(inProg(`    function mk() -> int[] | not { return not; }\n    let <xs=(mk())/>`))).toContain("E-GRANT-LET-ON-SEQUENCE");
       // without `let` it is locked: a whole write and a removal are refused
       const c = codes(inProg(`    <xs:int[] | not=not/>\n    function w() { @xs = [1]; }\n    function r() { @xs.shift(); }`));
       expect(c.filter((x) => x === "E-WRITE-NOT-GRANTED").length).toBe(2);
@@ -342,13 +346,13 @@ describe("§66.2.4 (S451) — a union type in a declaration opener", () => {
       expect(locked).toBeDefined();
       expect(locked.message).not.toContain("Declare it `let");
       expect(locked.message).toContain("`T[replace]`");
-      const derived = diag(inProg(`    function give() -> Entry[] | not { return [] }\n    <ys=(give())/>\n    function w() { @ys = []; }`), "E-DERIVED-WRITE");
+      const derived = diag(inProg(`    function give() -> Entry[] | not { return []; }\n    <ys=(give())/>\n    function w() { @ys = []; }`), "E-DERIVED-WRITE");
       expect(derived).toBeDefined();
       expect(derived.message).not.toContain("declare it `let`");
       expect(derived.message).toContain("E-GRANT-LET-ON-SEQUENCE");
     });
     test("a non-tape `T | not` in code positions is unaffected, either order", () => {
-      expect(codes(inProg(`    function ok(n: int | not) -> not | string { return not }`))).toEqual([]);
+      expect(codes(inProg(`    function ok(n: int | not) -> not | string { return not; }`))).toEqual([]);
       expect(codes(inProg(`    type Box:struct = { s: string | not }\n    let <b:Box=({ s: not })/>\n    function w() { @b.s = "x"; }`))).toEqual([]);
     });
     test("a derived tape's E-DERIVED-WRITE never advises `let` (E-GRANT-LET-ON-SEQUENCE)", () => {

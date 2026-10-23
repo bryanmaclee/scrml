@@ -2,9 +2,9 @@
 <program>
     function g() { }
     function pick(ready: bool) -> int {
-        if (!g()) { return 1 }
-        if (ready && g()) { return 2 }
-        return 0
+        if (!g()) { return 1; }
+        if (ready && g()) { return 2; }
+        return 0;
     }
     <main><p>x</p></main>
 </program>

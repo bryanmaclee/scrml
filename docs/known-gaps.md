@@ -31,10 +31,32 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 4 |
-| MED | 678 | 8 |
-| LOW | 475 | 0 |
+| MED | 679 | 8 |
+| LOW | 476 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-impl1-semicolon-in-attribute-list-accepted-s469 — impl#1 silently accepts a `;` inside a markup opener's attribute list (`<match for=Phase; on=@phase>`) and compiles it exactly as if the `;` were not there — `NEW S469; LOW; open`
+
+<!-- @gap id=g-impl1-semicolon-in-attribute-list-accepted-s469 sev=LOW status=open locus=searched:compiler/src(markup opener attribute scanning)—not-traced prov=dispatch:s469-boot-semicolons(review of 151366efc, round 2) · empirical:S469-emit-diff -->
+Found by the s469-boot-semicolons `;` codemod (round 1), which inserted a `;` after an unquoted attribute value in `components/bind-prop-write-back-positions` and `components/declared-prop-not-root-attr` (`<match for=Phase; on=@phase>`). impl#1's compile of both cases was byte-identical with and without the `;` (codes and emitted html / client / server JS, content hashes normalized) — the `;` is neither an error nor part of the `for=` value, it is dropped without a word. An opener's attribute list has no statement separator (§5), so a stray `;` there is a malformed opener and should be refused. The inserts were reverted in round 2; this gap is the impl#1 half. (The bootstrap's char-level opener scanner was not probed for the same shape.)
+
+### g-bootstrap-newline-sensitive-rules-remain-s469 — after the S469 `;` enforcement the bootstrap still decides several constructs by LINE, which dpa-073 F1 (a) ("a newline ends nothing") says it must not — `NEW S469; MED; open (owed bootstrap change)`
+
+<!-- @gap id=g-bootstrap-newline-sensitive-rules-remain-s469 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(parsePostfixFrom `(` / `[` / `!{` same-line tests, isPresenceTest, isPropagate, failAhead / deferAhead / transaction, parseStmt `return`, parseArmBlock `lift`, statement `match` boundary) prov=ruling:user-voice-scrml.md S469 "⭐⭐⭐ RULED — dpa-073 F1 = (a)" · ruling:user-voice-scrml.md S469 dpa-073 F2(i)/F3(i)/F4(ii) · dispatch:s469-boot-semicolons(review of 151366efc, round 2) -->
+The s469-boot-semicolons slice made `;` and arm `,` mandatory (E-STMT-MISSING-SEMICOLON / E-MATCH-ARM-SEPARATOR) and made a line break whitespace inside an arm body, but these rules still read the line. Each fails closed (the one exception, the statement-`match` boundary, was fixed in s469 r3):
+- `x⏎(y)` — a call `(` continues only on the same line; the next line is a new statement (with `;` enforced: E-STMT-MISSING-SEMICOLON after `x`). F4 (ii) rules this an error naming the split; today's code is the generic one.
+- `x⏎[y]` — an index `[` continues only when touching; same outcome.
+- `x⏎!{ … }` — a handler attaches only on the same line.
+- `x⏎is given` / `x⏎is not` — the presence test is read only on the same line (E-PARSE-* / E-SYNTAX-044 cascade; pinned in typer-s460.test.js).
+- `x⏎?` — propagation vs a conditional `?` is partly decided by end-of-line.
+- `return⏎expr` — refused fail closed (E-STMT-MISSING-SEMICOLON after `return`; F6 rules it returns `expr`, deferred until the newline-terminated corpus is migrated).
+- `lift⏎expr` — refused fail closed the same way (s469 r2; before r2 it was silently read as `lift expr`).
+- `fail⏎.E` — `fail` is a statement only before a same-line token, so the split form is read as the name `fail`: E-STMT-MISSING-SEMICOLON after it plus a misleading E-SCOPE-001 (`fail` is not declared) (probed S469 r2); `defer⏎…` and `transaction⏎{` likewise (route-to-PA R8 in the dpa-073 deep-dive: newline-free keyword decisions need design).
+- ~~**Not fail-closed:** a statement `match`'s `}` was not a statement boundary — `match k { … }⏎-1;` glued into one expression.~~ **Fixed s469 r3:** a `match` that starts a statement ends at its `}` (F3 (i) block-like): the next line is a new statement, and a same-line continuation (`match k { … } + 2`) is E-PARSE-TRAILING. Pinned in `compiler/self-host-v2/slice-m4/terminators-s469.test.js` ("r3 —").
+- **Silent split (no signal):** after a statement `match … }` — or any block-like `}` (`if` / `for` / `given` / `defer { }`) — a PURE expression on the NEXT line (`-1;`, `(x);`, `[1];`, a template) is read as a statement of its own and silently does nothing, while the same token on the SAME line is refused (E-PARSE-TRAILING after a statement `match`). Correct under F1 / F3 (two statements), but a writer who meant one expression gets no word. Suggested: build the kept language-wide `E-STMT-NO-EFFECT` (dpa-073 F6 "KEPT"; `g-stmt-no-effect-language-wide-unbuilt`) in the bootstrap, or at least a no-effect warning for an expression statement with no call, assignment or write, which would flag exactly these.
+- `break⏎label` / `continue⏎label` — a label is read only on the same line (fails closed: E-STMT-MISSING-SEMICOLON).
+Owed: one newline-free decision per construct (F1 (a)), the F4 (ii) diagnostic for `(` / `[` / template continuations, and the R8 keyword design; then the ruled `return⏎expr` / `lift⏎expr` readings.
 
 ### g-impl1-duplicate-function-silently-overrides-s469 — impl#1 accepts two `function` declarations of one name at file scope with exit 0 and no diagnostic, and the later one wins: `function pick(n: int) -> int { return 1; }` then a second `pick` returning `2` compiles, and `pick(0)` is `2` — `NEW S469 (owner: file as a gap); MED; open`
 

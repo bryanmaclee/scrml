@@ -12,9 +12,9 @@ ${
     }
 
     function loadItem(id: string)! LoadError {
-        if (id == "missing") fail LoadError.NotFound(id)
-        if (id == "slow") fail LoadError.Timeout
-        return id
+        if (id == "missing") fail LoadError.NotFound(id);
+        if (id == "slow") fail LoadError.Timeout;
+        return id;
     }
 }
 
@@ -38,7 +38,7 @@ ${
             .NotFound(mid) :> @phase = Phase.Missing(mid)
             .Timeout :> @phase = Phase.TimedOut
         }
-        @phase = Phase.Loaded(result)
+        @phase = Phase.Loaded(result);
     }
 }
 

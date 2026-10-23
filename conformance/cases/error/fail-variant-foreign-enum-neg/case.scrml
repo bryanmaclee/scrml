@@ -3,7 +3,7 @@ ${
     type OtherError:enum = { Whatever }
 
     function f()! MyError {
-        fail OtherError.Whatever
+        fail OtherError.Whatever;
     }
 }
 <p>x</>

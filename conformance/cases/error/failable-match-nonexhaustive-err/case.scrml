@@ -5,15 +5,15 @@ ${
     }
 
     function loadThing(id: int)! LoadError {
-        if (id < 0) { fail LoadError.NotFound }
-        return "ok"
+        if (id < 0) { fail LoadError.NotFound; }
+        return "ok";
     }
 
     function useIt(id: int) {
         return match loadThing(id) {
             ::Ok(v) :> v
             ::NotFound :> "nf"
-        }
+        };
     }
 }
 <p>${useIt(1)}</>

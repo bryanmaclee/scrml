@@ -3,7 +3,7 @@ ${
     <label> = "alpha"
     <typed> = ""
     function toggle() {
-        @open = !@open
+        @open = !@open;
     }
 }
 <button id="toggle" onclick=toggle()>Toggle</>

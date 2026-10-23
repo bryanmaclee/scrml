@@ -2,8 +2,8 @@
 <program>
   <n> = 0
   function beacon(v: number) {
-    return v
+    return v;
   }
-  when @n changes { beacon(@n) }
+  when @n changes { beacon(@n); }
   <p>${@n}</p>
 </program>

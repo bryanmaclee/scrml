@@ -3,7 +3,7 @@ ${
     const <doubled> = @base * 2
     const <quad> = @doubled * 2
     function grow() {
-        @base = @base + 1
+        @base = @base + 1;
     }
 }
 <button id="grow" onclick=grow()>Grow</>

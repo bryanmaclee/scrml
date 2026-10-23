@@ -1,6 +1,6 @@
 <program>
 
-${ import { sortBy } from 'scrml:data' }
+${ import { sortBy } from 'scrml:data'; }
 
 <rows> = [{ k: 2 }, { k: 1 }]
 

@@ -12,7 +12,7 @@
     // WRITE the database between iterations is not hoisted — a later iteration reads
     // the row as the earlier iteration left it, as the per-iteration query does.
     function bump(id: int) {
-        ?{`UPDATE notes SET body = body || '!' WHERE id = ${id}`}.run()
+        ?{`UPDATE notes SET body = body || '!' WHERE id = ${id}`}.run();
     }
     function bumpTwice(id: int) {
         bump(id)
@@ -23,7 +23,7 @@
         for (const it of [{ id: 7 }, { id: 7 }]) {
             const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
             out.push(row is not ? "none" : row.body)
-            bump(it.id)
+            bump(it.id);
         }
         return out.join(",")
     }
@@ -33,7 +33,7 @@
         for (const it of [{ id: 9 }, { id: 9 }]) {
             const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
             out.push(row is not ? "none" : row.body)
-            bumpTwice(it.id)
+            bumpTwice(it.id);
         }
         return out.join(",")
     }
@@ -43,15 +43,15 @@
         for (const it of [{ id: 11 }, { id: 11 }]) {
             const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
             out.push(row is not ? "none" : row.body)
-            const ids = [it.id]
-            ids.forEach(bump)
+            const ids = [it.id];
+            ids.forEach(bump);
         }
         return out.join(",")
     }
     function go() {
-        @viaCall = viaCall() !{ _ :> "err" }
-        @viaNested = viaNested() !{ _ :> "err" }
-        @viaCallback = viaCallback() !{ _ :> "err" }
+        @viaCall = viaCall() !{ _ :> "err" };
+        @viaNested = viaNested() !{ _ :> "err" };
+        @viaCallback = viaCallback() !{ _ :> "err" };
     }
     <button id="go" onclick=go()>go</button>
     <p id="viaCall">${@viaCall}</p>

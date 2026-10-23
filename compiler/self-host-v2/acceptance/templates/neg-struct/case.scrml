@@ -3,7 +3,7 @@
     type P:struct = { name: string }
     let <p:P=({ name: "a" })/>
     fn show(v: P) -> string {
-        return `p=${v}`
+        return `p=${v}`;
     }
     <main>
         <p>${show(@p)}</p>

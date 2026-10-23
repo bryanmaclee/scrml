@@ -8,13 +8,13 @@
     // two fixes the §14.8.10 corollary warning names).
     ${
         function login(email: string) {
-            const u = ?{`SELECT id, tenant_id FROM users WHERE email = ${email}`}.acrossTenants().get()
+            const u = ?{`SELECT id, tenant_id FROM users WHERE email = ${email}`}.acrossTenants().get();
             if (u is not) {
-                return "bad"
+                return "bad";
             }
-            session.set("userId", u.id)
-            session.set("tenantId", u.tenant_id)
-            return "ok"
+            session.set("userId", u.id);
+            session.set("tenantId", u.tenant_id);
+            return "ok";
         }
     }
     <button onclick=${ login("a@x") }>log in</button>

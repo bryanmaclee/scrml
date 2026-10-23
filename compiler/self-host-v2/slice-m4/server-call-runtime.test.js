@@ -338,38 +338,38 @@ const NOTES_SRC = `<program db="./notes.db">
     let <cause:ServerCallError=.Unreachable/>
 
     function saveNote(id: string, text: string, base: int)! SaveError {
-        if (text.length > 10000) fail .TooLong(10000)
-        ${SQ}\`UPDATE notes SET body = \${text}, version = \${base + 1} WHERE id = \${id}\`}.run() !{ _ :> { fail .Storage } }
-        return base + 1
+        if (text.length > 10000) fail .TooLong(10000);
+        ${SQ}\`UPDATE notes SET body = \${text}, version = \${base + 1} WHERE id = \${id}\`}.run() !{ _ :> { fail .Storage; } };
+        return base + 1;
     }
 
     function wordCount(id: string) -> int {
-        const row = ${SQ}\`SELECT body FROM notes WHERE id = \${id}\`}.get() !{ _ :> not }
-        return 0
+        const row = ${SQ}\`SELECT body FROM notes WHERE id = \${id}\`}.get() !{ _ :> not };
+        return 0;
     }
 
     function save() {
-        @status = "saving"
+        @status = "saving";
         @version = saveNote("n1", @body, @version) !{
-            .Conflict(cur) :> { @status = "conflict"; @seen = cur; return }
-            .TooLong(n)    :> { @status = "too long"; @seen = n; return }
-            .Storage       :> { @status = "the server could not store it"; return }
-            .Transport(t)  :> { @status = "transport"; @cause = t; return }
-        }
-        @status = "saved"
+            .Conflict(cur) :> { @status = "conflict"; @seen = cur; return; },
+            .TooLong(n)    :> { @status = "too long"; @seen = n; return; },
+            .Storage       :> { @status = "the server could not store it"; return; },
+            .Transport(t)  :> { @status = "transport"; @cause = t; return; }
+        };
+        @status = "saved";
     }
 
     function recount() {
-        @words = wordCount("n1") !{ .Transport(t) :> @words }
+        @words = wordCount("n1") !{ .Transport(t) :> @words };
     }
 
     function touch(id: string) {
-        ${SQ}\`UPDATE notes SET seen = 1 WHERE id = \${id}\`}.run() !{ _ :> {} }
+        ${SQ}\`UPDATE notes SET seen = 1 WHERE id = \${id}\`}.run() !{ _ :> {} };
     }
 
     function stamp() {
-        touch("n1") !{ .Transport(t) :> { @status = "stamp failed"; @cause = t; return } }
-        @status = "stamped"
+        touch("n1") !{ .Transport(t) :> { @status = "stamp failed"; @cause = t; return; } };
+        @status = "stamped";
     }
 
     <main>

@@ -8,17 +8,17 @@ ${
     <busy> = false
 
     function save(id: number) {
-        @busy = true
-        @trace = @trace + "start;"
-        defer @trace = @trace + "D;"
-        defer @busy = false
-        ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run()
-        @trace = @trace + "mid;"
-        ?{`INSERT INTO log (msg) VALUES ('saved')`}.run()
-        @trace = @trace + "end;"
+        @busy = true;
+        @trace = @trace + "start;";
+        defer @trace = @trace + "D;";
+        defer @busy = false;
+        ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run();
+        @trace = @trace + "mid;";
+        ?{`INSERT INTO log (msg) VALUES ('saved')`}.run();
+        @trace = @trace + "end;";
     }
 }
-<button id="go" onclick={ save(1) !{ .Transport(_) :> return } }>Go</>
+<button id="go" onclick={ save(1) !{ .Transport(_) :> return }; }>Go</>
 <p id="out">${@trace}</p>
 <p id="busy">${@busy}</p>
 </program>

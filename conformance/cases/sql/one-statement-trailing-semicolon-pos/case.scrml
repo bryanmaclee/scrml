@@ -4,10 +4,10 @@
     // are two ?{}s in a transaction block.
     ${
         function record() {
-            ?{`INSERT INTO log (msg) VALUES ('a;b'); -- one statement`}.run()
+            ?{`INSERT INTO log (msg) VALUES ('a;b'); -- one statement`}.run();
             transaction {
-                ?{`INSERT INTO log (msg) VALUES ('c');`}.run()
-                ?{`INSERT INTO log (msg) VALUES ('d')`}.run()
+                ?{`INSERT INTO log (msg) VALUES ('c');`}.run();
+                ?{`INSERT INTO log (msg) VALUES ('d')`}.run();
             }
             return 1
         }

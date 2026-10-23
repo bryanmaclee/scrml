@@ -65,7 +65,7 @@ describe("the lowered Core is CANONICAL (review INFO)", () => {
   test("a use's construction attributes are in field-index order, whatever the source order", async () => {
     const { frontEnd, readSlice } = await import("./lowered.js");
     const lib = { path: "lib/dropdown.scrml", src: readSlice("src/lib/dropdown.scrml") };
-    const mk = (attrs) => ({ path: "app.scrml", src: `\${ import { dropdown } from "./lib/dropdown.scrml" }\n<program>\n    <main>\n        <dropdown ${attrs}/>\n    </main>\n</program>\n` });
+    const mk = (attrs) => ({ path: "app.scrml", src: `\${ import { dropdown } from "./lib/dropdown.scrml"; }\n<program>\n    <main>\n        <dropdown ${attrs}/>\n    </main>\n</program>\n` });
     const a = frontEnd(mods, [lib, mk(`value="1" options=(["x"]) label="L"`)]);
     const b = frontEnd(mods, [lib, mk(`label="L" options=(["x"]) value="1"`)]);
     expect(a.diags).toEqual([]);

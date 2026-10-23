@@ -1,9 +1,9 @@
 ${
     server function manual(id: string)! SqlError {
-        ?{`BEGIN`}
-        let a = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
-        let b = ?{`SELECT * FROM posts WHERE user_id = ${id}`}.all()
-        ?{`COMMIT`}
+        ?{`BEGIN`};
+        let a = ?{`SELECT * FROM users WHERE id = ${id}`}.get();
+        let b = ?{`SELECT * FROM posts WHERE user_id = ${id}`}.all();
+        ?{`COMMIT`};
         return { a, b }
     }
 }

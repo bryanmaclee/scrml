@@ -19,8 +19,8 @@
         let out = []
         for (const it of [{ id: 7, on: false }, { id: 8, on: false }]) {
             if (it.on) {
-                const row = ?{`SELECT body FROM gone WHERE id = ${it.id}`}.get()
-                out.push(row is not ? "none" : row.body)
+                const row = ?{`SELECT body FROM gone WHERE id = ${it.id}`}.get();
+                out.push(row is not ? "none" : row.body);
             } else {
                 out.push("skip")
             }
@@ -53,9 +53,9 @@
         return out.join(",")
     }
     function go() {
-        @unreached = unreached() !{ _ :> "err" }
-        @handledUnreached = handledUnreached() !{ _ :> "err" }
-        @handledReached = handledReached() !{ _ :> "err" }
+        @unreached = unreached() !{ _ :> "err" };
+        @handledUnreached = handledUnreached() !{ _ :> "err" };
+        @handledReached = handledReached() !{ _ :> "err" };
     }
     <button id="go" onclick=go()>go</button>
     <p id="unreached">${@unreached}</p>

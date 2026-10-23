@@ -3,19 +3,19 @@
     let <wrong:string=""/>
     let <right:string=""/>
     function nothing(pw: string) {
-        if (pw == "") return
+        if (pw == "") return;
     }
     function w(pw: string) {
-        return nothing(pw)
+        return nothing(pw);
     }
     function attempt(pw: string) -> string {
-        const s: string = w(pw)
-        if (s == "") return "denied"
-        return "welcome"
+        const s: string = w(pw);
+        if (s == "") return "denied";
+        return "welcome";
     }
     function login() {
-        @wrong = attempt("hunter3")
-        @right = attempt("hunter2")
+        @wrong = attempt("hunter3");
+        @right = attempt("hunter2");
     }
     <main>
         <button id="go" onclick=login()>go</button>

@@ -10,24 +10,24 @@ ${ function t(x) { @log = @log + x + "," } }
 
 <p id="out">${@log}</p>
 
-<button id="top" onclick={ t("T1"); /* ; */ t("T2") }>top</button>
+<button id="top" onclick={ t("T1"); /* ; */ t("T2"); }>top</button>
 
 <engine for=Phase initial=.Idle>
     <Idle>
-        <button id="eng" onclick={ t("E1"); /* ; */ t("E2") }>engine</button>
+        <button id="eng" onclick={ t("E1"); /* ; */ t("E2"); }>engine</button>
     </>
     <Loading : "Loading…">
 </>
 
 <match on=@ph>
     <Idle>
-        <button id="mat" onclick={ t("M1"); /* ; */ t("M2") }>match</button>
+        <button id="mat" onclick={ t("M1"); /* ; */ t("M2"); }>match</button>
     </>
     <Loading><p>Loading…</p></>
 </>
 
 <ul>
     <each in=@items key=@.id>
-        <li><button class="row" onclick={ t("R1"); /* ; */ t("R2") }>${@.name}</button></li>
+        <li><button class="row" onclick={ t("R1"); /* ; */ t("R2"); }>${@.name}</button></li>
     </each>
 </ul>

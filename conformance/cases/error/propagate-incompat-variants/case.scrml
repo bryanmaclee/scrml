@@ -8,13 +8,13 @@ ${
     }
 
     function inner(x: int)! InnerError {
-        if (x < 0) { fail InnerError.Alpha }
-        return 1
+        if (x < 0) { fail InnerError.Alpha; }
+        return 1;
     }
 
     function outer(x: int)! OuterError {
-        const v = inner(x)?
-        return v
+        const v = inner(x)?;
+        return v;
     }
 }
 <p>z</>

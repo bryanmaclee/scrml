@@ -3,12 +3,12 @@
   <n> = 0
   <k> = 5
   function beacon(v: number) {
-    return v
+    return v;
   }
   <effect deps=[@n]>${
-    let sum = 0
-    sum = @n + @k
-    beacon(sum)
+    let sum = 0;
+    sum = @n + @k;
+    beacon(sum);
   }</>
   <p>${@n}</p>
 </program>

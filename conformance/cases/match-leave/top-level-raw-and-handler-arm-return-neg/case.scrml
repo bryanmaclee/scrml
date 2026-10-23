@@ -3,7 +3,7 @@ ${
     type E:enum = { X, Y }
     <k> : K = .A
     <out> : string = "init"
-    function risky()! E { fail E.X }
+    function risky()! E { fail E.X; }
     match @k {
         .A | .B :> return
         .C :> @out = "c"

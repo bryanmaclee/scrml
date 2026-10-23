@@ -20,10 +20,10 @@
     // is the same cell write as the unhandled `@c = ?{…}.get()` — the query runs on
     // the server and the CLIENT cell receives its value (the arm's on failure).
     function loadHit() {
-        @hit = ?{`SELECT id, body FROM notes`}.get() !{ _ :> not }
+        @hit = ?{`SELECT id, body FROM notes`}.get() !{ _ :> not };
     }
     function loadMiss() {
-        @miss = ?{`SELECT id, body FROM empties`}.get() !{ _ :> not }
+        @miss = ?{`SELECT id, body FROM empties`}.get() !{ _ :> not };
     }
     function loadFailed() {
         @failed = ?{`SELECT id, body FROM gone`}.get() !{
@@ -31,9 +31,9 @@
             _ :> not
         }
     }
-    <button id="a" onclick={ loadHit() !{ .Transport(_) :> return } }>a</button>
-    <button id="b" onclick={ loadMiss() !{ .Transport(_) :> return } }>b</button>
-    <button id="c" onclick={ loadFailed() !{ .Transport(_) :> return } }>c</button>
+    <button id="a" onclick={ loadHit() !{ .Transport(_) :> return }; }>a</button>
+    <button id="b" onclick={ loadMiss() !{ .Transport(_) :> return }; }>b</button>
+    <button id="c" onclick={ loadFailed() !{ .Transport(_) :> return }; }>c</button>
     <p id="hit">${@hit is not ? "none" : @hit.body}</p>
     <p id="miss">${@miss is not ? "none" : @miss.body}</p>
     <p id="failed">${@failed}</p>

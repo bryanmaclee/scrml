@@ -67,7 +67,7 @@ describe("S2 — the worked program lowers to Suspend → Attempt(FSettled) (des
   });
 
   test("two waiting calls in a row nest: the second is the first's continuation (source order, F6)", () => {
-    const r = clean(P(NOTES + "\n" + SAVE + "\n" + RECOUNT + `\n    function both() {\n        save()\n        recount()\n    }`));
+    const r = clean(P(NOTES + "\n" + SAVE + "\n" + RECOUNT + `\n    function both() {\n        save();\n        recount();\n    }`));
     const b = fnCore(r, "both");
     expect(b.waits).toBe(true);
     const s1 = b.body.stmts[0];
@@ -80,37 +80,37 @@ describe("S2 — the worked program lowers to Suspend → Attempt(FSettled) (des
   });
 
   test("a client function that waits for nothing is not `waits`", () => {
-    const r = clean(P(NOTES + `\n    function plain() {\n        @status = "x"\n    }`));
+    const r = clean(P(NOTES + `\n    function plain() {\n        @status = "x";\n    }`));
     expect(fnCore(r, "plain").waits).toBe(false);
   });
 });
 
 describe("S2 — §19.9.10 the client call is failable: E-ERROR-002, totality, `?` + E-ERROR-010", () => {
   test("an unhandled client call in a function body: E-ERROR-002 naming the wire", () => {
-    const src = P(NOTES + `\n    function go() {\n        @words = wordCount("n1")\n    }`);
+    const src = P(NOTES + `\n    function go() {\n        @words = wordCount("n1");\n    }`);
     expect(errCodes(src)).toEqual(["E-ERROR-002"]);
     expect(run(src).diags.find((d) => d.code === "E-ERROR-002").message).toContain("Transport");
   });
 
   test("an unhandled client call in an event handler, and a handler REFERENCE to a server function: E-ERROR-002", () => {
-    expect(errCodes(P(NOTES, `        <button onclick={ wordCount("n1") }>c</button>`))).toEqual(["E-ERROR-002"]);
-    const ref = P(NOTES + `\n    function ping() {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not }\n    }`, `        <button onclick=ping>c</button>`);
+    expect(errCodes(P(NOTES, `        <button onclick={ wordCount("n1"); }>c</button>`))).toEqual(["E-ERROR-002"]);
+    const ref = P(NOTES + `\n    function ping() {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not };\n    }`, `        <button onclick=ping>c</button>`);
     expect(errCodes(ref)).toEqual(["E-ERROR-002"]);
   });
 
   test("a handler that names only the declared variants is NOT total on the client — E-TYPE-080 names Transport", () => {
-    const src = P(NOTES + `\n    function go() {\n        saveNote("n1", "x", 1) !{\n            .Conflict(c) :> { @status = "c" }\n            .TooLong(n) :> { @status = "l" }\n            .Storage :> { @status = "s" }\n        }\n    }`);
+    const src = P(NOTES + `\n    function go() {\n        saveNote("n1", "x", 1) !{\n            .Conflict(c) :> { @status = "c"; },\n            .TooLong(n) :> { @status = "l"; },\n            .Storage :> { @status = "s"; }\n        };\n    }`);
     expect(errCodes(src)).toEqual(["E-TYPE-080"]);
     expect(run(src).diags.find((d) => d.code === "E-TYPE-080").message).toContain("Transport");
   });
 
   test("a catch-all `_ :>` / `_ err :>` covers the transport half (the S451 interim advice stays valid)", () => {
-    clean(P(NOTES + `\n    function go() {\n        saveNote("n1", "x", 1) !{ _ :> { @status = "failed" } }\n    }`));
-    clean(P(NOTES + `\n    function go() {\n        saveNote("n1", "x", 1) !{ _ err :> { @status = "failed" } }\n    }`));
+    clean(P(NOTES + `\n    function go() {\n        saveNote("n1", "x", 1) !{ _ :> { @status = "failed"; } };\n    }`));
+    clean(P(NOTES + `\n    function go() {\n        saveNote("n1", "x", 1) !{ _ err :> { @status = "failed"; } };\n    }`));
   });
 
   test("`?` needs `Transport(t: ServerCallError)` in the enclosing enum — else E-ERROR-010 naming the line to add (SPEC wording)", () => {
-    const E = `\n    type SyncError:enum = {\n        Conflict(current: int)\n        TooLong(limit: int)\n        Storage\n    }\n    function sync()! SyncError {\n        @version = saveNote("n1", @body, @version)?\n    }`;
+    const E = `\n    type SyncError:enum = {\n        Conflict(current: int)\n        TooLong(limit: int)\n        Storage\n    }\n    function sync()! SyncError {\n        @version = saveNote("n1", @body, @version)?;\n    }`;
     const src = P(NOTES + E);
     expect(errCodes(src)).toEqual(["E-ERROR-010"]);
     const m = run(src).diags.find((d) => d.code === "E-ERROR-010").message;
@@ -118,7 +118,7 @@ describe("S2 — §19.9.10 the client call is failable: E-ERROR-002, totality, `
   });
 
   test("with the wrapper declared, `?` re-fails every variant of the client set — the four retags", () => {
-    const E = `\n    type SyncError:enum = {\n        Conflict(current: int)\n        TooLong(limit: int)\n        Storage\n        Transport(t: ServerCallError)\n    }\n    function sync()! SyncError {\n        @version = saveNote("n1", @body, @version)?\n        @words = wordCount("n1")?\n    }`;
+    const E = `\n    type SyncError:enum = {\n        Conflict(current: int)\n        TooLong(limit: int)\n        Storage\n        Transport(t: ServerCallError)\n    }\n    function sync()! SyncError {\n        @version = saveNote("n1", @body, @version)?;\n        @words = wordCount("n1")?;\n    }`;
     const r = clean(P(NOTES + E));
     const s1 = fnCore(r, "sync").body.stmts[0];
     const at = s1.data.then.stmts[0];
@@ -133,17 +133,17 @@ describe("S2 — §19.9.10 the client call is failable: E-ERROR-002, totality, `
 
 describe("S2 — §19.9.10 F5 (a): \"remote\" is a whole-program placement fact", () => {
   test("server→server (the caller's own body places it on the server): a non-`!` callee's call needs no handling", () => {
-    clean(P(NOTES + `\n    function srv(id: string) -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not }\n        return wordCount(id)\n    }`));
+    clean(P(NOTES + `\n    function srv(id: string) -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not };\n        return wordCount(id);\n    }`));
   });
 
   test("server→server: a `!{}` on a non-`!` callee is E-ERROR-013 (\"the whole handler is attached to a call that cannot fail\")", () => {
-    const src = P(NOTES + `\n    function srv(id: string) -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not }\n        const n = wordCount(id) !{ .Transport(t) :> 0 }\n        return n\n    }`);
+    const src = P(NOTES + `\n    function srv(id: string) -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not };\n        const n = wordCount(id) !{ .Transport(t) :> 0 };\n        return n;\n    }`);
     expect(errCodes(src)).toContain("E-ERROR-013");
     expect(run(src).diags.find((d) => d.code === "E-ERROR-013").message).toContain("server→server");
   });
 
   test("Trigger 5: a helper called ONLY from server functions is server-placed — its call is server→server, valid unhandled; the client artifact omits it", () => {
-    const src = P(NOTES + `\n    function helper(id: string) -> int {\n        return wordCount(id)\n    }\n    function srv(id: string) -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not }\n        return helper(id)\n    }`);
+    const src = P(NOTES + `\n    function helper(id: string) -> int {\n        return wordCount(id);\n    }\n    function srv(id: string) -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not };\n        return helper(id);\n    }`);
     const r = clean(src);
     expect(r.typed.tables.server.inherited).toContain(fnInfo(r, "helper").sym.id);
     // s468 (U1c, the S467 §13 gate): the call is in place (a Call, never a ServerCall) — and
@@ -158,7 +158,7 @@ describe("S2 — §19.9.10 F5 (a): \"remote\" is a whole-program placement fact"
   });
 
   test("Trigger 5: a `!` callee's `.Transport` arm in an inherited helper handles nothing — reported as dead handling (E-ERROR-013 manner)", () => {
-    const src = P(NOTES + `\n    function helper(id: string) -> int {\n        const n = saveNote(id, "x", 1) !{\n            .Transport(t) :> 0\n            _ :> 1\n        }\n        return n\n    }\n    function srv(id: string) -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not }\n        return helper(id)\n    }`);
+    const src = P(NOTES + `\n    function helper(id: string) -> int {\n        const n = saveNote(id, "x", 1) !{\n            .Transport(t) :> 0,\n            _ :> 1\n        };\n        return n;\n    }\n    function srv(id: string) -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not };\n        return helper(id);\n    }`);
     const d = run(src).diags.find((x) => x.code === "E-ERROR-013");
     expect(d).toBeDefined();
     expect(d.message).toContain("`.Transport` arm handles nothing");
@@ -166,7 +166,7 @@ describe("S2 — §19.9.10 F5 (a): \"remote\" is a whole-program placement fact"
   });
 
   test("the flip: a client caller makes the helper client-placed — E-ERROR-002 inside it NAMES that caller (file:line)", () => {
-    const src = P(NOTES + `\n    function helper(id: string) -> int {\n        return wordCount(id)\n    }\n    function srv(id: string) -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not }\n        return helper(id)\n    }\n    function refresh() {\n        @words = helper("n1")\n    }`);
+    const src = P(NOTES + `\n    function helper(id: string) -> int {\n        return wordCount(id);\n    }\n    function srv(id: string) -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not };\n        return helper(id);\n    }\n    function refresh() {\n        @words = helper("n1");\n    }`);
     const d = run(src).diags.find((x) => x.code === "E-ERROR-002");
     expect(d).toBeDefined();
     const line = src.split("\n").findIndex((l) => l.includes('@words = helper("n1")')) + 1;
@@ -179,7 +179,7 @@ describe("S2 — §19.9.10 F5 (a): \"remote\" is a whole-program placement fact"
   });
 
   test("a server function calling a client function that waits → refused (its server-side copy is not built — s468 U1c emits a function per side only as it is)", () => {
-    const src = P(NOTES + "\n" + RECOUNT + `\n    function srv() -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not }\n        recount()\n        return 1\n    }`);
+    const src = P(NOTES + "\n" + RECOUNT + `\n    function srv() -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not };\n        recount();\n        return 1;\n    }`);
     const d = run(src).diags.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED");
     expect(d).toBeDefined();
     expect(d.message).toContain("a second, server-side copy of `recount()`");
@@ -189,7 +189,7 @@ describe("S2 — §19.9.10 F5 (a): \"remote\" is a whole-program placement fact"
 describe("S2 — design §2.2 positions: lowered (ANF, Join) / refused (named)", () => {
   const H = `wordCount("n1") !{ .Transport(t) :> 0 }`;
   test("an operand: everything evaluated before the call becomes a temporary (left-to-right kept)", () => {
-    const r = clean(P(NOTES + `\n    function go() {\n        @words = @version + (${H})\n    }`));
+    const r = clean(P(NOTES + `\n    function go() {\n        @words = @version + (${H});\n    }`));
     const st = fnCore(r, "go").body.stmts;
     expect(st.map(v)).toEqual(["Let", "Suspend"]);
     const tmp = st[0].data.sym;
@@ -199,13 +199,13 @@ describe("S2 — design §2.2 positions: lowered (ANF, Join) / refused (named)",
   });
 
   test("a call argument: the earlier argument is a temporary, a literal is not", () => {
-    const r = clean(P(NOTES + `\n    function sum(a: int, b: int, c: int) -> int {\n        return a + b + c\n    }\n    function go() {\n        @words = sum(@version, ${H}, 2)\n    }`));
+    const r = clean(P(NOTES + `\n    function sum(a: int, b: int, c: int) -> int {\n        return a + b + c;\n    }\n    function go() {\n        @words = sum(@version, ${H}, 2);\n    }`));
     const st = fnCore(r, "go").body.stmts;
     expect(st.map(v)).toEqual(["Let", "Suspend"]);
   });
 
   test("inside an `if` branch with statements after it: a Join, each branch ends in Jump(k)", () => {
-    const r = clean(P(NOTES + `\n    function go() {\n        if (@flag) {\n            @words = ${H}\n        }\n        @status = "done"\n    }`));
+    const r = clean(P(NOTES + `\n    function go() {\n        if (@flag) {\n            @words = ${H};\n        }\n        @status = "done";\n    }`));
     const st = fnCore(r, "go").body.stmts;
     expect(st.map(v)).toEqual(["Join", "If"]);
     const k = st[0].data.k;
@@ -219,23 +219,23 @@ describe("S2 — design §2.2 positions: lowered (ANF, Join) / refused (named)",
   });
 
   const refused = (body, word) => {
-    const src = P(NOTES + `\n    function go() {\n${body}\n    }`);
+    const src = P(NOTES + `\n    function go() {\n${body};\n    }`);
     const d = run(src).diags.filter((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED");
     expect(d.length).toBeGreaterThan(0);
     expect(d.map((x) => x.message).join("\n")).toContain(word);
   };
   test("the right operand of `&&` → refused, naming the follow-up", () => refused(`        const ok = @flag && (${H} > 0)`, "right operand"));
   test("a ternary branch → refused", () => refused(`        @words = @flag ? (${H}) : 0`, "branch of `? :`"));
-  test("a `!{}` arm → refused (first cut)", () => refused(`        saveNote("n1", "x", 1) !{ _ :> { @words = ${H} } }`, "arm"));
+  test("a `!{}` arm → refused (first cut)", () => refused(`        saveNote("n1", "x", 1) !{ _ :> { @words = ${H}; } }`, "arm"));
   test("a lambda → refused (awaited combinator)", () => refused(`        const xs = [1, 2].map(x => ${H})`, "lambda"));
-  test("a `defer` body → refused (C16)", () => refused(`        defer {\n            @words = ${H}\n        }`, "`defer` body"));
-  test("a `defer` in a function that waits → refused (§19.16.2 exit timing)", () => refused(`        defer {\n            @status = "x"\n        }\n        @words = ${H}`, "function that waits"));
+  test("a `defer` body → refused (C16)", () => refused(`        defer {\n            @words = ${H};\n        }`, "`defer` body"));
+  test("a `defer` in a function that waits → refused (§19.16.2 exit timing)", () => refused(`        defer {\n            @status = "x";\n        }\n        @words = ${H}`, "function that waits"));
 });
 
 describe("S2 fix round — own-trigger server sites, owner-named messages", () => {
-  const WF = `\n    type E:enum = {\n        Bad\n    }\n    function wf(x: string)! E {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not }\n        return 1\n    }`;
+  const WF = `\n    type E:enum = {\n        Bad\n    }\n    function wf(x: string)! E {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not };\n        return 1;\n    }`;
   test("1: a `.Transport` arm in a `!{}` at a server→server site inside a server function placed by its OWN trigger is dead handling (E-ERROR-013 naming the callee, server→server) — not E-TYPE-VARIANT", () => {
-    const src = P(WF + `\n    function sv9() -> int {\n        const r = ${SQ}\`SELECT 2\`}.get() !{ _ :> not }\n        const n = wf("a") !{\n            .Bad :> 1\n            .Transport(t) :> 0\n        }\n        return n\n    }`);
+    const src = P(WF + `\n    function sv9() -> int {\n        const r = ${SQ}\`SELECT 2\`}.get() !{ _ :> not };\n        const n = wf("a") !{\n            .Bad :> 1,\n            .Transport(t) :> 0\n        };\n        return n;\n    }`);
     const ds = run(src).diags;
     expect(ds.map((d) => d.code)).not.toContain("E-TYPE-VARIANT");
     const d = ds.find((x) => x.code === "E-ERROR-013");
@@ -245,14 +245,14 @@ describe("S2 fix round — own-trigger server sites, owner-named messages", () =
   });
 
   test("1: the same for a `match` on the call", () => {
-    const src = P(WF + `\n    function sv9() -> int {\n        const r = ${SQ}\`SELECT 2\`}.get() !{ _ :> not }\n        return match wf("a") {\n            .Ok(v) :> v\n            .Bad :> 1\n            .Transport(t) :> 0\n        }\n    }`);
+    const src = P(WF + `\n    function sv9() -> int {\n        const r = ${SQ}\`SELECT 2\`}.get() !{ _ :> not };\n        return match wf("a") {\n            .Ok(v) :> v,\n            .Bad :> 1,\n            .Transport(t) :> 0\n        };\n    }`);
     const ds = run(src).diags;
     expect(ds.map((d) => d.code)).not.toContain("E-TYPE-VARIANT");
     expect(ds.find((x) => x.code === "E-ERROR-013").message).toContain("server→server");
   });
 
   test("1 (twin): a total handler without `.Transport` at an own-trigger server site is valid and lowers to the callee's own enum", () => {
-    const r = clean(P(WF + `\n    function sv9() -> int {\n        const r = ${SQ}\`SELECT 2\`}.get() !{ _ :> not }\n        const n = wf("a") !{ .Bad :> 1 }\n        return n\n    }`));
+    const r = clean(P(WF + `\n    function sv9() -> int {\n        const r = ${SQ}\`SELECT 2\`}.get() !{ _ :> not };\n        const n = wf("a") !{ .Bad :> 1 };\n        return n;\n    }`));
     const sv = r.core.server.find((x) => x.sym.hint === "sv9");
     // s468 (U1c): wf waits on the server (its query) — the in-place call is a Suspend, its Attempt over the outcome
     const sus = [];
@@ -267,7 +267,7 @@ describe("S2 fix round — own-trigger server sites, owner-named messages", () =
   });
 
   test("2: E-ERROR-002 in an `<effect>` body names the effect, not an event handler", () => {
-    const src = P(NOTES, `        <effect deps=[@flag]>\${ wordCount("n1") }</>`);
+    const src = P(NOTES, `        <effect deps=[@flag]>\${ wordCount("n1"); }</>`);
     const d = run(src).diags.find((x) => x.code === "E-ERROR-002");
     expect(d).toBeDefined();
     expect(d.message).toContain("an `<effect>` body runs on the client");
@@ -275,7 +275,7 @@ describe("S2 fix round — own-trigger server sites, owner-named messages", () =
   });
 
   test("3: the waiting-client-function refusal names the chain once (no doubled parens, no repeated head)", () => {
-    const src = P(NOTES + `\n    function wc2() {\n        @words = wordCount("n1") !{ .Transport(t) :> 0 }\n    }\n    function hp() {\n        wc2()\n    }\n    function srv() -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not }\n        hp()\n        return 1\n    }`);
+    const src = P(NOTES + `\n    function wc2() {\n        @words = wordCount("n1") !{ .Transport(t) :> 0 };\n    }\n    function hp() {\n        wc2();\n    }\n    function srv() -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not };\n        hp();\n        return 1;\n    }`);
     const d = run(src).diags.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("server-side copy"));
     expect(d).toBeDefined();
     expect(d.message).not.toContain("()()");
@@ -283,7 +283,7 @@ describe("S2 fix round — own-trigger server sites, owner-named messages", () =
   });
 
   test("4: E-ERROR-013 on a non-`!` callee names the form: 'match' for a match", () => {
-    const src = P(NOTES + `\n    function sv() -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not }\n        return match wordCount("a") {\n            .Ok(v) :> v\n            .Transport(t) :> 0\n        }\n    }`);
+    const src = P(NOTES + `\n    function sv() -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not };\n        return match wordCount("a") {\n            .Ok(v) :> v,\n            .Transport(t) :> 0\n        };\n    }`);
     const d = run(src).diags.find((x) => x.code === "E-ERROR-013");
     expect(d.message.startsWith("'match' on 'wordCount(…)'")).toBe(true);
   });

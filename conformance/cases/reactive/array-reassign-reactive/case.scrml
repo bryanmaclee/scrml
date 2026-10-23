@@ -1,7 +1,7 @@
 ${
     <items> = [{ id: 1, label: "a" }, { id: 2, label: "b" }]
     function addItem() {
-        @items = [...@items, { id: 3, label: "c" }]
+        @items = [...@items, { id: 3, label: "c" }];
     }
 }
 <button id="add" onclick=addItem()>add</>

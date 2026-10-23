@@ -9,13 +9,13 @@ type Phase:enum = { Idle, Loading }
 
 <button id="top" onclick={ @log = @n > 5
             ? @log + "Tx,"
-            : @log + "T," }>top</button>
+            : @log + "T,"; }>top</button>
 
 <engine for=Phase initial=.Idle>
     <Idle>
         <button id="eng" onclick={ @log = @n > 5
             ? @log + "Ex,"
-            : @log + "E," }>engine</button>
+            : @log + "E,"; }>engine</button>
     </>
     <Loading : "Loading…">
 </>
@@ -24,7 +24,7 @@ type Phase:enum = { Idle, Loading }
     <Idle>
         <button id="mat" onclick={ @log = @n > 5
             ? @log + "Mx,"
-            : @log + "M," }>match</button>
+            : @log + "M,"; }>match</button>
     </>
     <Loading><p>Loading…</p></>
 </>
@@ -33,6 +33,6 @@ type Phase:enum = { Idle, Loading }
     <each in=@items key=@.id>
         <li><button class="row" onclick={ @log = @n > 5
             ? @log + "Rx,"
-            : @log + "R," }>${@.name}</button></li>
+            : @log + "R,"; }>${@.name}</button></li>
     </each>
 </ul>

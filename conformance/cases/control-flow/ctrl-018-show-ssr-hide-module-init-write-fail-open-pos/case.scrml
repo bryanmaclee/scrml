@@ -9,7 +9,7 @@ ${
   <ready>: bool = false
 
   function init() {
-    @ready = true
+    @ready = true;
   }
 
   init()

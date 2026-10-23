@@ -6,11 +6,11 @@ ${
     // unplaceable, so E-ROUTE-005 stays silent (and no E-ROUTE-002 either — the
     // only cross-boundary call goes client -> server).
     function flash(name: string) {
-        document.title = name
-        persist(name) !{ .Transport(_) :> return }
+        document.title = name;
+        persist(name) !{ .Transport(_) :> return };
     }
     function persist(name: string) {
-        ?{`INSERT INTO audit (who) VALUES (${name})`}.run()
+        ?{`INSERT INTO audit (who) VALUES (${name})`}.run();
     }
 }
 <button id="go" onclick=flash("hi")>Go</button>

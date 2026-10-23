@@ -5,14 +5,14 @@
     let <empty:string=""/>
     function attempt(pw: string) -> string {
         return match pw {
-            "hunter2" :> "welcome"
+            "hunter2" :> "welcome",
             else :> "denied"
-        }
+        };
     }
     function login() {
-        @wrong = attempt("hunter3")
-        @right = attempt("hunter2")
-        @empty = attempt("")
+        @wrong = attempt("hunter3");
+        @right = attempt("hunter2");
+        @empty = attempt("");
     }
     <main>
         <button id="go" onclick=login()>go</button>
