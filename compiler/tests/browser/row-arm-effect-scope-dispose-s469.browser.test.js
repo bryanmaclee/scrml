@@ -366,6 +366,54 @@ describe("arm teardown disposes the effects of everything the arm mounted (face 
   });
 });
 
+describe("self-attack — a removed row's effect must not act, even within the write that removed it", () => {
+  test("the SAME write removes the row and changes what its arm reads: the detached arm is never written", async () => {
+    // One write of @rows (a) re-renders the list, removing row 1, and (b) is read by the
+    // arm mounted in row 1. The write's effect snapshot still holds row 1's arm effect
+    // when it runs after the list effect; it must find its owner dead and not run.
+    const app = compileAndMount(`${PHASE}<rows> = [{ id: 1 }, { id: 2 }]
+<div id="out"><each in=@rows key=@.id as r><div class="row"><match for=Phase on=@ph><Idle><span class="len">\${@rows.length}</span></Idle><Active><i>a</i></Active></match></div></each></div>
+`);
+    expect(app.errors).toEqual([]);
+    await flush();
+    const spans = [...document.querySelectorAll("#out span.len")];
+    expect(spans.map((s) => s.textContent)).toEqual(["2", "2"]);
+    const dead = spans[0];
+    await set("rows", [{ id: 2 }]);
+    expect(dead.isConnected).toBe(false);
+    expect(dead.textContent).toBe("2");
+    expect([...document.querySelectorAll("#out span.len")].map((s) => s.textContent)).toEqual(["1"]);
+    // And never again, whatever is written later — including the key coming back.
+    await set("rows", [{ id: 2 }, { id: 3 }, { id: 1 }]);
+    expect(dead.textContent).toBe("2");
+    expect([...document.querySelectorAll("#out span.len")].map((s) => s.textContent)).toEqual(["3", "3", "3"]);
+  });
+
+  test("a row removed while its arm is switching does not keep the new arm alive", async () => {
+    const app = compileAndMount(`${PHASE}<rows> = [{ id: 1 }, { id: 2 }]
+<n> = 0
+<div id="out"><each in=@rows key=@.id as r><div class="row"><match for=Phase on=@ph><Idle><b>\${@n}</b></Idle><Active><s>\${@n}</s></Active></match></div></each></div>
+`);
+    expect(app.errors).toEqual([]);
+    await flush();
+    const rebuilt = [];
+    for (let i = 0; i < 4; i++) {
+      await set("ph", i % 2 === 0 ? "Active" : "Idle");
+      await set("rows", [{ id: 2 }]);
+      await set("rows", [{ id: 1 }, { id: 2 }]);
+      rebuilt.push(subs("n"));
+    }
+    // Flat across switch + remove/re-add cycles (no generation survives).
+    expect(new Set(rebuilt).size).toBe(1);
+    await set("rows", []);
+    expect(subs("n")).toBe(0);
+    await set("ph", "Active");
+    await set("n", 5);
+    expect(count("#out .row")).toBe(0);
+    expect(subs("n")).toBe(0);
+  });
+});
+
 describe("randomized add / remove / switch stress — subscriber count returns to baseline", () => {
   // Deterministic PRNG so a failure reproduces.
   function rng(seed) {
