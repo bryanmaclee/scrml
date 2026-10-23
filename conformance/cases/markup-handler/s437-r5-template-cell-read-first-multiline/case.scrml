@@ -7,28 +7,28 @@ type Phase:enum = { Idle, Loading }
 
 <p id="out">${@log}</p>
 
-<button id="top" onclick={ @log = `${@log}T${@r},`
-            @r = 7 }>top</button>
+<button id="top" onclick={ @log = `${@log}T${@r},`;
+            @r = 7; }>top</button>
 
 <engine for=Phase initial=.Idle>
     <Idle>
-        <button id="eng" onclick={ @log = `${@log}E${@r},`
-            @r = 7 }>engine</button>
+        <button id="eng" onclick={ @log = `${@log}E${@r},`;
+            @r = 7; }>engine</button>
     </>
     <Loading : "Loading…">
 </>
 
 <match on=@ph>
     <Idle>
-        <button id="mat" onclick={ @log = `${@log}M${@r},`
-            @r = 7 }>match</button>
+        <button id="mat" onclick={ @log = `${@log}M${@r},`;
+            @r = 7; }>match</button>
     </>
     <Loading><p>Loading…</p></>
 </>
 
 <ul>
     <each in=@items key=@.id>
-        <li><button class="row" onclick={ @log = `${@log}R${@r},`
-            @r = 7 }>${@.name}</button></li>
+        <li><button class="row" onclick={ @log = `${@log}R${@r},`;
+            @r = 7; }>${@.name}</button></li>
     </each>
 </ul>

@@ -1,8 +1,8 @@
 <program>
 ${
     fn build(x: string) {
-        let el = document.createElement("div")
-        return x
+        let el = document.createElement("div");
+        return x;
     }
 }
 <p>${build("hi")}</>

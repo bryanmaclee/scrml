@@ -18,22 +18,22 @@
     function getAll() {
         let out = []
         for (const it of [{ id: 7 }, { id: 8 }, { id: 9 }, { id: 7 }, { id: 10 }]) {
-            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get()
-            out.push(row is not ? "none" : row.body)
+            const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get();
+            out.push(row is not ? "none" : row.body);
         }
         return out.join(",")
     }
     function allAll() {
         let out = []
         for (const it of [{ id: 7 }, { id: 8 }, { id: 9 }, { id: 7 }, { id: 10 }]) {
-            const rows = ?{`SELECT name FROM tags WHERE note = ${it.id} ORDER BY name`}.all()
-            out.push(rows.map((t) => t.name).join("+"))
+            const rows = ?{`SELECT name FROM tags WHERE note = ${it.id} ORDER BY name`}.all();
+            out.push(rows.map((t) => t.name).join("+"));
         }
         return out.join(",")
     }
     function go() {
-        @firstRows = getAll() !{ _ :> "err" }
-        @allRows = allAll() !{ _ :> "err" }
+        @firstRows = getAll() !{ _ :> "err" };
+        @allRows = allAll() !{ _ :> "err" };
     }
     <button id="go" onclick=go()>go</button>
     <p id="firstRows">${@firstRows}</p>

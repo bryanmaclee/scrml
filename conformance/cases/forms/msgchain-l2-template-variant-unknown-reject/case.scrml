@@ -1,6 +1,6 @@
 <program>
 ${
-    import { registerMessages } from 'scrml:data'
+    import { registerMessages } from 'scrml:data';
     registerMessages({
         .TooShort: "{field} is too short",
     })

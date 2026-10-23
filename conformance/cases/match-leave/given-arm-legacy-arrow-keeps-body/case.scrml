@@ -9,8 +9,8 @@ ${
         return out
     }
     function go() {
-        @a = decl("al")
-        @b = decl(not)
+        @a = decl("al");
+        @b = decl(not);
     }
 }
 <button id="go" onclick=go()>go</>

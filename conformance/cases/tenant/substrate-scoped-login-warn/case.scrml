@@ -8,13 +8,13 @@
     // login fails. The identity substrate must not be tenant-scoped (§14.8.10 corollary).
     ${
         function login(email: string) {
-            const u = ?{`SELECT id, tenant_id FROM users WHERE email = ${email}`}.get()
+            const u = ?{`SELECT id, tenant_id FROM users WHERE email = ${email}`}.get();
             if (u is not) {
-                return "bad"
+                return "bad";
             }
-            session.set("userId", u.id)
-            session.set("tenantId", u.tenant_id)
-            return "ok"
+            session.set("userId", u.id);
+            session.set("tenantId", u.tenant_id);
+            return "ok";
         }
     }
     <button onclick=${ login("a@x") }>log in</button>

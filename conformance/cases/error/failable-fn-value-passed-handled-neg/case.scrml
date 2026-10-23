@@ -1,14 +1,14 @@
 ${
     type LoadError:enum = { Empty }
     function risky(n: int)! -> LoadError {
-        if (n < 1) fail LoadError::Empty
-        return n
+        if (n < 1) fail LoadError::Empty;
+        return n;
     }
     function applyOr(f, n: int) {
-        return f(n) !{ .Empty :> 0 }
+        return f(n) !{ .Empty :> 0 };
     }
     function total() {
-        return applyOr(risky, 2)
+        return applyOr(risky, 2);
     }
 }
 

@@ -3,11 +3,11 @@
   <category> = "all"
   <lastFilter> = ""
   function logFilter(c: string) {
-    @lastFilter = c
+    @lastFilter = c;
   }
   function track(c: string) {
-    logFilter(c)
+    logFilter(c);
   }
-  <effect deps=[@category]>${ track(@category) }</>
+  <effect deps=[@category]>${ track(@category); }</>
   <p>${@category}</p>
 </program>

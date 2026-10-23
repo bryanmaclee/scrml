@@ -23,7 +23,7 @@
         ${ for (r of @rows) { lift <li><Counter bind:count=@inLift label="l"/></li> } }
     </ol>
     <div id="a">
-        <match for=Phase on=@phase>
+        <match for=Phase; on=@phase>
             <Idle>
                 <p>idle</p>
             </>

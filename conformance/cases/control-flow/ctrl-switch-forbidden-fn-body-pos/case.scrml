@@ -4,7 +4,7 @@ type Phase:enum = { Idle, Busy }
 
 ${
   function toggle() {
-    switch (@phase) {
+    switch (@phase); {
       case .Idle: @phase = .Busy
       case .Busy: @phase = .Idle
     }

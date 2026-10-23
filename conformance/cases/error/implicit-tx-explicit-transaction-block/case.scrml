@@ -10,10 +10,10 @@
         }
     </schema>
     server function both(id: string)! SqlError {
-        let a = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
-        let b = ?{`SELECT * FROM posts WHERE user_id = ${id}`}.all()
+        let a = ?{`SELECT * FROM users WHERE id = ${id}`}.get();
+        let b = ?{`SELECT * FROM posts WHERE user_id = ${id}`}.all();
         transaction {
-            ?{`UPDATE users SET name = 'x' WHERE id = ${id}`}.run()
+            ?{`UPDATE users SET name = 'x' WHERE id = ${id}`}.run();
         }
         return { a, b }
     }

@@ -5,15 +5,15 @@ ${
         NotFound(id: string)
     }
 
-    function step1(v: int) { return v + 1 }
+    function step1(v: int) { return v + 1; }
 
     function load(id: string)! LoadError {
-        if (id == "missing") fail LoadError.NotFound(id)
-        return id
+        if (id == "missing") fail LoadError.NotFound(id);
+        return id;
     }
 
     function liftLiteralInArm() {
-        step1(40)
+        step1(40);
         const label = if (@n > 0) {
             lift 41
         } else {
@@ -26,7 +26,7 @@ ${
         const label = if (@n > 0) {
             load("ok") !{
                 .NotFound(mid) :> console.warn("not found", mid)
-            }
+            };
             lift "found"
         } else {
             lift "neg"

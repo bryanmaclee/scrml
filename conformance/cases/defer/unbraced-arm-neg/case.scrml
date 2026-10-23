@@ -2,23 +2,23 @@ ${
     <trace> = ""
 
     function D(s: string) {
-        @trace = @trace + s
+        @trace = @trace + s;
     }
 
     function a(c: boolean) {
-        if (c) defer D("a;")
-        D("x;")
+        if (c) defer D("a;");
+        D("x;");
     }
 
     function b(c: boolean) {
         if (c) {
-            D("y;")
-        } else defer D("b;")
-        D("x;")
+            D("y;");
+        } else defer D("b;");
+        D("x;");
     }
 
     function l() {
-        for (const i of [1, 2]) defer D("l;")
+        for (const i of [1, 2]) defer D("l;");
         D("x;")
     }
 }

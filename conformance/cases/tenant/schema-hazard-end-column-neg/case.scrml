@@ -8,8 +8,8 @@
     // SQLite does not reserve `end`: the column named `end` is not the end of the trigger body.
     ${
         function go() {
-            ?{`INSERT INTO config (k, v) VALUES ('a', 'b')`}.run()
-            return "ok"
+            ?{`INSERT INTO config (k, v) VALUES ('a', 'b')`}.run();
+            return "ok";
         }
     }
     <button onclick=${ go() }>go</button>

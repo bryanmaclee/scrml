@@ -13,9 +13,9 @@ ${
         return v * 10
     }
     function go() {
-        const first = pick(K.A, K.A)
-        const second = pick(K.B, K.A)
-        @out = `${first},${second}`
+        const first = pick(K.A, K.A);
+        const second = pick(K.B, K.A);
+        @out = `${first},${second}`;
     }
 }
 <button id="go" onclick=go()>go</>

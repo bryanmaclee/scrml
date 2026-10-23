@@ -4,7 +4,7 @@
     </>
     // `assets` is tenant-scoped HERE; the forged write lives in ./writer.scrml.
     ${
-        import { forge } from './writer.scrml'
+        import { forge } from './writer.scrml';
     }
     <button onclick=${ forge() }>forge</button>
 </program>

@@ -29,12 +29,12 @@
         lift ?{`SELECT id FROM gone`}.all() !{ _ :> [] }
     }
     function go() {
-        const a = liftHit() !{ .Transport(_) :> return }
-        const b = liftMiss() !{ .Transport(_) :> return }
-        const c = liftFailed() !{ .Transport(_) :> return }
-        @hit = "rows:" + a.length
-        @miss = "rows:" + b.length
-        @failed = "rows:" + c.length
+        const a = liftHit() !{ .Transport(_) :> return };
+        const b = liftMiss() !{ .Transport(_) :> return };
+        const c = liftFailed() !{ .Transport(_) :> return };
+        @hit = "rows:" + a.length;
+        @miss = "rows:" + b.length;
+        @failed = "rows:" + c.length;
     }
     <button id="go" onclick=go()>go</button>
     <p id="hit">${@hit}</p>

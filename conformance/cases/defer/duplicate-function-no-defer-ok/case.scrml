@@ -12,7 +12,7 @@ ${
     }
 
     function go() {
-        @out = f()
+        @out = f();
     }
 }
 <program>

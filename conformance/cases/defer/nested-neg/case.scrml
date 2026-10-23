@@ -3,10 +3,10 @@ ${
 
     function go() {
         defer {
-            @n = 1
-            defer @n = 2
+            @n = 1;
+            defer @n = 2;
         }
-        @n = 3
+        @n = 3;
     }
 }
 <program>

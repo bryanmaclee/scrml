@@ -1,8 +1,8 @@
 <program>
 ${
     function go() {
-        unusedThing = 42
-        return 1
+        unusedThing = 42;
+        return 1;
     }
 }
 <p id="s">must-use</p>

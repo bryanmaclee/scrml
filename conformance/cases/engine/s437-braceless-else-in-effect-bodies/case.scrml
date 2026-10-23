@@ -7,7 +7,7 @@ type Phase:enum = { Idle, Busy }
     </>
     <Busy rule=.Idle>
         <onTransition to=.Idle>
-            ${ if (@n > 0) @r = @r + "P"; else @r = @r + "N" }
+            ${ if (@n > 0) @r = @r + "P"; else @r = @r + "N"; }
         </>
         <button id="back" onclick=@phase = .Idle>back</button>
     </>

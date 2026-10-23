@@ -7,12 +7,12 @@ ${
     <blank> = "init"
 
     function go() {
-        let name: string | not = "ada"
-        let age: int | not = not
-        let empty: string | not = ""
-        if (name is given) { @seen = "hello " + name }
-        if (name is given && age is given) { @both = "both present" }
-        if (empty is given) { @blank = "empty string is present" }
+        let name: string | not = "ada";
+        let age: int | not = not;
+        let empty: string | not = "";
+        if (name is given) { @seen = "hello " + name; }
+        if (name is given && age is given) { @both = "both present"; }
+        if (empty is given) { @blank = "empty string is present"; }
     }
 }
 <program>

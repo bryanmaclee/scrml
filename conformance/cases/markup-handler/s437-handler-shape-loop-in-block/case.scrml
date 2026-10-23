@@ -10,24 +10,24 @@ ${ function t(x) { @log = @log + x + "," } }
 
 <p id="out">${@log}</p>
 
-<button id="top" onclick={ for (const x of [1, 2]) { t("T" + x) } t("T9") }>top</button>
+<button id="top" onclick={ for (const x of [1, 2]) { t("T" + x); } t("T9"); }>top</button>
 
 <engine for=Phase initial=.Idle>
     <Idle>
-        <button id="eng" onclick={ for (const x of [1, 2]) { t("E" + x) } t("E9") }>engine</button>
+        <button id="eng" onclick={ for (const x of [1, 2]) { t("E" + x); } t("E9"); }>engine</button>
     </>
     <Loading : "Loading…">
 </>
 
 <match on=@ph>
     <Idle>
-        <button id="mat" onclick={ for (const x of [1, 2]) { t("M" + x) } t("M9") }>match</button>
+        <button id="mat" onclick={ for (const x of [1, 2]) { t("M" + x); } t("M9"); }>match</button>
     </>
     <Loading><p>Loading…</p></>
 </>
 
 <ul>
     <each in=@items key=@.id>
-        <li><button class="row" onclick={ for (const x of [1, 2]) { t("R" + x) } t("R9") }>${@.name}</button></li>
+        <li><button class="row" onclick={ for (const x of [1, 2]) { t("R" + x); } t("R9"); }>${@.name}</button></li>
     </each>
 </ul>

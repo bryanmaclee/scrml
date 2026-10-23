@@ -1,4 +1,4 @@
 ${
-    import { helper } from './m.scrml'
+    import { helper } from './m.scrml';
 }
 <p>${helper()}</>

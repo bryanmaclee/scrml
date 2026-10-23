@@ -1,5 +1,5 @@
 ${
-  import { formFor } from 'scrml:data'
+  import { formFor } from 'scrml:data';
 
   type SignupError:enum = {
     Rejected(reason: string)
@@ -12,7 +12,7 @@ ${
   }
 
   server function persistSignup() ! SignupError {
-    return "ok"
+    return "ok";
   }
 }
 <program>

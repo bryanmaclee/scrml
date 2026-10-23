@@ -7,12 +7,12 @@ ${
     <trace> = ""
 
     function save(id: number) {
-        @trace = @trace + "start;"
-        defer ?{`UPDATE locks SET held = 0 WHERE id = ${id}`}.run()
-        ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run()
-        @trace = @trace + "end;"
+        @trace = @trace + "start;";
+        defer ?{`UPDATE locks SET held = 0 WHERE id = ${id}`}.run();
+        ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run();
+        @trace = @trace + "end;";
     }
 }
-<button onclick={ save(1) !{ .Transport(_) :> return } }>go</>
+<button onclick={ save(1) !{ .Transport(_) :> return }; }>go</>
 <p>${@trace}</p>
 </program>

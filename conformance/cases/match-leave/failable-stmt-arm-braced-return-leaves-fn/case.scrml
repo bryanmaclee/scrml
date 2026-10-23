@@ -5,16 +5,16 @@ ${
     <seen> : string = "none"
     <after> : string = "not-run"
     function risky(n: number)! E {
-        if (n < 0) { fail E.Boom("neg") }
-        return n
+        if (n < 0) { fail E.Boom("neg"); }
+        return n;
     }
     function go() {
         match risky(-1) {
             .Ok(v) :> @seen = "ok"
-            .Boom(m) :> { return }
+            .Boom(m) :> { return; }
             .Other :> @seen = "other"
         }
-        @after = "ran"
+        @after = "ran";
     }
 }
 <button id="go" onclick=go()>go</>

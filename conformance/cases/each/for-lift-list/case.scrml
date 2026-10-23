@@ -2,8 +2,8 @@ ${
     <items> = []
     <nextId> = 1
     function addItem() {
-        @items = [...@items, { id: @nextId, name: "Item " + @nextId }]
-        @nextId = @nextId + 1
+        @items = [...@items, { id: @nextId, name: "Item " + @nextId }];
+        @nextId = @nextId + 1;
     }
 }
 <button id="add-btn" onclick=addItem()>Add Item</>

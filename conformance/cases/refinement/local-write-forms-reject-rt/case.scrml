@@ -18,9 +18,9 @@ ${
         @done = @done + "d"
     }
     function assignBad() {
-        let l: L = { u: "a", n: 1 }
-        Object.assign(l, { n: @m })
-        @done = @done + "a"
+        let l: L = { u: "a", n: 1 };
+        Object.assign(l, { n: @m });
+        @done = @done + "a";
     }
     function destructure() {
         let { n }: L = { u: "a", n: @m }

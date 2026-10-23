@@ -1,8 +1,8 @@
 <program>
 ${
     fn build(x: int) {
-        let n = x * 2
-        return n
+        let n = x * 2;
+        return n;
     }
 }
 <p>${build(2)}</>

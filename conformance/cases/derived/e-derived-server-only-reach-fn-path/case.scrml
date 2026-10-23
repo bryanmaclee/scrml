@@ -1,6 +1,6 @@
 <program>
 
-${ import { hashPassword } from 'scrml:auth' }
+${ import { hashPassword } from 'scrml:auth'; }
 
 <pw> = "secret"
 <hashed> = ""
@@ -15,10 +15,10 @@ ${ import { hashPassword } from 'scrml:auth' }
 // This is also the resolution E-DERIVED-SERVER-ONLY-REACH's message names: move
 // the call into a `function`, write the result to a plain reactive cell.
 ${ function computeHash(pw: string) {
-    return hashPassword(pw)
+    return hashPassword(pw);
 } }
 
-<button id="go" onclick={ @hashed = computeHash(@pw) }>Hash</button>
+<button id="go" onclick={ @hashed = computeHash(@pw); }>Hash</button>
 <div id="out">${@hashed}</div>
 
 </program>

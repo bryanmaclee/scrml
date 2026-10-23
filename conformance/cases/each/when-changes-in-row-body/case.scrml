@@ -5,7 +5,7 @@
 <ul>
     <each in=@rows key=@.id as r>
         <li class="row">${r.id}
-            ${ when @n changes { @hits = @hits + 1 } }
+            ${ when @n changes { @hits = @hits + 1; } }
         </li>
     </each>
 </ul>

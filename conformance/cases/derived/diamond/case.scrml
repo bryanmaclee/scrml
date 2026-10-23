@@ -4,7 +4,7 @@ ${
     const <times> = @n * 3
     const <sum> = @plus + @times
     function bump() {
-        @n = @n + 1
+        @n = @n + 1;
     }
 }
 <button id="bump" onclick=bump()>Bump</>

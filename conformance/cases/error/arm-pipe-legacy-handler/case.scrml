@@ -8,8 +8,8 @@ ${
     }
 
     function risky(n: number)! -> LoadError {
-        if (n == 0) { fail LoadError.NotFound("was-zero") }
-        return "ok"
+        if (n == 0) { fail LoadError.NotFound("was-zero"); }
+        return "ok";
     }
 
     <result> = "init"
@@ -18,7 +18,7 @@ ${
         @result = risky(0) !{
             | .NotFound reason :> "recovered: " + reason
             | .Empty           :> "was-empty"
-        }
+        };
     }
 }
 <program>
