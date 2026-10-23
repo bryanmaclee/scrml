@@ -31,7 +31,9 @@ export function armTokens(s: string): ArmTok[] | null {
   if (typeof s !== "string") return null;
   // `->` (deprecated arm arrow) → `:>`, same length: an arm arrow puts the lexer in
   // regex context, as `:>` / `=>` already do.
-  const lexText = s.replace(/(^|[\s)\]\w"'`])->(?=\s)/g, (_m, p: string) => p + ":>");
+  // S469 r4 — raw arm text is TOKEN-JOINED, so the arrow usually arrives as `- >`: match
+  // `-\s*>` and keep the length (`:>` then the spaces), so every offset still maps to `s`.
+  const lexText = s.replace(/(^|[\s)\]\w"'`])-(\s*)>(?=\s)/g, (_m, p: string, sp: string) => p + ":>" + sp);
   let raw: Array<{ kind: string; text: string; span: { start: number; end: number } }>;
   try {
     raw = tokenizeLogic(lexText, 0, 1, 1, []) as never;
