@@ -362,3 +362,100 @@ describe("a lift inside an <each> inside a <match> arm", () => {
     expect(count("#out b.g")).toBe(0);
   });
 });
+
+describe("S469 round 2 — F1: a cell read through a function call is a dependency of the gate", () => {
+  for (const [name, wrap] of [
+    ["a bare lift", (b) => `\${ lift <span>${b}</span> }`],
+    ["an `if … lift` arm", (b) => `\${ if (true) { lift <span>${b}</span> } }`],
+    ["a `for` over a non-reactive iterable", (b) => `\${ for (x of [1, 2]) { lift <span>${b}</span> } }`],
+    ["a reactive `for … lift` row", (b) => `\${ for (x of @xs) { lift <span>${b}</span> } }`],
+  ]) {
+    for (const guard of ["isAdmin()", "(isAdmin() && true)"]) {
+      test(`${name}, if=${guard}: revoked through the function, the element leaves (and returns)`, async () => {
+        const app = compileAndMount(`<role> = "admin"
+<xs> = [1, 2]
+\${ function isAdmin() { return @role == "admin" } }
+<div id="out">${wrap(`<b class="g" if=${guard}>x</b>`)}</div>
+`);
+        const open = name.startsWith("a bare") || name.startsWith("an `if") ? 1 : 2;
+        await expectReactiveGate(app, { cell: "role", off: "user", on: "admin", sel: "#out b.g", openCount: open, startsOpen: true });
+        // No text reader decides the dependencies any more.
+        expect(app.clientJs).not.toMatch(/_scrml_cs_reactive_subscribe\(/);
+      });
+    }
+  }
+});
+
+describe("S469 round 2 — F2: a removed row releases its gate (value bucket + effect)", () => {
+  test("100 rows, `@items = []` then the same ids again × 10: the swaps per two `@sel` writes stay constant", async () => {
+    const patch = `globalThis.__s469l_swaps = 0; { const _orig = _scrml_ifrow_apply; _scrml_ifrow_apply = function (c, e, p, on) { globalThis.__s469l_swaps++; return _orig(c, e, p, on); }; }`;
+    const rowsOf = () => Array.from({ length: 100 }, (_, i) => ({ id: i + 1 }));
+    const app = compileAndMount(`<sel> = 0
+<items> = [${Array.from({ length: 100 }, (_, i) => `{ id: ${i + 1} }`).join(", ")}]
+<div id="out">\${ for (r of @items) { lift <div class="row"><b class="g" if=(@sel == r.id)>E</b></div> } }</div>
+`, "app", patch);
+    expect(app.errors).toEqual([]);
+    await flush();
+    const perCycle = [];
+    let oldRow5 = null;
+    for (let cycle = 0; cycle < 10; cycle++) {
+      oldRow5 = document.querySelectorAll("#out .row")[4];
+      await set("sel", 0);
+      await set("items", []);
+      await set("items", rowsOf());
+      globalThis.__s469l_swaps = 0;
+      await set("sel", 5);
+      await set("sel", 6);
+      perCycle.push(globalThis.__s469l_swaps);
+      expect(count("#out b.g")).toBe(1);
+      // The removed row's updater no longer runs: its gated content stays closed.
+      await set("sel", 5);
+      expect(oldRow5.isConnected).toBe(false);
+      expect(oldRow5.querySelector("b.g")).toBeNull();
+    }
+    expect(perCycle).toEqual(Array(10).fill(3)); // 5 opens (1), then 5 closes + 6 opens (2)
+  });
+
+  test("a non-value-indexed row gate stops running once its row is removed", async () => {
+    const patch = `globalThis.__s469l_swaps = 0; { const _orig = _scrml_ifrow_apply; _scrml_ifrow_apply = function (c, e, p, on) { globalThis.__s469l_swaps++; return _orig(c, e, p, on); }; }`;
+    const app = compileAndMount(`<ok> = true
+<items> = [{ id: 1 }, { id: 2 }]
+<div id="out">\${ for (r of @items) { lift <div class="row"><b class="g" if=@ok>E</b></div> } }</div>
+`, "app", patch);
+    expect(app.errors).toEqual([]);
+    await flush();
+    const counts = [];
+    for (let cycle = 0; cycle < 5; cycle++) {
+      await set("items", []);
+      await set("items", [{ id: 1 }, { id: 2 }]);
+      globalThis.__s469l_swaps = 0;
+      await set("ok", false);
+      await set("ok", true);
+      counts.push(globalThis.__s469l_swaps);
+      expect(count("#out b.g")).toBe(2);
+    }
+    expect(counts).toEqual(Array(5).fill(4)); // 2 live rows × 2 flips — none from removed rows
+  });
+});
+
+describe("S469 round 2 — F4: a gated-off bind:value input writes nothing", () => {
+  test("a held, detached input dispatching `input` does not write the cell", async () => {
+    const app = compileAndMount(`<ok> = true
+<t> = ""
+<div id="out">\${ lift <span><input id="field" if=@ok bind:value=@t></span> }</div>
+`);
+    expect(app.errors).toEqual([]);
+    await flush();
+    const field = document.querySelector("#field");
+    field.value = "live";
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    await flush();
+    expect(get("t")).toBe("live");
+    await set("ok", false);
+    expect(field.isConnected).toBe(false);
+    field.value = "detached";
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    await flush();
+    expect(get("t")).toBe("live");
+  });
+});

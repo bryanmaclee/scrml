@@ -17,6 +17,7 @@ const PAGE = (guard, wrap) => `<pw> = "secret"
 <sel> = "secret"
 \${
     function allowed(p) { return p == "secret" }
+    function granted() { return @pw == "secret" }
 }
 <button id="wrong" onclick=\${ @pw = "wrong" }>go</button>
 <button id="right" onclick=\${ @pw = "secret" }>go</button>
@@ -28,6 +29,9 @@ const GUARDS = [
   ["call", `allowed(@pw)`],
   // A QUOTED condition is an expression (§17.1), not a string: read as a string it is truthy.
   ["quoted", `"allowed(@pw)"`],
+  // S469 round 2 (F1): the cell is read INSIDE the called function — no `@pw` in the attribute text.
+  ["indirect", `granted()`],
+  ["indirect and", `(granted() && true)`],
 ];
 const WRAPS = [
   ["for-lift sole root", (b) => `<div id="out">\${ for (x of @xs) { lift ${b} } }</div>`],
@@ -36,6 +40,7 @@ const WRAPS = [
   ["for-lift multi-root, gated head", (b) => `<div id="out">\${ for (x of @xs) { lift ${b}\n lift <i></i> } }</div>`],
   ["for-lift multi-root, gated tail", (b) => `<div id="out">\${ for (x of @xs) { lift <i></i>\n lift ${b} } }</div>`],
   ["for-lift in for-lift, nested", (b) => `<div id="out">\${ for (y of @xs) { lift <div>\${ for (x of @xs) { lift <span>${b}</span> } }</div> } }</div>`],
+  ["for over a literal, nested", (b) => `<div id="out">\${ for (x of [1]) { lift <span>${b}</span> } }</div>`],
   ["if-lift root", (b) => `<div id="out">\${ if (true) { lift ${b} } }</div>`],
   ["if-lift nested", (b) => `<div id="out">\${ if (true) { lift <span>${b}</span> } }</div>`],
   ["bare lift root", (b) => `<div id="out">\${ lift ${b} }</div>`],

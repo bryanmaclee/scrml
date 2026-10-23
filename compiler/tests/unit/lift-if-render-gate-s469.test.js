@@ -64,17 +64,17 @@ describe("every lifted if= position lowers to the element⇄comment swap, never 
 });
 
 describe("the trigger per context", () => {
-  test("inside a reconciled row: a live-keyed per-item RENDER-GATE effect (`}, true)`)", () => {
+  test("inside a reconciled row: a live-keyed per-item RENDER-GATE effect that disposes itself when the row is gone", () => {
     const r = compile(`<xs> = [{ id: 1, ok: true }]\n<div>\${ for (x of @xs) { lift <span><b if=x.ok>x</b></span> } }</div>\n`);
     expect(r.errors).toEqual([]);
-    expect(r.js).toMatch(/_scrml_resolve_item\([^)]*\);\s*if \(x === null\) return;\s*_scrml_cur_\w+ = _scrml_ifrow_apply\([^\n]*\n\s*\}, true\);/);
+    expect(r.js).toMatch(/let (_scrml_gate_off_\w+) = null;\n\s*\1 = _scrml_effect\(\(\) => \{\n\s*let x = _scrml_resolve_item\([^)]*\);\n\s*if \(x === null\) \{ if \(\1 !== null\) _scrml_g\.queueMicrotask\(\1\); return; \}\n\s*_scrml_cur_\w+ = _scrml_ifrow_apply\([^\n]*\n\s*\}, true\);/);
   });
 
-  test("the value-indexed `@cell == lit` predicate keeps the O(2) subscribe_when dispatch", () => {
+  test("a value-indexed `@cell == lit` predicate in a row keeps the O(2) subscribe_when dispatch", () => {
     const r = compile(`<sel> = 0\n<xs> = [{ id: 1 }]\n<div>\${ for (r of @xs) { lift <span><b if=(@sel == 3)>x</b></span> } }</div>\n`);
     expect(r.errors).toEqual([]);
-    expect(r.js).toMatch(/function (_scrml_if_\w+)\(\) \{ _scrml_cur_\w+ = _scrml_ifrow_apply\(/);
-    expect(r.js).toMatch(/_scrml_cs_reactive_subscribe_when\("sel", 3, _scrml_if_\w+\);/);
+    expect(r.js).toMatch(/const _scrml_vi_v = \(3\);/);
+    expect(r.js).toMatch(/_scrml_cs_reactive_subscribe_when\("sel", _scrml_vi_v, _scrml_if_\w+\);/);
     expect(r.js).not.toMatch(/style\.display\s*=/);
   });
 
@@ -88,7 +88,22 @@ describe("the trigger per context", () => {
     expect(r.js).toMatch(/const _scrml_vi_v = \(r\.id\);/);
     expect(r.js).toMatch(/_scrml_vi_off_\w+ = _scrml_cs_reactive_subscribe_when\("sel", _scrml_vi_v, _scrml_if_\w+\);/);
     expect(r.js).toMatch(/_scrml_untracked\(_scrml_if_\w+\);\n\s*\}, true\);/);
+    // The bucket registration is released with the row (F2, S469 round 2).
+    expect(r.js).toMatch(/if \(r === null\) \{ if \((_scrml_vi_off_\w+) !== null\) \{ \1\(\); \1 = null; \} if \(_scrml_gate_off_\w+ !== null\)/);
     expect(r.js).not.toMatch(/style\.display\s*=/);
+  });
+
+  test("outside a row every gate is a TRACKING effect — no `@name`-token subscriptions (F1, S469 round 2)", () => {
+    for (const wrap of [
+      (b) => `\${ lift <span>${b}</span> }`,
+      (b) => `\${ if (true) { lift <span>${b}</span> } }`,
+      (b) => `\${ for (x of [1, 2]) { lift <span>${b}</span> } }`,
+    ]) {
+      const r = compile(`<role> = "admin"\n\${ function isAdmin() { return @role == "admin" } }\n<div>${wrap(`<b if=(isAdmin() && true)>x</b>`)}</div>\n`);
+      expect(r.errors).toEqual([]);
+      expect(r.js).toMatch(/let (_scrml_cur_\w+) = (_scrml_lift_el_\w+);\n\s*_scrml_effect\(function\(\) \{ \1 = _scrml_ifrow_apply\(\1, \2, _scrml_ph_\w+, \(_scrml_isAdmin_\w+\(\) && true\)\); \}, true\);/);
+      expect(r.js).not.toMatch(/_scrml_cs_reactive_subscribe\(/);
+    }
   });
 
   test("an `if … lift` arm (LIVE): the swap is its own render-gate effect, the element the initial node", () => {
@@ -111,7 +126,7 @@ describe("every if= value kind is read; one that cannot be is refused (fail clos
     const r = compile(`<n> = 0\n<div>\${ lift <span><b if="@n >= 3">x</b></span> }</div>\n`);
     expect(r.errors).toEqual([]);
     expect(r.js).not.toMatch(/\("@n >= 3"\)/);
-    expect(r.js).toMatch(/\(_scrml_cs_reactive_get\("n"\) >= 3\) \? _scrml_lift_el_\w+ : _scrml_ph_\w+/);
+    expect(r.js).toMatch(/_scrml_ifrow_apply\(_scrml_cur_\w+, _scrml_lift_el_\w+, _scrml_ph_\w+, \(_scrml_cs_reactive_get\("n"\) >= 3\)\)/);
   });
 
   test("a bare `if` (no condition) is E-CG-003, not an ungated render", () => {

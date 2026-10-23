@@ -605,13 +605,28 @@ function liftExprReadsRequestState(rewritten) {
  * @param {boolean} [gate] — a RENDER GATE (a markup `if=` swap): the effect is
  *   created with `_scrml_effect(fn, true)` so a write runs it before ordinary
  *   effects (S462 round 7, `_scrml_trigger`), as `<each>` rows do.
+ *   A render gate also DISPOSES itself once its row is gone: when the row's key no
+ *   longer resolves (`_scrml_resolve_item` → null) the reconciler has removed the row
+ *   — a returning key gets a fresh row from the factory — so the effect (and anything
+ *   `onDead` releases, e.g. a value-bucket registration) is released instead of
+ *   staying subscribed and reviving on a later reconcile. The dispose is queued: the
+ *   effect subscribes its run's reads after the body returns.
+ * @param {string} [onDead] — statements run when the row is gone (gate only).
  * @returns {string[]} — either the wrapped effect lines or bodyLines unchanged
  */
-function maybeWrapLiftPerItemEffect(bodyLines, gate = false) {
+function maybeWrapLiftPerItemEffect(bodyLines, gate = false, onDead = "") {
   const ctx = currentLiftReconcileCtx();
   if (!ctx) return bodyLines;
   const out = [];
-  out.push(`_scrml_effect(() => {`);
+  let bail = 'return;';
+  if (gate) {
+    const offVar = genVar("gate_off");
+    out.push(`let ${offVar} = null;`);
+    out.push(`${offVar} = _scrml_effect(() => {`);
+    bail = `{ ${onDead ? onDead + " " : ""}if (${offVar} !== null) _scrml_g.queueMicrotask(${offVar}); return; }`;
+  } else {
+    out.push(`_scrml_effect(() => {`);
+  }
   // Re-resolve the live item by this node's create-time key + replay any item-
   // derived local aliases the body reads (S293), so `item.field` and
   // `let {name}=item` reads hit the live Proxy on every reconcile. ctx.iterVar is
@@ -619,7 +634,7 @@ function maybeWrapLiftPerItemEffect(bodyLines, gate = false) {
   // null-bail (SPEC §42.5 canonical-absence: bail before reading a field off a
   // gone node; the W-CG-UNDEFINED-INTERPOLATION lint forbids the `undefined`
   // keyword in emitted JS, so the bail keys on `=== null`).
-  const prelude = computeItemDerivedReplay(bodyLines.join('\n'), [ctx.iterVar], 'return;');
+  const prelude = computeItemDerivedReplay(bodyLines.join('\n'), [ctx.iterVar], bail);
   for (const l of prelude) out.push('  ' + l);
   for (const l of bodyLines) out.push('  ' + l);
   out.push(gate ? `}, true);` : `});`);
@@ -651,13 +666,17 @@ function pushLiftAttrSet(lines, setStmt) {
 // the user types) and the arm run disposes the sync with the arm.
 function pushLiftBind(lines, elVar, flavor, eventName, varJSON) {
   const initStmt = `${elVar}.${flavor} = _scrml_reactive_get(${varJSON});`;
+  // The input → cell listener is guarded like every lifted handler: a DETACHED element
+  // (an `if=`-gated input while the gate is off, a removed row) writes nothing when an
+  // event is dispatched on a held reference (S469 round 2, F4).
+  const writeListener = guardDetachedListener(`function(_scrml_event) { _scrml_reactive_set(${varJSON}, ${elVar}.${flavor}); }`);
   if (liftLiveWraps(initStmt)) {
     lines.push(`_scrml_effect(function() { ${initStmt} });`);
-    lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function() { _scrml_reactive_set(${varJSON}, ${elVar}.${flavor}); });`);
+    lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${writeListener});`);
     return;
   }
   lines.push(initStmt);
-  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function() { _scrml_reactive_set(${varJSON}, ${elVar}.${flavor}); });`);
+  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${writeListener});`);
   lines.push(`_scrml_reactive_subscribe(${varJSON}, function() { ${elVar}.${flavor} = _scrml_reactive_get(${varJSON}); });`);
 }
 
@@ -678,23 +697,27 @@ function pushLiftBind(lines, elVar, flavor, eventName, varJSON) {
 // is a no-op while `cur` already matches, so a first run inside the row factory
 // (before the reconciler has assigned the key) moves nothing.
 //
-// What re-runs the swap is chosen the way every other lifted binding chooses its
-// trigger — the gate changes WHAT the update does, not WHEN it runs:
+// What re-runs the swap is a TRACKING effect — every read the condition makes is a
+// dependency, a cell read inside a called function (`if=isAdmin()`) and a deep field
+// (`@u.ok`) included. No text reader decides what the gate depends on (S469 round 2:
+// the earlier `@name`-token subscriptions missed a cell read through a call, and the
+// gate stayed open after the cell revoked it):
 //   - inside a reconciled row: a live-keyed per-item RENDER-GATE effect
 //     (maybeWrapLiftPerItemEffect, gate) — re-resolves the row item by key, so a
-//     same-key reconcile and an in-place field write re-evaluate it, and it tracks
-//     every cell the condition reads (g-lift-per-item-if-directive-not-reactive-on-
-//     reconcile);
-//   - EXCEPT the value-indexed select-row predicate `@cell == expr` (S103): it keeps
-//     its `_scrml_reactive_subscribe_when` O(2)-per-write dispatch (an effect would
-//     track the cell in every row → O(N) per write); only the update is now the swap.
-//     When `expr` reads the row, a live-keyed effect follows the row's value and
-//     re-registers the bucket (see below) — the cell stays the bucket's to react to;
-//   - LIVE mode (an `if … lift` arm, outside a row): its own render-gate effect, so
-//     the arm does not re-render on the condition and the arm run owns the effect;
-//     `cur` starts as the element and the effect's synchronous first run settles it;
-//   - otherwise: the updater runs on a write of each `@` cell the condition names
-//     (the enclosing lift group re-runs the whole body on those reads as well).
+//     same-key reconcile and an in-place field write re-evaluate it; it disposes
+//     itself when the row is gone;
+//   - EXCEPT, in a row, the value-indexed select-row predicate `@cell == v` (S103,
+//     `v` a literal or a plain name path — detectPredicateShapeBind): an effect per
+//     row tracking the cell would make every write O(N). The cell is reacted to by
+//     its value bucket (`_scrml_reactive_subscribe_when`, O(2) per write); a live-keyed
+//     render-gate effect re-reads `v` (the row, anything else it reads), moves the
+//     registration when it changes, and applies the swap with the cell read untracked.
+//     The bucket registration is released with the row;
+//   - outside a row: its own render-gate effect. In an `if … lift` arm (LIVE mode)
+//     that effect is the arm's, disposed with the arm, so a flip does not re-render
+//     the arm. A condition reading a name the arm declares is evaluated in the arm's
+//     render instead (the arm re-renders on it — see LIVE mode above: an own effect
+//     would read that local's LATER value).
 //
 // Returns the name of the `cur` variable.
 function emitLiftIfGate(lines, elVar, exprJS, rawText) {
@@ -702,33 +725,16 @@ function emitLiftIfGate(lines, elVar, exprJS, rawText) {
   const curVar = genVar("cur");
   const swap = `${curVar} = _scrml_ifrow_apply(${curVar}, ${elVar}, ${phVar}, (${exprJS}));`;
   lines.push(`const ${phVar} = _scrml_g.document.createComment("scrml-if-row");`);
-  // Extract @-prefixed reactive var names from the raw expression. Strip any
-  // dotted-path tail so `@form.field` subscribes to the compound root `form`.
-  const refs = [...new Set((rawText.match(/@([A-Za-z_$][A-Za-z0-9_$.]*)/g) || []).map(r => r.replace(/^@/, "").split(".")[0]))];
-  const pred = detectPredicateShapeBind(rawText);
-  const valueIndexed = pred.matched && refs.length === 1 && refs[0] === pred.cellName;
-  if (currentLiftReconcileCtx() && !valueIndexed) {
-    lines.push(`let ${curVar} = (${exprJS}) ? ${elVar} : ${phVar};`);
-    for (const l of maybeWrapLiftPerItemEffect([swap], true)) lines.push(l);
-    return curVar;
-  }
-  if (currentLiftReconcileCtx() && valueIndexed && computeItemDerivedReplay(pred.valueExprJS, [], 'return;').length > 0) {
-    // The value-indexed predicate reads the ROW (`@sel == r.id`): its value bucket is
-    // keyed on the row's field, which a same-key reconcile or an in-place write can
-    // change. A bucket registered once under the create-time value would keep firing
-    // (and the updater would read the create-time row) — the gate stays open after
-    // the row revokes it. So a live-keyed render-gate effect follows the row: it
-    // re-reads the field, moves the registration to the new bucket when the value
-    // changes, and applies the swap with the cell read UNTRACKED (the bucket, not the
-    // effect, reacts to the cell — the O(2) dispatch). The updater re-resolves the
-    // row itself, because the bucket calls it outside the effect.
+  const ctx = currentLiftReconcileCtx();
+  const pred = ctx ? detectPredicateShapeBind(rawText) : { matched: false };
+  if (ctx && pred.matched) {
     lines.push(`let ${curVar} = (${exprJS}) ? ${elVar} : ${phVar};`);
     const updaterVar = genVar("if");
     const offVar = genVar("vi_off");
     const keyVar = genVar("vi_key");
-    const ctx = currentLiftReconcileCtx();
     lines.push(`let ${offVar} = null;`);
     lines.push(`let ${keyVar} = null;`);
+    // The bucket calls the updater outside any effect: it re-resolves the row itself.
     lines.push(`function ${updaterVar}() {`);
     for (const l of computeItemDerivedReplay(swap, [ctx.iterVar], 'return;')) lines.push(`  ${l}`);
     lines.push(`  ${swap}`);
@@ -741,22 +747,20 @@ function emitLiftIfGate(lines, elVar, exprJS, rawText) {
       `  ${offVar} = _scrml_reactive_subscribe_when(${JSON.stringify(pred.cellName)}, _scrml_vi_v, ${updaterVar});`,
       `}`,
       `_scrml_untracked(${updaterVar});`,
-    ], true)) lines.push(l);
+    ], true, `if (${offVar} !== null) { ${offVar}(); ${offVar} = null; }`)) lines.push(l);
     return curVar;
   }
-  if (liftLiveWraps(exprJS)) {
-    lines.push(`let ${curVar} = ${elVar};`);
-    lines.push(`_scrml_effect(function() { ${swap} }, true);`);
+  if (ctx) {
+    lines.push(`let ${curVar} = (${exprJS}) ? ${elVar} : ${phVar};`);
+    for (const l of maybeWrapLiftPerItemEffect([swap], true)) lines.push(l);
     return curVar;
   }
-  lines.push(`let ${curVar} = (${exprJS}) ? ${elVar} : ${phVar};`);
-  const updaterVar = genVar("if");
-  lines.push(`function ${updaterVar}() { ${swap} }`);
-  if (valueIndexed) {
-    lines.push(`_scrml_reactive_subscribe_when(${JSON.stringify(pred.cellName)}, ${pred.valueExprJS}, ${updaterVar});`);
-  } else {
-    for (const ref of refs) lines.push(`_scrml_reactive_subscribe(${JSON.stringify(ref)}, ${updaterVar});`);
+  if (_liftLiveActive() && _jsReadsAnyName(exprJS, _liftLiveArmNames())) {
+    lines.push(`let ${curVar} = (${exprJS}) ? ${elVar} : ${phVar};`);
+    return curVar;
   }
+  lines.push(`let ${curVar} = ${elVar};`);
+  lines.push(`_scrml_effect(function() { ${swap} }, true);`);
   return curVar;
 }
 
