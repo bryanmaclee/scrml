@@ -149,7 +149,18 @@ if [ "$HAS_UPDATE" = "1" ]; then
   echo ""
   echo "--- generated-doc currency (mirrors the cloud gate; ~0.3s) ---"
   CURRENCY_FAILED=0
-  if ! bun scripts/facts.ts --check; then CURRENCY_FAILED=1; fi
+  # S469 — FACTS is WARN-only (owner ruling "Regenerate on main after merge"): main regenerates
+  # docs/FACTS.md post-merge (.github/workflows/facts-regen.yml), so a stale table no longer blocks a
+  # push and a branch should not commit a regen. Exit 1 = stale → warn; any other non-zero (2 = zero
+  # measurement, 3 = missing anchor) is a broken instrument/file and still blocks.
+  FACTS_RC=0
+  bun scripts/facts.ts --check >/dev/null 2>&1 || FACTS_RC=$?   # `|| …` — this hook runs under set -e
+  if [ "$FACTS_RC" = "1" ]; then
+    echo "  WARN   docs/FACTS.md figures differ from this tree (non-blocking; regenerated on main after merge)"
+  elif [ "$FACTS_RC" != "0" ]; then
+    bun scripts/facts.ts --check || true
+    CURRENCY_FAILED=1
+  fi
   if ! bun run scripts/regen-spec-index.ts --check >/dev/null 2>&1; then
     echo "  STALE  SPEC-INDEX totals (compiler/SPEC-INDEX.md)"
     CURRENCY_FAILED=1
@@ -157,7 +168,7 @@ if [ "$HAS_UPDATE" = "1" ]; then
   if [ "$CURRENCY_FAILED" = "1" ]; then
     echo ""
     echo "X Generated docs are stale — push blocked (the cloud gate would reject this)."
-    echo "   Fix:  bun scripts/facts.ts --write && bun run scripts/regen-spec-index.ts"
+    echo "   Fix:  bun run scripts/regen-spec-index.ts   (+ bun scripts/facts.ts --write only if the FACTS check failed hard above)"
     echo "   Then amend or add a commit with the regenerated file(s)."
     echo "   NOTE: regenerate AFTER your last content commit, not before it — regenerating"
     echo "         early and then editing compiler/src again is what this gate exists to catch."
