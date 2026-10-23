@@ -69,6 +69,19 @@ fresh node); every enter/exit class assertion kept; added non-emptiness guards s
 cases can no longer pass on zero elements. 16/16 pass. Product transitions verified working in
 happy-dom. Baseline 41 → 27.
 
+## Step 6 — engine harnesses (FIXED, class b — pre-namespacing names/keys)
+
+- `engine-gated-each-populate` §2 (4): captured `__scrml_engine_phase_transitions` and queried
+  `[data-scrml-engine-mount="phase"]`; N4 namespacing emits `__scrml_engine_<token>_phase_…` and
+  `"<token>_phase"` → ReferenceError at mount. Now built from `chunkNamespaceToken`. 9/9.
+- `engine-message-dispatch-s155` (6): the harness drove the RAW runtime
+  `_scrml_engine_dispatch_message("dragPhase", …)`, which reads the UN-namespaced key — no such
+  cell, so every dispatch silently no-op'd (state stayed `Idle`, effects never ran, rule= violation
+  never threw). The compiled `.advance()` call site uses the chunk's `_scrml_cs_engine_dispatch_message`
+  wrapper (verified in scratch emit), which keys through `_scrml_cs_key`; the harness now does the
+  same. The onIdle timer key is likewise `<token>$game::__idle`. 9/9; assertions unchanged.
+- Baseline 27 → 17.
+
 ## Classified, NOT fixed — class c, ALREADY FILED
 
 - `g-each-peritem-markup-value-ternary` (3) and `g-emit-lift-markup-text-interp` (4): `ON ${@.label}` /

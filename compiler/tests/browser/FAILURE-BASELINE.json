@@ -2,15 +2,11 @@
   "_comment": "GENERATED — the browser tier's documented failure NAME SET. Regenerate with `bun scripts/browser-baseline.ts --write`; verify with `--check`. Timings and counts are deliberately excluded (non-deterministic / uninformative). A name LEAVING this list is as much a failure as one joining it: prune it in the same commit that fixes the test.",
   "tier": "compiler/tests/browser",
   "recordedAt": "2026-08-02",
-  "count": 27,
+  "count": 17,
   "failures": [
     "M1 — an <each> list in a swapped region RE-RENDERS > a swapped-in each re-renders after a list change",
     "M1 — an if= mount/unmount controller in a swapped region RE-EVALUATES > a swapped-in if= mounts on true and unmounts on false (not frozen)",
     "M1 — an if= mount/unmount controller in a swapped region RE-EVALUATES > if= re-entry idempotency — nav away+back mounts EXACTLY ONE copy (no double-mount, no leaked scope)",
-    "engine-gated-each §2 — list populates on arm entry (real module-init order) > idempotent re-entry: Loading -> Browsing -> Loading -> Browsing re-renders correctly",
-    "engine-gated-each §2 — list populates on arm entry (real module-init order) > ongoing reactivity: mutating @todos while Browsing is visible re-renders (Mode 1 dep established)",
-    "engine-gated-each §2 — list populates on arm entry (real module-init order) > repro-1 (button): Loading shows no <li>; after transition to Browsing the list populates",
-    "engine-gated-each §2 — list populates on arm entry (real module-init order) > repro-2 (boot effect): boot opener loads todos + transitions; list populates",
     "extended #1 — a show= display-toggle in a swapped region RE-EVALUATES > a swapped-in show= toggle updates on a cell change (not frozen)",
     "finding #1 — the swapped region stays REACTIVE (not frozen) > a `${@cell}` in a swapped region UPDATES after a cell mutation",
     "finding #2 — the OLD region's reactivity is torn down (no leak) > the swapped-out region's effect STOPS updating after nav",
@@ -24,13 +20,7 @@
     "navigate-wave1c — an ENGINE route loaded cross-chunk renders + transitions > first cross-chunk visit: the initial arm renders after the swap, and a variant transition re-renders",
     "navigate-wave1c — cross-chunk soft navigation loads the chunk + swaps > the swapped route's reactivity works AFTER the cross-chunk swap (@cell + <each> re-render)",
     "navigate-wave1c — finding #5: a MUTATED reactive shell cell survives a cross-chunk nav > the injected route chunk's eager boot + seed-apply does NOT reset a mutated shell cell",
-    "§20.8.2 step 3 — rehydration re-wires the swapped region > a non-delegable handler in the swapped-in region fires after rehydration",
-    "§51.0.S.2.6 no-arm-for-message — runtime no-op > a message dispatched in a state with NO arms for it is a no-op (.Off declares none)",
-    "§51.0.S.2.7 arm-target rule= violation — runtime E-ENGINE-INVALID-TRANSITION > an arm resolving a target not in the from-state rule= throws E-ENGINE-INVALID-TRANSITION",
-    "§51.0.S.3 same-state arm — effect runs, onIdle resets, onTransition does NOT fire > .Tick (same-state arm) RESETS the <onIdle> watchdog — §51.0.R handled-message reset",
-    "§51.0.S.3 same-state arm — effect runs, onIdle resets, onTransition does NOT fire > .Tick in .Playing resolving .Playing RUNS the effect (@score increments)",
-    "§51.0.S.6 worked example — drag flow (happy-dom runtime) > .advance(.Drop(col)) from .Dragging runs the arm body effect (both payload planes) AND transitions to .Idle",
-    "§51.0.S.6 worked example — drag flow (happy-dom runtime) > .advance(.Start(id)) transitions Idle → Dragging carrying the id payload"
+    "§20.8.2 step 3 — rehydration re-wires the swapped region > a non-delegable handler in the swapped-in region fires after rehydration"
   ],
   "envExcluded": [
     {
