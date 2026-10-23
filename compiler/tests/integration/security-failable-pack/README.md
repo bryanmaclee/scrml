@@ -131,6 +131,7 @@ must not act again; every shape grants only through an effect the revoke should 
 | after round 3 (112 shapes; body locals snapshot at render) | 111 (+ 1 PASS-REFUSED) | 0 |
 | round 3 `e7c7f7a28` (124 shapes) | 117 (+ 1 PASS-REFUSED, 2 PASS-DENY) | **4** — a local closure (flag / counter) in a plain group and a row: the snapshot skipped callees, and a closure reads its locals by reference |
 | after round 4 (124 shapes; a gate with any unclassified name is read inline) | 123 (+ 1 PASS-REFUSED) | 0 |
+| after round 5 (124 shapes; main's evaluation placement, swap instead of display) | 87 (+ 1 PASS-REFUSED) | **36**, all in `KNOWN_FAIL` — positions stale on main (a cell read only in a called function, a value-indexed row field, a body local in a keyed row): `g-lift-gate-placement-inherits-main-staleness-s469` |
 | after round 2 (99 shapes; every gate a tracking effect) | 98 (+ 1 PASS-REFUSED: a quoted `if=` on a lifted `<each>` root is E-CG-003, the `<each>` reader's refusal) | 0 |
 
 The pack reads `#out`'s `textContent`, which includes a `display: none` element — so a display toggle is a

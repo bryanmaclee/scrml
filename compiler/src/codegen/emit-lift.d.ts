@@ -23,6 +23,8 @@ export interface LiftReconcileCtx {
   iterVar: string;
   /** Item-derived local decls replayed per item (see scanItemDerivedLocals). */
   itemDerivedLocals: Array<{ bindNames: string[]; node: object; init: string }>;
+  /** The single markup root of the per-item body, when there is exactly one. */
+  soleRootMarkupNode: object | null;
 }
 
 export declare function pushLiftReconcileCtx(ctx: LiftReconcileCtx): void;
@@ -43,7 +45,6 @@ export declare function liftNonKeyedActive(): boolean;
 
 /** Restore every emit-lift module stack / counter to its initial value (head of every runCG). */
 export declare function resetLiftModuleState(): void;
-export declare function setLiftFileFunctionNames(names: Iterable<string> | null | undefined): void;
 
 /** Build a reconcile ctx (call BEFORE pushing it — the item-local scan reads the ancestor stack). */
 export declare function buildLiftReconcileCtx(

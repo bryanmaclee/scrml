@@ -63,54 +63,58 @@ describe("every lifted if= position lowers to the element⇄comment swap, never 
   }
 });
 
-describe("the trigger per context", () => {
-  test("inside a reconciled row: a live-keyed per-item RENDER-GATE effect that disposes itself when the row is gone", () => {
+describe("S469 round 5 — main's evaluation placement, kept exactly; only the DOM operation is the swap", () => {
+  test("A: the sole root of a reconciled row — the per-item effect main already had", () => {
+    const r = compile(`<ok> = true\n<xs> = [{ id: 1 }]\n<div>\${ for (x of @xs) { lift <b if=@ok>x</b> } }</div>\n`);
+    expect(r.errors).toEqual([]);
+    expect(r.js).toMatch(/let (_scrml_cur_\w+) = \(_scrml_cs_reactive_get\("ok"\)\) \? _scrml_lift_el_\w+ : _scrml_ph_\w+;\n\s*_scrml_effect\(\(\) => \{\n\s*let x = _scrml_resolve_item\([^\n]*\n\s*if \(x === null\) return;\n\s*\1 = _scrml_ifrow_apply\(/);
+  });
+
+  test("B: a nested element whose condition reads the row — a per-item effect (main's tryEmitLiftIfReactive)", () => {
     const r = compile(`<xs> = [{ id: 1, ok: true }]\n<div>\${ for (x of @xs) { lift <span><b if=x.ok>x</b></span> } }</div>\n`);
     expect(r.errors).toEqual([]);
-    expect(r.js).toMatch(/let (_scrml_gate_off_\w+) = null;\n\s*\1 = _scrml_effect\(\(\) => \{\n\s*let x = _scrml_resolve_item\([^)]*\);\n\s*if \(x === null\) \{ if \(\1 !== null\) _scrml_g\.queueMicrotask\(\1\); return; \}\n\s*_scrml_cur_\w+ = _scrml_ifrow_apply\([^\n]*\n\s*\}, true\);/);
+    expect(r.js).toMatch(/let (_scrml_cur_\w+) = _scrml_lift_el_\w+;\n\s*_scrml_effect\(\(\) => \{\n\s*let x = _scrml_resolve_item\([^\n]*\n\s*if \(x === null\) return;\n\s*\1 = _scrml_ifrow_apply\(\1, _scrml_lift_el_\w+, _scrml_ph_\w+, \(x\.ok\)\);/);
   });
 
-  test("a value-indexed `@cell == lit` predicate in a row keeps the O(2) subscribe_when dispatch", () => {
-    const r = compile(`<sel> = 0\n<xs> = [{ id: 1 }]\n<div>\${ for (r of @xs) { lift <span><b if=(@sel == 3)>x</b></span> } }</div>\n`);
-    expect(r.errors).toEqual([]);
-    expect(r.js).toMatch(/const _scrml_vi_v = \(3\);/);
-    expect(r.js).toMatch(/_scrml_cs_reactive_subscribe_when\("sel", _scrml_vi_v, _scrml_if_\w+\);/);
-    expect(r.js).not.toMatch(/style\.display\s*=/);
-  });
-
-  test("a value-indexed predicate that reads the ROW (`@sel == r.id`): the bucket follows the live row", () => {
-    const r = compile(`<sel> = 0\n<xs> = [{ id: 1 }]\n<div>\${ for (r of @xs) { lift <span><b if=(@sel == r.id)>x</b></span> } }</div>\n`);
-    expect(r.errors).toEqual([]);
-    // The updater re-resolves the row (the bucket calls it outside any effect) ...
-    expect(r.js).toMatch(/function _scrml_if_\w+\(\) \{\n\s*let r = _scrml_resolve_item\([^)]*\);\n\s*if \(r === null\) return;\n\s*_scrml_cur_\w+ = _scrml_ifrow_apply\(/);
-    // ... and a render-gate effect re-reads the row's value, moves the registration, and swaps
-    // with the cell read untracked (the bucket, not the effect, reacts to the cell).
-    expect(r.js).toMatch(/const _scrml_vi_v = \(r\.id\);/);
-    expect(r.js).toMatch(/_scrml_vi_off_\w+ = _scrml_cs_reactive_subscribe_when\("sel", _scrml_vi_v, _scrml_if_\w+\);/);
-    expect(r.js).toMatch(/_scrml_untracked\(_scrml_if_\w+\);\n\s*\}, true\);/);
-    // The bucket registration is released with the row (F2, S469 round 2).
-    expect(r.js).toMatch(/if \(r === null\) \{ if \((_scrml_vi_off_\w+) !== null\) \{ \1\(\); \1 = null; \} if \(_scrml_gate_off_\w+ !== null\)/);
-    expect(r.js).not.toMatch(/style\.display\s*=/);
-  });
-
-  test("outside a row every gate is a TRACKING effect — no `@name`-token subscriptions (F1, S469 round 2)", () => {
-    for (const wrap of [
-      (b) => `\${ lift <span>${b}</span> }`,
-      (b) => `\${ if (true) { lift <span>${b}</span> } }`,
-      (b) => `\${ for (x of [1, 2]) { lift <span>${b}</span> } }`,
-    ]) {
-      const r = compile(`<role> = "admin"\n\${ function isAdmin() { return @role == "admin" } }\n<div>${wrap(`<b if=(isAdmin() && true)>x</b>`)}</div>\n`);
-      expect(r.errors).toEqual([]);
-      expect(r.js).toMatch(/let (_scrml_cur_\w+) = (_scrml_lift_el_\w+);\n\s*_scrml_effect\(function\(\) \{ \1 = _scrml_ifrow_apply\(\1, \2, _scrml_ph_\w+, \(_scrml_isAdmin_\w+\(\) && true\)\); \}, true\);/);
-      expect(r.js).not.toMatch(/_scrml_cs_reactive_subscribe\(/);
-    }
-  });
-
-  test("an `if … lift` arm (LIVE): the swap is its own render-gate effect, the element the initial node", () => {
+  test("C: LIVE mode in an `if … lift` arm — the updater is its own (arm-owned) effect", () => {
     const r = compile(`<ok> = true\n<show> = true\n<div>\${ if (@show) { lift <p><b if=@ok>x</b></p> } }</div>\n`);
     expect(r.errors).toEqual([]);
-    expect(r.js).toMatch(/let (_scrml_cur_\w+) = (_scrml_lift_el_\w+);\n\s*_scrml_effect\(function\(\) \{ \1 = _scrml_ifrow_apply\(\1, \2, /);
-    expect(r.js).toMatch(/_scrml_ifrow_apply\([^\n]*\); \}, true\);/);
+    expect(r.js).toMatch(/function (_scrml_if_\w+)\(\) \{ _scrml_cur_\w+ = _scrml_ifrow_apply\([^\n]*\); \}\n\s*_scrml_effect\(\1\);/);
+  });
+
+  test("D: elsewhere — evaluated where the element is built, plus main's updater subscriptions", () => {
+    const r = compile(`<ok> = true\n<div>\${ lift <span><b if=@ok>x</b></span> }</div>\n`);
+    expect(r.errors).toEqual([]);
+    expect(r.js).toMatch(/function (_scrml_if_\w+)\(\) \{ _scrml_cur_\w+ = _scrml_ifrow_apply\([^\n]*\); \}\n\s*\1\(\);\n\s*_scrml_mount_track\(_scrml_cs_reactive_subscribe\("ok", \1\)\);/);
+  });
+
+  test("D, value-indexed in a row: main's O(2) bucket, its release registered with the row's owner scope", () => {
+    const r = compile(`<sel> = 0\n<xs> = [{ id: 1 }]\n<div>\${ for (r of @xs) { lift <span><b if=(@sel == r.id)>x</b></span> } }</div>\n`);
+    expect(r.errors).toEqual([]);
+    expect(r.js).toMatch(/_scrml_mount_track\(_scrml_cs_reactive_subscribe_when\("sel", r\.id, _scrml_if_\w+\)\);/);
+  });
+
+  test("a body local / a local closure: read where main reads it (inline, placement D), never snapshot", () => {
+    const r = compile(`<n> = 1\n<div>\${ let ok = false\n const allowed = () => ok || @n > 5\n lift <span><b if=(allowed())>x</b></span>\n ok = true }</div>\n`);
+    expect(r.errors).toEqual([]);
+    expect(r.js).toMatch(/function (_scrml_if_\w+)\(\) \{ _scrml_cur_\w+ = _scrml_ifrow_apply\(_scrml_cur_\w+, _scrml_lift_el_\w+, _scrml_ph_\w+, \(allowed\(\)\)\); \}\n\s*\1\(\);/);
+    expect(r.js).not.toMatch(/style\.display\s*=/);
+  });
+
+  test("show= (main ignored it) takes the same placements: B in a row, D elsewhere", () => {
+    const row = compile(`<xs> = [{ id: 1, on: true }]\n<div>\${ for (x of @xs) { lift <span><b show=x.on>x</b></span> } }</div>\n`);
+    expect(row.errors).toEqual([]);
+    expect(row.js).not.toMatch(/setAttribute\("show"/);
+    expect(row.js).toMatch(/_scrml_effect\(\(\) => \{\n\s*let x = _scrml_resolve_item\([^\n]*\n[^\n]*\n\s*_scrml_lift_el_\w+\.style\.display = \(x\.on\) \? "" : "none";/);
+    const bare = compile(`<on> = true\n<div>\${ lift <span><b show=@on>x</b></span> }</div>\n`);
+    expect(bare.errors).toEqual([]);
+    expect(bare.js).toMatch(/function (_scrml_show_\w+)\(\) \{ _scrml_lift_el_\w+\.style\.display = \(_scrml_cs_reactive_get\("on"\)\) \? "" : "none"; \}\n\s*\1\(\);\n\s*_scrml_mount_track\(_scrml_cs_reactive_subscribe\("on", \1\)\);/);
+  });
+
+  test("the swap ships in its own `ifrow` chunk: no reconciler for a list-free page", () => {
+    const r = compile(`<ok> = true\n<div>\${ lift <span><b if=@ok>x</b></span> }</div>\n`);
+    expect(r.runtime).toMatch(/function _scrml_ifrow_apply\(/);
+    expect(r.runtime).not.toMatch(/function _scrml_reconcile_list\(/);
   });
 });
 
@@ -147,14 +151,11 @@ describe("an <each> that IS the lifted root goes through the shared <each> lower
 });
 
 describe("S469 round 2 — show=, the top-level bare `if`, and a component's `@` refs in lifted markup", () => {
-  test("lifted `show=` is a tracking display toggle, not a plain attribute", () => {
-    const row = compile(`<on> = true\n<xs> = [1]\n<div>\${ for (x of @xs) { lift <span><b show=@on>x</b></span> } }</div>\n`);
-    expect(row.errors).toEqual([]);
-    expect(row.js).not.toMatch(/setAttribute\("show"/);
-    expect(row.js).toMatch(/_scrml_effect\(\(\) => \{\n\s*let x = _scrml_resolve_item\([^\n]*\n[^\n]*\n\s*_scrml_lift_el_\w+\.style\.display = \(_scrml_cs_reactive_get\("on"\)\) \? "" : "none";/);
-    const bare = compile(`<on> = true\n<div>\${ lift <span><b show=@on>x</b></span> }</div>\n`);
-    expect(bare.errors).toEqual([]);
-    expect(bare.js).toMatch(/_scrml_effect\(function\(\) \{ _scrml_lift_el_\w+\.style\.display = \(_scrml_cs_reactive_get\("on"\)\) \? "" : "none"; \}\);/);
+  test("lifted `show=` is a display toggle, not a plain attribute", () => {
+    const r = compile(`<on> = true\n<xs> = [1]\n<div>\${ for (x of @xs) { lift <span><b show=@on>x</b></span> } }</div>\n`);
+    expect(r.errors).toEqual([]);
+    expect(r.js).not.toMatch(/setAttribute\("show"/);
+    expect(r.js).toMatch(/style\.display = \(_scrml_cs_reactive_get\("on"\)\) \? "" : "none";/);
   });
 
   test("a bare `show` in lifted markup is E-CG-003", () => {
@@ -174,40 +175,5 @@ describe("S469 round 2 — show=, the top-level bare `if`, and a component's `@`
     expect(r.js).not.toMatch(/\(ok\)|, ok\)|!!\(ok\)/);
     expect(r.js).toMatch(/classList\.toggle\("on", !!\(_scrml_cs_reactive_get\("ok"\)\)\)/);
     expect(r.js).toMatch(/setAttribute\("title", _scrml_cs_reactive_get\("ok"\)\)/);
-  });
-});
-
-describe("S469 round 4 — a gate is its own effect only when its condition is self-contained", () => {
-  test("a body local: read inline in the render (main's lowering), no own effect", () => {
-    const r = compile(`<n> = 1\n<div>\${ let i = 0\n while (i < 3) { lift <span><b if=(i == @n)>x</b></span>\n i = i + 1 } }</div>\n`);
-    expect(r.errors).toEqual([]);
-    expect(r.js).toMatch(/let _scrml_cur_\w+ = \(_scrml_structural_eq\(i, _scrml_cs_reactive_get\("n"\)\)\) \? _scrml_lift_el_\w+ : _scrml_ph_\w+;/);
-    expect(r.js).not.toMatch(/_scrml_ifrow_apply\(/);
-  });
-
-  test("a local closure: inline, never an effect", () => {
-    const r = compile(`<n> = 1\n<div>\${ let ok = false\n const allowed = () => ok || @n > 5\n lift <span><b if=(allowed())>x</b></span>\n ok = true }</div>\n`);
-    expect(r.errors).toEqual([]);
-    expect(r.js).toMatch(/let _scrml_cur_\w+ = \(allowed\(\)\) \? /);
-    expect(r.js).not.toMatch(/_scrml_ifrow_apply\(/);
-  });
-
-  test("a keyed loop whose gate reads a local is lowered plain (the group re-runs it)", () => {
-    const r = compile(`<n> = 1\n<rows> = [{ id: 1 }]\n<div>\${ let ok = false\n const allowed = () => ok || @n > 5\n for (row of @rows) { lift <b if=(allowed())>x</b> }\n ok = true }</div>\n`);
-    expect(r.errors).toEqual([]);
-    expect(r.js).not.toMatch(/_scrml_reconcile_list\(/);
-  });
-
-  test("a file-level function, a cell, the row item: self-contained — own effect, keyed row kept", () => {
-    const r = compile(`<role> = "admin"\n<rows> = [{ id: 1, ok: true }]\n\${ function isAdmin() { return @role == "admin" } }\n<div>\${ for (row of @rows) { lift <b if=(isAdmin() && row.ok)>x</b> } }</div>\n`);
-    expect(r.errors).toEqual([]);
-    expect(r.js).toMatch(/_scrml_reconcile_list\(/);
-    expect(r.js).toMatch(/_scrml_ifrow_apply\(/);
-  });
-
-  test("an arrow parameter inside the condition is not a free name", () => {
-    const r = compile(`<xs> = [1]\n<div>\${ lift <span><b if=(@xs.some(v => v > 0))>x</b></span> }</div>\n`);
-    expect(r.errors).toEqual([]);
-    expect(r.js).toMatch(/_scrml_effect\(function\(\) \{ _scrml_cur_\w+ = _scrml_ifrow_apply\(/);
   });
 });

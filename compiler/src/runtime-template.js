@@ -1567,31 +1567,17 @@ function _scrml_lift(factoryOrElement) {
 // closure at call-time (after module init, so no TDZ issue).
 let _scrml_lift_target = null;
 
-// S469 — an if-lift arm render is an owner scope (§6.7.2) when the 'owner' chunk ships, so
-// the rows of a list it renders die with the render; without the chunk these are no-ops
-// (named only here, so a list-free file does not ship the owner chunk for its arms).
-function _scrml_lift_arm_scope_open(host) {
-  if (typeof _scrml_scope_recs === "undefined") return null;
-  const sid = _scrml_scope_open("as", _scrml_mount_owner(host));
-  host._scrml_arm_sid = sid;
-  return sid;
-}
-function _scrml_lift_arm_scope_run(sid, fn) {
-  return sid === null ? fn() : _scrml_in_scope(sid, fn);
-}
-function _scrml_lift_arm_scope_close(host, sid) {
-  if (sid === null) return;
-  if (host._scrml_arm_sid === sid) host._scrml_arm_sid = undefined;
-  _scrml_owner_destroy(sid);
-}
 
+
+
+// §17.1 if= render-gate swap (chunk: 'ifrow') — its own chunk (S469): shipped only when the
+// emitted code calls it, so neither a list-free lift page nor a gate-free list pays for it.
 /**
  * §17.1 if= render gate (<each> rows and lifted markup): put \`el\` (on) or the placeholder
  * comment \`ph\` (off) where \`cur\` is, returning the node now in the DOM. A list row's
  * tracking (\`_scrml_key\`, group membership, owner scope) moves with it, so reorder /
  * delete act on the live node. A no-op while \`cur\` already matches (the first run inside
- * a row factory, before the key is assigned). In the 'lift' chunk (S469 round 4), so a
- * list-free page does not ship the reconciler for it.
+ * a row factory, before the key is assigned).
  */
 function _scrml_ifrow_apply(cur, el, ph, on) {
   const want = on ? el : ph;
@@ -1868,6 +1854,7 @@ function _scrml_arm_scope(mount, wire) {
   if (_scrml_scope_gone(owner)) teardown();
   return teardown;
 }
+
 
 // ---------------------------------------------------------------------------
 // §17.1 if= mount/unmount runtime (chunk: 'ifmount')
