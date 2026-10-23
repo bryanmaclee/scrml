@@ -709,16 +709,37 @@ function _liftReadsRow(exprJS) {
   return !!currentLiftReconcileCtx() && computeItemDerivedReplay(exprJS, [], 'return;').length > 0;
 }
 /**
+ * S469 round 6 — a lift emitted with no container inside a reconciled row factory goes to
+ * the AMBIENT target (`_scrml_lift(…)`), not into the row's fragment (a `while` in a row:
+ * g-while-lift-in-reconciled-row-escapes-the-row-s469). Its elements outlive the row
+ * scope — which the reconciler drops at mount when the factory returns nothing — so their
+ * updater subscriptions must not be registered with it. Counted on the row's ctx; a list
+ * nested inside the escaped markup has its own ctx and is unaffected.
+ */
+function _withLiftTarget(ambient, fn) {
+  const ctx = ambient ? currentLiftReconcileCtx() : null;
+  if (ctx) ctx.ambientLiftDepth = (ctx.ambientLiftDepth ?? 0) + 1;
+  try { return fn(); } finally { if (ctx) ctx.ambientLiftDepth -= 1; }
+}
+function _liftLandsOutsideRow() {
+  const ctx = currentLiftReconcileCtx();
+  return !!(ctx && ctx.ambientLiftDepth > 0);
+}
+
+/**
  * Main's updater subscriptions (placement D) — the same triggers. Each one's release is
  * registered with the owner scope open where the element is built (a row, an arm render,
  * an if= mount — #1508's tree; none at top level), so a removed row / arm stops running
  * them. Release only: what triggers the update is unchanged.
  */
 function _liftPushUpdaterSubscriptions(lines, updaterVar, refs, pred, valueIndexed) {
+  // An element that does not land in the row it is built in (see _withLiftTarget) keeps
+  // main's plain subscriptions: no owner scope owns it.
+  const wrap = _liftLandsOutsideRow() ? (c) => c : (c) => `_scrml_mount_track(${c})`;
   if (valueIndexed) {
-    lines.push(`_scrml_mount_track(_scrml_reactive_subscribe_when(${JSON.stringify(pred.cellName)}, ${pred.valueExprJS}, ${updaterVar}));`);
+    lines.push(`${wrap(`_scrml_reactive_subscribe_when(${JSON.stringify(pred.cellName)}, ${pred.valueExprJS}, ${updaterVar})`)};`);
   } else {
-    for (const ref of refs) lines.push(`_scrml_mount_track(_scrml_reactive_subscribe(${JSON.stringify(ref)}, ${updaterVar}));`);
+    for (const ref of refs) lines.push(`${wrap(`_scrml_reactive_subscribe(${JSON.stringify(ref)}, ${updaterVar})`)};`);
   }
 }
 function emitLiftIfGate(lines, elVar, exprJS, rawText, node = null) {
@@ -3405,6 +3426,9 @@ export function emitIfStmtWithContainer(ifNode, containerElVar, opts = {}) {
  *   instead of `_scrml_lift(factory)`. Used by reactive list render functions (§6.5.3).
  */
 export function emitConsolidatedLift(body, opts = {}) {
+  return _withLiftTarget(!(opts.containerVar ?? null) && !(opts.directReturn ?? false), () => _emitConsolidatedLift(body, opts));
+}
+function _emitConsolidatedLift(body, opts = {}) {
   // Find the first lift-expr
   const liftIdx = body.findIndex(n => n && n.kind === "lift-expr");
   if (liftIdx === -1) return "";
@@ -3902,6 +3926,9 @@ export function emitConsolidatedLift(body, opts = {}) {
  * @returns {string}
  */
 export function emitLiftExpr(node, opts = {}) {
+  return _withLiftTarget(!(opts.containerVar ?? null), () => _emitLiftExpr(node, opts));
+}
+function _emitLiftExpr(node, opts = {}) {
   if (!node || !node.expr) return "";
 
   const containerVar = opts.containerVar ?? null;

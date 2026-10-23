@@ -1567,9 +1567,7 @@ function _scrml_lift(factoryOrElement) {
 // closure at call-time (after module init, so no TDZ issue).
 let _scrml_lift_target = null;
 
-
-
-
+// ---------------------------------------------------------------------------
 // §17.1 if= render-gate swap (chunk: 'ifrow') — its own chunk (S469): shipped only when the
 // emitted code calls it, so neither a list-free lift page nor a gate-free list pays for it.
 /**
@@ -1854,7 +1852,6 @@ function _scrml_arm_scope(mount, wire) {
   if (_scrml_scope_gone(owner)) teardown();
   return teardown;
 }
-
 
 // ---------------------------------------------------------------------------
 // §17.1 if= mount/unmount runtime (chunk: 'ifmount')
@@ -2867,7 +2864,6 @@ function _scrml_resolve_item(container, key) {
   // raw object.
   return _scrml_deep_reactive(_v);
 }
-
 
 /**
  * Compute the indices of the Longest Increasing Subsequence.

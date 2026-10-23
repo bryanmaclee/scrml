@@ -26486,6 +26486,9 @@ DOM as `display: none`), and are now stale with the content removed — the same
 | a body local / local closure read in a keyed row (`let ok = false; … lift <b if=(ok …)> …; ok = true`), a mutated local array in an arm or row | D's updater re-reads the local's FINAL value when the cell changes | pack `n23` "body local (row)" (2); browser round-3 / F-A row and arm cases (8) |
 | a file function reading a file-level `let` mutated after render (M1) | the function's cell read is not in the text, and the group is not re-run | browser "M1b" |
 
+Also (round-5 final review, F2, left as is — main refused the shape): at a sole row root, a body local written after
+the lift makes `show=` (the per-item effect re-reads the final value) and `if=` (placement A, likewise) disagree with
+the render-time value; main compiled neither.
 Also found by the review, recorded here: a `function` declared in a group body over a group `let` (M1a) is
 hoisted to file level and throws `ReferenceError` at its first call (fails loud, main too); a destructured row
 binder `for ({ id } of @rows)` is refused `E-CODEGEN-INVALID-LOGIC` (main too). The visible set of the review's
@@ -26521,7 +26524,7 @@ verify compares the runtime too). Round 5 also registers main's per-`@name` upda
 scope. Measured: buckets 2,2,…,2 over 10 arm toggles (was 2 → 4 → 6 → 8) and over 10
 outer-row removals; the live rows alone swap on `@sel` writes. Pins: browser `lift-if-render-gate-s469` "F2".
 
-### g-while-lift-in-reconciled-row-escapes-the-row-s469 — a `while` loop inside a reconciled `${ for (r of @rows) { … } }` row lifts its markup OUTSIDE the list, duplicated, and the `if=` gates in it FREEZE at their render-time value — a revoked guard stays open (fail-open) — `NEW S469; HIGH; open`
+### g-while-lift-in-reconciled-row-escapes-the-row-s469 — a `while` loop inside a reconciled `${ for (r of @rows) { … } }` row lifts its markup OUTSIDE the list (the ambient target), duplicated per render; its gates still toggle, but the escaped content is outside the list's reconcile and its text interpolations are frozen — `NEW S469; HIGH; open`
 <!-- @gap id=g-while-lift-in-reconciled-row-escapes-the-row-s469 sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts(the row factory routes lift-expr / if-stmt / for-stmt children to the row fragment; a while-stmt falls to emitLogicNode, whose lift is the global `_scrml_lift(…)`) prov=empirical:S469(s469-lift-if-render-gate rounds 3-4, reproduced on main 0a2d747d3 and on the branch);review:s469-lift-if-render-gate-round-3(F-B) -->
 
 Found while writing the round-3 tests; raised MED → HIGH by the review of `e7c7f7a28` (F-B). Measured S469 in
@@ -26533,6 +26536,17 @@ i = i + 1 } } }</div>`:
 |---|---|---|---|
 | main `0a2d747d3` | 0 / 4 | 0 / 4 (text still in the page) | 0 / 8 |
 | branch (round 4) | 0 / 4 | 0 / **4 — still mounted** | 0 / 4 |
+
+**Corrected S469 round 6** (review of `3214a9a60`): on main the escaped gates keep TOGGLING (`display`), and on this
+branch they keep swapping — the visible set after `@pw = "wrong"` equals main's (0 visible), so the row above
+reads: the elements are still in the page on main (`display: none`, text present), absent here. What is frozen is
+the escaped markup's TEXT (`textContent` / interpolations read the loop local's final value) and its place: it sits
+outside `#out`, is duplicated by every render, and is never removed by the row's reconcile. Round 5 regressed this
+(the escaped gates' subscriptions were registered with the row's owner scope, which the reconciler drops at mount
+when the factory returns nothing — SECRET stayed visible with 0 subscribers); round 6 registers them only when the
+element lands in the row (`_withLiftTarget` / `_liftLandsOutsideRow`). Pinned by the browser block "S469 round 6"
+(18 shapes: plain row, nested row, row in `<each>`, arm→row, arm-else→row, arm inside a row × a cell / value-indexed
+/ counter condition — head's visible set equals main's at every step).
 
 The while body's lift is emitted as the global `_scrml_lift(() => …)` — the ambient target, which is null during a
 reconcile, so the `[data-scrml-lift-target]` / `document.body` fallback — and the row factory returns

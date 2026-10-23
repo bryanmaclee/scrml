@@ -352,9 +352,9 @@ describe("§3 the 16 KB aspiration, measured on both shapes", () => {
 // ---------------------------------------------------------------------------
 
 /**
- * The §17.1 if= swap (`_scrml_ifrow_apply`) is its own `ifrow` chunk and the if-lift
- * arm owner-scope wrappers their own `liftarm` chunk, each shipped only when the emitted
- * code names it. Rounds 1–4 of the lane put the swap in `reconciliation` (a one-gate,
+ * The §17.1 if= swap (`_scrml_ifrow_apply`) is its own `ifrow` chunk, shipped only when the
+ * emitted code calls it (the if-lift arm's owner scope is typeof-guarded client code, emitted
+ * only when the file has owner-tracked content — no runtime bytes). Rounds 1–4 of the lane put the swap in `reconciliation` (a one-gate,
  * list-free page shipped the reconciler + owner tree: +86%) and then in `lift` (every
  * lift page paid for it). Measured with this file's pinned compressor, stripped:
  *

@@ -177,3 +177,23 @@ describe("S469 round 2 — show=, the top-level bare `if`, and a component's `@`
     expect(r.js).toMatch(/setAttribute\("title", _scrml_cs_reactive_get\("ok"\)\)/);
   });
 });
+
+describe("S469 round 6 — the if-lift arm helper is owner-scoped only where it can own something", () => {
+  test("an arm with no list / owner-tracked content: main's helper, byte for byte (no scope code)", () => {
+    const r = compile(`<show> = true\n<n> = 1\n<div>\${ if (@show) { lift <p>\${@n}</p> } }</div>\n`);
+    expect(r.errors).toEqual([]);
+    expect(r.js).toMatch(/function _scrml_lift_arm_run\(/);
+    expect(r.js).not.toMatch(/_scrml_arm_sid|_scrml_scope_open/);
+  });
+  test("an arm over a list: the scoped helper, its tree calls typeof-guarded", () => {
+    const r = compile(`<show> = true\n<sel> = 0\n<items> = [{ id: 1 }]\n<div>\${ if (@show) { for (r of @items) { lift <div><b if=(@sel == r.id)>E</b></div> } } }</div>\n`);
+    expect(r.errors).toEqual([]);
+    expect(r.js).toMatch(/if \(typeof _scrml_scope_open === "function" && typeof _scrml_mount_owner === "function"\) \{ sid = _scrml_scope_open\("as", _scrml_mount_owner\(host\)\);/);
+  });
+  test("a lift that escapes its row (a while in a row) keeps main's plain subscriptions", () => {
+    const r = compile(`<ok> = true\n<rows> = [{ id: 1 }]\n<div>\${ for (row of @rows) { let i = 0\n while (i < 1) { lift <b if=@ok>S</b>\n i = i + 1 } } }</div>\n`);
+    expect(r.errors).toEqual([]);
+    expect(r.js).toMatch(/\n\s*_scrml_cs_reactive_subscribe\("ok", _scrml_if_\w+\);/);
+    expect(r.js).not.toMatch(/_scrml_mount_track\(_scrml_cs_reactive_subscribe\("ok"/);
+  });
+});

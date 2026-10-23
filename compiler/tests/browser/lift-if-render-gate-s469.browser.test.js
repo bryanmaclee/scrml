@@ -810,3 +810,1589 @@ describe("S469 round 5 — the review's H1–H4 / M1 shapes: the gate's RESULT i
     expect(app.errors).toContain("E-CODEGEN-INVALID-LOGIC");
   });
 });
+
+describe("S469 round 6 — a `while` inside a reconciled row: head's visible set is main's at every step", () => {
+  // The while body lifts to the AMBIENT target, outside the row (g-while-lift-in-reconciled-row-escapes-the-row-s469,
+  // HIGH, main too). Round 5 registered those escaped gates' subscriptions with the row's owner scope, which the
+  // reconciler drops at mount (the factory returns nothing): the gate never re-ran and SECRET stayed. MAIN_STEPS is the
+  // visible set (every non-hidden element under <body>, the runner's snap) after mount and after each step, measured
+  // on main dba986eb9; head must equal it.
+  const snap = () => {
+    const res = [];
+    const walk = (el, hidden) => {
+      for (const ch of el.children) {
+        const h = hidden || ch.style.display === "none";
+        if (!h) res.push(ch.tagName.toLowerCase() + (ch.className ? "." + ch.className.replace(/\s+/g, ".") : "") + "[" + [...ch.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim() + "]");
+        walk(ch, h);
+      }
+    };
+    walk(document.body, false);
+    return res.join(" ");
+  };
+  const CASES = [
+ [
+  "row__cell",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\">${ for (row of @rows) { let i = 0\n while (i < 2) { lift <b class=\"g\" if=@ok>S${i}</b>\n i = i + 1 } } }</div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]"
+  ]
+ ],
+ [
+  "row__vi",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\">${ for (row of @rows) { let i = 0\n while (i < 2) { lift <b class=\"g\" if=(@sel == 1)>S${i}</b>\n i = i + 1 } } }</div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]"
+  ]
+ ],
+ [
+  "row__counter",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\">${ for (row of @rows) { let i = 0\n while (i < 3) { lift <b class=\"g\" if=(i == @n)>S${i}</b>\n i = i + 1 } } }</div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[] b.g[S0] b.g[S0]",
+   "div[] span[] div[] b.g[S0] b.g[S0]",
+   "div[] span[] div[] b.g[S0] b.g[S0]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]"
+  ]
+ ],
+ [
+  "nested_row__cell",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\">${ for (o of @rows) { lift <div class=\"o\">${ for (row of @rows) { let i = 0\n while (i < 2) { lift <b class=\"g\" if=@ok>S${i}</b>\n i = i + 1 } } }</div> } }</div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] span[] div[] div.o[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] div.o[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] div.o[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] div.o[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] div.o[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] div.o[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] div.o[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] div.o[] div[] div.o[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] div.o[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[] div.o[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]"
+  ]
+ ],
+ [
+  "nested_row__vi",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\">${ for (o of @rows) { lift <div class=\"o\">${ for (row of @rows) { let i = 0\n while (i < 2) { lift <b class=\"g\" if=(@sel == 1)>S${i}</b>\n i = i + 1 } } }</div> } }</div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] span[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[] div.o[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] div.o[] div[] div.o[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]"
+  ]
+ ],
+ [
+  "nested_row__counter",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\">${ for (o of @rows) { lift <div class=\"o\">${ for (row of @rows) { let i = 0\n while (i < 3) { lift <b class=\"g\" if=(i == @n)>S${i}</b>\n i = i + 1 } } }</div> } }</div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] span[] div[] div.o[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] div.o[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] div.o[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] div.o[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] div.o[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[]",
+   "div[] span[] div[] div.o[] div[] div.o[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
+   "div[] span[] div[] div.o[] div[] div.o[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
+   "div[] span[] div[] div.o[] div[] div.o[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
+   "div[] span[] div[] div.o[] div[] div.o[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]"
+  ]
+ ],
+ [
+  "row_in_each__cell",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\"><each in=@xs as y><div>${ for (row of @rows) { let i = 0\n while (i < 2) { lift <b class=\"g\" if=@ok>S${i}</b>\n i = i + 1 } } }</div></each></div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]"
+  ]
+ ],
+ [
+  "row_in_each__vi",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\"><each in=@xs as y><div>${ for (row of @rows) { let i = 0\n while (i < 2) { lift <b class=\"g\" if=(@sel == 1)>S${i}</b>\n i = i + 1 } } }</div></each></div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]"
+  ]
+ ],
+ [
+  "row_in_each__counter",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\"><each in=@xs as y><div>${ for (row of @rows) { let i = 0\n while (i < 3) { lift <b class=\"g\" if=(i == @n)>S${i}</b>\n i = i + 1 } } }</div></each></div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
+   "div[] div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[]",
+   "div[] div[] span[] div[]"
+  ]
+ ],
+ [
+  "arm_row__cell",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\">${ if (@on) { for (row of @rows) { let i = 0\n while (i < 2) { lift <b class=\"g\" if=@ok>S${i}</b>\n i = i + 1 } } } }</div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]"
+  ]
+ ],
+ [
+  "arm_row__vi",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\">${ if (@on) { for (row of @rows) { let i = 0\n while (i < 2) { lift <b class=\"g\" if=(@sel == 1)>S${i}</b>\n i = i + 1 } } } }</div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]"
+  ]
+ ],
+ [
+  "arm_row__counter",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\">${ if (@on) { for (row of @rows) { let i = 0\n while (i < 3) { lift <b class=\"g\" if=(i == @n)>S${i}</b>\n i = i + 1 } } } }</div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[]",
+   "div[] span[] div[] b.g[S0] b.g[S0]",
+   "div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
+   "div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
+   "div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]"
+  ]
+ ],
+ [
+  "arm_else_row__cell",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\">${ if (@on) { for (row of @rows) { let i = 0\n while (i < 2) { lift <b class=\"g\" if=@ok>S${i}</b>\n i = i + 1 } } } else { lift <p>off</p> } }</div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] p[off]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]"
+  ]
+ ],
+ [
+  "arm_else_row__vi",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\">${ if (@on) { for (row of @rows) { let i = 0\n while (i < 2) { lift <b class=\"g\" if=(@sel == 1)>S${i}</b>\n i = i + 1 } } } else { lift <p>off</p> } }</div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] p[off]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1] b.g[S0] b.g[S1]"
+  ]
+ ],
+ [
+  "arm_else_row__counter",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\">${ if (@on) { for (row of @rows) { let i = 0\n while (i < 3) { lift <b class=\"g\" if=(i == @n)>S${i}</b>\n i = i + 1 } } } else { lift <p>off</p> } }</div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[] b.g[S1] b.g[S1]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] p[off]",
+   "div[] span[] div[] b.g[S0] b.g[S0]",
+   "div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
+   "div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
+   "div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
+   "div[] span[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]"
+  ]
+ ],
+ [
+  "arm_in_row__cell",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\">${ for (row of @rows) { lift <div>${ if (@on) { let i = 0\n while (i < 2) { lift <b class=\"g\" if=@ok>S${i}</b>\n i = i + 1 } } }</div> } }</div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
+   "div[] span[] div[] div[]",
+   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
+   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
+   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
+   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
+   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
+   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
+   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
+   "div[] span[] div[] div[] div[] b.g[S2] b.g[S2] b.g[S0] b.g[S1]",
+   "div[] span[] div[] div[] div[]",
+   "div[] span[] div[] div[] div[]",
+   "div[] span[] div[] div[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[] b.g[S2] b.g[S2] b.g[S0] b.g[S1]"
+  ]
+ ],
+ [
+  "arm_in_row__vi",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\">${ for (row of @rows) { lift <div>${ if (@on) { let i = 0\n while (i < 2) { lift <b class=\"g\" if=(@sel == 1)>S${i}</b>\n i = i + 1 } } }</div> } }</div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] span[] div[] div[]",
+   "div[] span[] div[] div[]",
+   "div[] span[] div[] div[]",
+   "div[] span[] div[] div[] b.g[S2] b.g[S2]",
+   "div[] span[] div[] div[]",
+   "div[] span[] div[] div[]",
+   "div[] span[] div[] div[]",
+   "div[] span[] div[] div[]",
+   "div[] span[] div[] div[]",
+   "div[] span[] div[] div[] div[]",
+   "div[] span[] div[] div[] div[]",
+   "div[] span[] div[] div[] div[] b.g[S2] b.g[S2] b.g[S0] b.g[S1]",
+   "div[] span[] div[] div[] div[] b.g[S2] b.g[S2] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S2] b.g[S2] b.g[S0] b.g[S1]",
+   "div[] span[] div[] b.g[S2] b.g[S2] b.g[S0] b.g[S1]"
+  ]
+ ],
+ [
+  "arm_in_row__counter",
+  "<ok> = true\n<n> = 1\n<sel> = 0\n<on> = true\n<rows> = [{ id: 1 }]\n<xs> = [1]\n<div id=\"out\">${ for (row of @rows) { lift <div>${ if (@on) { let i = 0\n while (i < 3) { lift <b class=\"g\" if=(i == @n)>S${i}</b>\n i = i + 1 } } }</div> } }</div>\n",
+  [
+   [
+    "ok",
+    false
+   ],
+   [
+    "ok",
+    true
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "sel",
+    2
+   ],
+   [
+    "n",
+    2
+   ],
+   [
+    "n",
+    0
+   ],
+   [
+    "on",
+    false
+   ],
+   [
+    "on",
+    true
+   ],
+   [
+    "rows",
+    [
+     {
+      "id": 1
+     },
+     {
+      "id": 2
+     }
+    ]
+   ],
+   [
+    "ok",
+    false
+   ],
+   [
+    "sel",
+    1
+   ],
+   [
+    "n",
+    1
+   ],
+   [
+    "rows",
+    []
+   ],
+   [
+    "ok",
+    true
+   ]
+  ],
+  [
+   "div[] span[] div[] div[] b.g[S3]",
+   "div[] span[] div[] div[] b.g[S3]",
+   "div[] span[] div[] div[] b.g[S3]",
+   "div[] span[] div[] div[] b.g[S3]",
+   "div[] span[] div[] div[] b.g[S3]",
+   "div[] span[] div[] div[]",
+   "div[] span[] div[] div[]",
+   "div[] span[] div[] div[]",
+   "div[] span[] div[] div[]",
+   "div[] span[] div[] div[] div[] b.g[S0]",
+   "div[] span[] div[] div[] div[] b.g[S0]",
+   "div[] span[] div[] div[] div[] b.g[S0]",
+   "div[] span[] div[] div[] div[]",
+   "div[] span[] div[]",
+   "div[] span[] div[]"
+  ]
+ ]
+];
+  for (const [id, source, steps, mainSteps] of CASES) {
+    test(id, async () => {
+      const app = compileAndMount(source);
+      expect(app.errors).toEqual([]);
+      await flush();
+      await flush();
+      const seen = [snap()];
+      for (const [k, v] of steps) {
+        globalThis.__s469l_set(k, JSON.parse(JSON.stringify(v)));
+        await flush();
+        await flush();
+        seen.push(snap());
+      }
+      expect(seen).toEqual(mainSteps);
+    });
+  }
+});
