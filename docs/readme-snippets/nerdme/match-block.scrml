@@ -1,0 +1,20 @@
+// NERDME.md "Engines, matches & iteration" (Tier 1, the <match> element) — ruled; spec-ahead on the bootstrap.
+<program>
+
+type Load:enum = { Idle, Loading, Loaded(rows: int), Failed(msg: string) }
+
+let <phase:Load=.Idle/>
+
+function load() {
+    @phase = .Loading;
+    @phase = Load.Loaded(2);
+}
+
+<match for=Load on=@phase>
+    <Idle><button onclick=load()>Load</button></Idle>
+    <Loading><p>Loading…</p></Loading>
+    <Loaded(rows)><p>Got ${rows} rows</p></Loaded>
+    <Failed(msg)><p>${msg}</p></Failed>
+</match>
+
+</program>

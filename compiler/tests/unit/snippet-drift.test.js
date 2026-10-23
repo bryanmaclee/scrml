@@ -10,7 +10,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { checkDrift, parseDoc, normalize } from "../../../scripts/snippet-drift.js";
+import { checkDrift, parseDoc, normalize, SNIPPET_CORPUS } from "../../../scripts/snippet-drift.js";
 
 const FILE = ["<program>", "", "  <count> = 0", "", "  <p>${@count}</p>", "", "</program>", ""].join("\n");
 const GATED = ["snips"];
@@ -81,6 +81,15 @@ describe("snippet drift", () => {
     expect(r.failures[0].message).toContain("unmarked scrml block contains a `<program` opener");
   });
 
+  test("a `gate: skip` marker does not exempt an unmarked `<program` fragment in an opted-in document (S469)", () => {
+    // NERDME.md carried `<!-- gate: skip — fragment … -->` over a bare `<program mcp="dev-only">`
+    // opener; claim-gate skipped it, but the drift check still fails it. Write it as inline prose.
+    write("doc.md", fence(FILE, "<!-- snippet: snips/a.scrml -->") + "\n" +
+      fence('<program mcp="dev-only">\n', "<!-- gate: skip — fragment: the root opener only -->"));
+    const r = run();
+    expect(r.failures.length).toBe(1);
+    expect(r.failures[0].message).toContain("unmarked scrml block contains a `<program` opener");
+  });
   test("documents without markers are not checked", () => {
     write("doc.md", fence(FILE.replace("= 0", "= 7")));
     const r = run();
@@ -103,5 +112,16 @@ describe("snippet drift", () => {
   test("normalize strips outer blank lines and CR", () => {
     expect(normalize(["", "a\r", "  b  ", ""])).toEqual(["a", "  b"]);
     expect(normalize(["    a", "      b"], true)).toEqual(["a", "  b"]);
+  });
+});
+
+// S469: the real repo must pass the drift check, so a drift failure (NERDME's `gate: skip`
+// `<program>` fragment) is caught by the pre-commit suite and not only by snippet-gate in CI.
+describe("snippet drift — the real repo", () => {
+  test("every opted-in document is drift-clean", () => {
+    const repo = join(import.meta.dir, "../../..");
+    const r = checkDrift(repo, SNIPPET_CORPUS);
+    expect(r.failures.map((f) => `${f.doc}:${f.line} — ${f.message}`)).toEqual([]);
+    expect(r.checked).toBeGreaterThan(0);
   });
 });

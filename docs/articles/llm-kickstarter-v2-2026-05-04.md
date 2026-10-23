@@ -1731,7 +1731,7 @@ Notes:
 
 ### 11.7 Multi-page routing
 
-Route params arrive via the compiler-provided `route` object: `route.params.id`, `route.query.tab`, `route.path`. All values are typed `string` — parse explicitly for numeric IDs.
+Route params arrive via the compiler-provided `route` object: `route.params.id`, `route.query.tab`, `route.path`. A path parameter is typed `string` — parse explicitly for numeric IDs. A query key is typed `string | not`: a missing key is `not`, a bare `?tab` is `""`, and a repeated key gives its first value (SPEC §20.4, S469).
 
 <!-- gate: skip — fragment: `route` is provided inside a routed `<page>` -->
 ```scrml
@@ -1740,11 +1740,12 @@ function currentUserId() -> int | not {
 }
 
 function activeTab() -> string {
-  const tab = route.query.tab;                 // typed `string`
-  return tab == "" ? "profile" : tab;          // `||` takes booleans only, so not `tab || "profile"`
+  const tab = route.query.tab;                 // typed `string | not`
+  if (tab is not) {
+    return "profile";                          // ?tab absent
+  }
+  return tab;                                  // narrowed to `string` ("" for a bare ?tab)
 }
-// ⚑ SPEC §20.4 types every query value `string` but does not say what a MISSING key yields
-// (`""`, `not`, or an error); the `== ""` test above assumes `""`. Gap g-spec-route-query-missing-key-s469.
 
 function go(target: string) {
   navigate(`/users/${target}`);                // Soft (history push) by default

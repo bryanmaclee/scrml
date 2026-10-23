@@ -276,7 +276,7 @@ The fix is to move the `lin` declaration inside the deferred body, so it is fres
 </program>
 ```
 
-⚑ **Open conflict (owner ruling pending):** SPEC §6.7.7 says a `<request>` body holds exactly one assignment expression, while §35.5 (this fix, and the E-LIN-006 fix-it) puts a `lin` declaration and an assignment in it. Until that is ruled, treat this shape as provisional.
+This shape is ruled (S469): a `<request>` body may hold `lin` declarations before its one assignment (SPEC §6.7.7 `request-body` grammar; §35.5).
 
 If the token is genuinely a one-shot value that does not re-fetch on every request, then `lin` is probably the wrong tool — use a regular `let` or `const`.
 
@@ -415,7 +415,7 @@ The compiler enforces that the transaction is always committed (or aborted via a
 </>
 ```
 
-`lin` inside `<request>` is fine — the declaration and consumption share a single deferred execution. ⚑ **Open conflict (owner ruling pending):** SPEC §6.7.7 says a `<request>` body holds exactly one assignment expression, while §35.5 (this fix, and the E-LIN-006 fix-it) puts a `lin` declaration and an assignment in it. Until that is ruled, treat this shape as provisional.
+`lin` inside `<request>` is fine — the declaration and consumption share a single deferred execution. This shape is ruled (S469): a `<request>` body may hold `lin` declarations before its one assignment (SPEC §6.7.7 `request-body` grammar; §35.5).
 
 **Pattern 4 — conditional consume.** If the consumption site is conditional, move the decision to a helper function so the compiler sees the paths clearly.
 

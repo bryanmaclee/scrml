@@ -76,7 +76,7 @@
 
 import { readFileSync, existsSync, statSync, readdirSync, writeFileSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
-import { join, extname, resolve, relative, sep } from "path";
+import { join, extname, resolve, relative, sep, isAbsolute } from "path";
 import { execFileSync } from "child_process";
 import { lintGhostPatterns } from "../compiler/src/lint-ghost-patterns.js";
 import { parseDocMarkers } from "./doc-gate-markers.js";
@@ -89,10 +89,21 @@ import { PUBLIC_SURFACE, SURFACE_EXCLUDE, SURFACE_UNGATED, uncoveredDocs } from 
 const args = process.argv.slice(2);
 const reportMode = args.includes("--report");
 const strictMode = args.includes("--strict");
-const explicitPaths = args.filter((a) => !a.startsWith("--"));
+// Run from the REPO ROOT, whatever the caller's cwd (S469 round 3): the surface rows
+// (PUBLIC_SURFACE) and the excludes (SURFACE_UNGATED) are repo-relative paths, and the printed
+// paths are too. An explicit path argument is resolved against the caller's cwd FIRST, then
+// re-expressed repo-relative (or kept absolute when it lies outside the repo, e.g. a test's tmp dir).
+const GATE_REPO_ROOT = resolve(import.meta.dir, "..");
+const explicitPaths = args.filter((a) => !a.startsWith("--")).map((a) => {
+  const abs = resolve(a);
+  const rel = relative(GATE_REPO_ROOT, abs);
+  return rel === "" ? "." : rel.startsWith("..") || isAbsolute(rel) ? abs : rel.split(sep).join("/");
+});
+process.chdir(GATE_REPO_ROOT);
 const surface = explicitPaths.length > 0 ? explicitPaths : PUBLIC_SURFACE;
 
-const toRel = (p) => relative(process.cwd(), resolve(p)).split(sep).join("/");
+// Repo-relative, `/`-separated: the form SURFACE_EXCLUDE's rows are written in.
+const toRel = (p) => relative(GATE_REPO_ROOT, resolve(p)).split(sep).join("/");
 
 /** Expand the surface into a concrete .md file list (tolerates absent rows). */
 function collectMarkdown(paths) {
@@ -101,15 +112,20 @@ function collectMarkdown(paths) {
   const walk = (p, explicit) => {
     if (!existsSync(p)) return; // a declared-but-absent row is not an error
     const st = statSync(p);
+    // An excluded row may be a directory or a single file (S469 "Banner + exempt": the dated
+    // articles are excused one by one, so a NEW page under docs/articles is still gated).
+    if (!explicit && SURFACE_EXCLUDE.includes(toRel(p))) return;
     if (st.isDirectory()) {
-      if (!explicit && SURFACE_EXCLUDE.includes(toRel(p))) return;
       for (const entry of readdirSync(p)) walk(join(p, entry), false);
       return;
     }
     if (extname(p) !== ".md") return;
-    if (seen.has(p)) return;
-    seen.add(p);
-    out.push(p);
+    // POSIX separators (S469): `join` writes `\` on Windows; every printed path and the
+    // floor's gated set are `/`-separated. Bun's fs accepts `/` on Windows too.
+    const posix = p.split(sep).join("/");
+    if (seen.has(posix)) return;
+    seen.add(posix);
+    out.push(posix);
   };
   for (const p of paths) walk(p, explicitPaths.length > 0);
   return out.sort();
