@@ -97,7 +97,7 @@ const <left> = @tasks.filter(isActive).length
 
 `<tasks>: Task[] = []` declares a reactive cell, and `@tasks` reads or writes it. Because it sits inside `<channel>`, every write reaches every open tab. The compiler emitted the WebSocket route and the client that keeps the copies in step; you wrote a list.
 
-> **Before-picture: this tape cell is not scrml.** `<tasks>: Task[] = []` is a legacy tape cell with no grants, and the shipping compiler lets anything write it: a spread-rebuild, a `map` written back, a wipe. scrml has no unconstrained tapes, so in the language this line is an error, `E-DECL-LEGACY-RHS`, with no deprecation window (SPEC §66.12.4, S469). The ruled spelling names every write the app makes in the tape's type. Appending a row is `append`, replacing a row by `map` writes a position (`writable`), and `load()` replaces the whole tape (`replace`): `<tasks:Task[free, append, writable, replace]=[]/>`. `append` is one of the six grow/shrink tokens ruled at S442; `free`, `writable`, `replace` and the bracket-list form are still ⚑ O10. The bootstrap compiles that declaration with those three writes at program level. It does not have `<channel>` yet.
+> **Before-picture: this tape cell is not scrml.** `<tasks>: Task[] = []` is a legacy tape cell with no grants, and the shipping compiler lets anything write it: a spread-rebuild, a `map` written back, a wipe. scrml has no unconstrained tapes, so in the language this line is an error, `E-DECL-LEGACY-RHS`, with no deprecation window (SPEC §66.12.4, S469). The ruled spelling names every write the app makes in the tape's type. Appending a row is `append`, replacing a row by `map` writes a position (`write`), and `load()` replaces the whole tape (`replace`): `<tasks:Task[free, append, write, replace]=[]/>`. The grant tokens and the bracket-list form are all ruled (O10: the six grow/shrink tokens at S442; `free`, `write`, `replace` and the bracket form at S469, where `writable` was renamed `write`). The bootstrap compiles that declaration with those three writes at program level. It does not have `<channel>` yet.
 
 `<newTask req length(>=1)> = <input …/>` is a cell bound to an input. The validators become `required minlength="1"` on the emitted `<input>`, so the browser won't submit an empty task.
 
@@ -303,7 +303,7 @@ export <warn:swatch label="Warn" hex="#FF6600"/>
 
 A component is a declaration with typed attributes and a `renders`. An attribute is always locked data, so a field the component writes is a child declaration with `let` before its `<`. The opener then says `:struct`, because no typed attribute is left in it (SPEC §66.19.4, S447). The earlier one-line spelling `<swatch let label:… let hex:…/>` is refused with `E-DECL-LET-IN-OPENER`. A plain `<swatch label="Danger" hex=@danger/>` makes a fresh instance; `<*accent/>` renders the one named shared instance, wherever it is used.
 
-**4. Tapes carry their permissions** (SPEC §66.19.5, §66.12; grant tokens ruled at S442, bracket form ⚑ O10)
+**4. Tapes carry their permissions** (SPEC §66.19.5, §66.12; grant tokens and bracket form ruled, O10 at S442 + S469)
 
 scrml has one sequence kind, the **tape**, and no JavaScript-style arrays. Today ([file](./docs/readme-snippets/today-log.scrml)), the shipping compiler treats `<audit>: Entry[] = []` as an unconstrained legacy cell, so nothing stops the audit log from being wiped. In the language that line is `E-DECL-LEGACY-RHS` (§66.12.4):
 

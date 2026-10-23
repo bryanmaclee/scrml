@@ -15,70 +15,75 @@
   </>
 
   type SaveError:enum = {
-    EmptyName
-    InvalidEmail(input: string)
-    DuplicateEmail(email: string)
+    EmptyName,
+    InvalidEmail(input: string),
+    DuplicateEmail(email: string),
+    Storage,
   }
 
   type Phase:enum = { Editing, Saving, Saved, Errored(msg: string) }
 
-  <engine for=Phase initial=.Editing>
-    <Editing rule=.Saving></>
-    <Saving  rule=(.Saved | .Errored)></>
-    <Saved   rule=.Editing></>
-    <Errored rule=.Editing></>
+  <phase:Phase=.Editing single>
+    <Editing rule=.Saving/>
+    <Saving  rule=(.Saved | .Errored)/>
+    <Saved   rule=.Editing/>
+    <Errored rule=.Editing/>
   </>
 
-  <db src="users.db" tables="users">
-
-    ${
-      <form>
-        <name  req length(>=2)>             = <input type="text"/>
-        <email req pattern(/^[^@]+@[^@]+$/)> = <input type="email"/>
-      </>
-
-      // Failable + server-escalated. The `!` after the param list marks the
-      // function as failable; `-> SaveError` names the error enum type.
-      function persistUser(name, email)! -> SaveError {
-        if (name == "")                          fail SaveError.EmptyName
-        if (!email.includes("@"))                fail SaveError.InvalidEmail(email)
-        const existing = ?{`SELECT id FROM users WHERE email = ${email}`}.get()
-        if (existing is given)                    fail SaveError.DuplicateEmail(email)
-        ?{`INSERT INTO users (name, email) VALUES (${name}, ${email})`}.run()
-      }
-
-      function save() {
-        @phase = Phase.Saving
-        persistUser(@form.name, @form.email) !{
-          .EmptyName        :> { @phase = Phase.Errored("Name can't be empty.") ; return }
-          .InvalidEmail(e)  :> { @phase = Phase.Errored("Not an email: " + e) ; return }
-          .DuplicateEmail(e):> { @phase = Phase.Errored(e + " is already taken.") ; return }
-        }
-        @phase = Phase.Saved
-      }
-    }
-
-    <match for=Phase on=@phase>
-      <Editing>
-        <form onsubmit=save()>
-          <label>Name  <name/>  <errors of=@form.name/></label>
-          <label>Email <email/> <errors of=@form.email/></label>
-          <button type="submit" disabled=!@form.isValid>Save</button>
-        </form>
-      </Editing>
-      <Saving>
-        <p>Saving…</p>
-      </Saving>
-      <Saved>
-        <p>Saved!</p>
-        <button onclick={ @phase = Phase.Editing }>Add another</button>
-      </Saved>
-      <Errored(msg)>
-        <p class="err">${msg}</p>
-        <button onclick={ @phase = Phase.Editing }>Try again</button>
-      </Errored>
-    </match>
-
+  <newUser:struct>
+    let <name:string="" req length(>=2)/>
+    renders <input type="text" bind:value=@name/>
+    let <email:string="" req pattern(/^[^@]+@[^@]+$/)/>
+    renders <input type="email" bind:value=@email/>
   </>
+  renders <form onsubmit=save()>
+    <label>Name  <*name/>  <errors of=@newUser.name/></label>
+    <label>Email <*email/> <errors of=@newUser.email/></label>
+    <button type="submit">Save</button>
+  </form>
+
+  // Failable + server-escalated. The `!` after the param list marks the
+  // function as failable; `-> SaveError` names the error enum type.
+  function persistUser(name: string, email: string)! -> SaveError {
+    if (name == "")              { fail SaveError.EmptyName; }
+    if (!email.includes("@"))    { fail SaveError.InvalidEmail(email); }
+    let existing = ?{`SELECT id FROM users WHERE email = ${email}`}.get() !{
+      _ :> { fail SaveError.Storage; },
+    };
+    if (existing is given)       { fail SaveError.DuplicateEmail(email); }
+    ?{`INSERT INTO users (name, email) VALUES (${name}, ${email})`}.run() !{
+      _ :> { fail SaveError.Storage; },
+    };
+    return email;
+  }
+
+  function save() {
+    @phase = .Saving;
+    persistUser(@newUser.name, @newUser.email) !{
+      .EmptyName         :> { @phase = Phase.Errored("Name can't be empty."); return; },
+      .InvalidEmail(e)   :> { @phase = Phase.Errored("Not an email: " + e); return; },
+      .DuplicateEmail(e) :> { @phase = Phase.Errored(e + " is already taken."); return; },
+      .Storage           :> { @phase = Phase.Errored("The database is unavailable."); return; },
+      .Transport(t)      :> { @phase = Phase.Errored("Could not reach the server."); return; },
+    };
+    @phase = .Saved;
+  }
+
+  <match for=Phase on=@phase>
+    <Editing>
+      <*newUser/>
+    </Editing>
+    <Saving>
+      <p>Saving…</p>
+    </Saving>
+    <Saved>
+      <p>Saved!</p>
+      <button onclick={ @phase = .Editing; }>Add another</button>
+    </Saved>
+    <Errored(msg)>
+      <p class="err">${msg}</p>
+      <button onclick={ @phase = .Editing; }>Try again</button>
+    </Errored>
+  </match>
 
 </program>

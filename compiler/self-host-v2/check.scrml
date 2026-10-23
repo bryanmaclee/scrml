@@ -2718,7 +2718,7 @@ ${
     // C9 (s469 F/U-6) — a whole-value PositionWrite keeps the length and moves
     // or rewrites positions; its value must be a length-preserving function OF
     // THE FIELD ITSELF: `SeqCall(Map | SortBy, <this field>, f)` or
-    // `Prim(SortNum | SortStr | Reverse, [<this field>])`. So a `writable`
+    // `Prim(SortNum | SortStr | Reverse, [<this field>])`. So a `write`
     // grant can never carry an arbitrary replace (any other value, a grow or a
     // shrink, another field's tape).
     fn positionProblem(d: Sym, idx: int, inst: InstRef, v: Expr) -> string {

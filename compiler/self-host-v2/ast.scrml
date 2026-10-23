@@ -218,7 +218,7 @@ ${
     export type AType:struct = { nid: int, span: ASpan, k: ATypeK }
     export type ATypeK:enum = {
         TName(name: string),                   // int · string · bool · number · struct · Line · Openness …
-        TSeq(elem: AType, grants: string[]),   // T[] or T[g1, g2] (⚑ O10 spelling)
+        TSeq(elem: AType, grants: string[]),   // T[] or T[g1, g2] (O10 spelling, ruled S469)
         TMaybe(inner: AType),                  // T | not
     }
 
