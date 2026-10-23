@@ -59,4 +59,4 @@ Order-dependent RED: a test file that evaluates the runtime at GLOBAL scope leav
 - **F4** — filed `g-per-route-chunks-no-build-gate-s469` (LOW).
 - Ratchet gap resolved citing the ratification; the two ratchet comments updated.
 - Pack family renamed n23 → n26 (s469-lift-if-render-gate keeps n23); EXPECTED_SHAPE_COUNT = main 467 + 6 = 473.
-- Shell runtime after round 2: 23,748 raw / 6,373 B gzip (≤ 6,489); counter 4,129 B.
+- Shell runtime after round 2: 23,764 raw / 6,377 B gzip (≤ 6,489); counter 4,132 B.

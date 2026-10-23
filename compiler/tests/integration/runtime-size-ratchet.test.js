@@ -183,7 +183,7 @@ const RUNTIME_GZIP_TOLERANCE_BAND = 188;
 //   NO correct fix fits: the minimum (admit + nav check, no defence-in-depth, no
 //   diagnostics) measured 6,196 B. Offset already taken: the retired, never-called
 //   `_scrml_nav_same_chunk` is deleted (-48 B). New ceiling = 6,301 + the band.
-//   Round 2 (review F1/F2: admit count + stamp-seeded build) measured 6,373 B,
+//   Round 2 (review F1/F2: admit count + stamp-seeded build) measured 6,377 B,
 //   inside the ratified ceiling. Lower it freely; raise it only by a new ruling.
 const SHELL_RUNTIME_GZIP_CEILING = 6301 + RUNTIME_GZIP_TOLERANCE_BAND; // 6,489 B
 
