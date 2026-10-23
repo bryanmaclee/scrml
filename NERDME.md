@@ -485,14 +485,7 @@ Use `function` for general-purpose callables; use `fn` for deterministic computa
 
 ## LLM agent integration — `scrml:mcp`
 
-scrml ships a Model Context Protocol surface so an LLM agent can read your app's structure first-hand instead of guessing. Opt in on the root program:
-
-<!-- gate: skip — fragment: the root opener only; the app body is elided -->
-```scrml
-<program mcp="dev-only">
-```
-
-(Fragment; impl#1.) With that attribute the build writes descriptor sidecars next to the output — `engines.json`, `forms.json`, `channels.json`, `serverfns.json`, `chunks.json` — turns on per-route emission, and bundles the `scrml:mcp` stdlib, which serves them over MCP stdio as 11 read-only tools:
+scrml ships a Model Context Protocol surface so an LLM agent can read your app's structure first-hand instead of guessing. Opt in on the root program with `<program mcp="dev-only">` (impl#1). With that attribute the build writes descriptor sidecars next to the output — `engines.json`, `forms.json`, `channels.json`, `serverfns.json`, `chunks.json` — turns on per-route emission, and bundles the `scrml:mcp` stdlib, which serves them over MCP stdio as 11 read-only tools:
 
 | Tool | Surfaces |
 |---|---|
