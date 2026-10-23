@@ -1,6 +1,6 @@
 // JavaScript's tape method name / a discarded new tape (§66.12.6 rule 3).
 <program>
-    <log:string[free, append, prepend, writable]=([])/>
+    <log:string[free, append, prepend, write]=([])/>
     let <n:int=0/>
     function go() {
         @log.unshift("x");

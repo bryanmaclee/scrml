@@ -931,15 +931,19 @@ ${
     //             and front (an insert grant admits appends and prepends, a
     //             remove grant pops and shifts).
     // The retired bare place tokens `end` / `front` / `anywhere` are refused,
-    // naming both halves (never guessing which was meant). The rest of O10 — the
-    // bracket-list form, `free` / `writable` / `replace`, the bounded-length
-    // token — is still OPEN; a respelling is an edit here only.
-    type GrantAxis:enum = { GFree, GWritable, GReplace, GGrow(at: SeqAt), GShrink(at: SeqAt), GRetired(grow: string, shrink: string), GUnknown }
+    // naming both halves (never guessing which was meant).
+    // RULED S469 (O10 complete; user-voice "I dont like writable, I think I
+    // prefer write" … "Keep free and replace (Rec)"): the bracket form `T[g, …]`,
+    // `free` (length may change), `write` (positions may be overwritten), and
+    // `replace` (whole-value reassignment). The old spelling `writable` is
+    // refused with the fix-it "`writable` is spelled `write`" (E-GRANT-UNKNOWN,
+    // no deprecation window — the bootstrap is pre-release).
+    type GrantAxis:enum = { GFree, GWrite, GReplace, GGrow(at: SeqAt), GShrink(at: SeqAt), GRetired(grow: string, shrink: string), GRenamed(to: string), GUnknown }
 
     fn grantAxis(w: string) -> GrantAxis {
         return match w {
             "free"     :> GrantAxis.GFree
-            "writable" :> GrantAxis.GWritable
+            "write"    :> GrantAxis.GWrite
             "replace"  :> GrantAxis.GReplace
             "append"   :> GrantAxis.GGrow(SeqAt.End)
             "pop"      :> GrantAxis.GShrink(SeqAt.End)
@@ -950,6 +954,7 @@ ${
             "end"      :> GrantAxis.GRetired("append", "pop")
             "front"    :> GrantAxis.GRetired("prepend", "shift")
             "anywhere" :> GrantAxis.GRetired("insert", "remove")
+            "writable" :> GrantAxis.GRenamed("write")
             _          :> GrantAxis.GUnknown
         }
     }
@@ -964,7 +969,7 @@ ${
         let length: LengthGrant = LengthGrant.Fixed
         let where: SeqAt[] = []
         let shrinks: SeqAt[] = []
-        let writable = false
+        let write = false
         let seen: string[] = []
         for (const g of gs) {
             const ax: GrantAxis = grantAxis(g)
@@ -976,8 +981,8 @@ ${
             seen = seen.concat([g])
             if (ax == GrantAxis.GFree) {
                 length = LengthGrant.Free
-            } else if (ax == GrantAxis.GWritable) {
-                writable = true
+            } else if (ax == GrantAxis.GWrite) {
+                write = true
             } else if (ax == GrantAxis.GReplace) {
                 // carried on the field's grant set (seqReplace), not on SeqGrants
             } else {
@@ -992,7 +997,7 @@ ${
                 }
             }
         }
-        return { t: Type.Seq(re.t, { length: length, at: where, shrink: shrinks, positionsWritable: writable }), st: st, unresolved: re.unresolved }
+        return { t: Type.Seq(re.t, { length: length, at: where, shrink: shrinks, positionsWritable: write }), st: st, unresolved: re.unresolved }
     }
 
     fn growAt(ax: GrantAxis) -> SeqAt | not {
@@ -1000,8 +1005,9 @@ ${
             .GGrow(at: a) :> a
             .GShrink(at: a) :> not
             .GRetired(grow: g) :> not
+            .GRenamed(to: t) :> not
             .GFree :> not
-            .GWritable :> not
+            .GWrite :> not
             .GReplace :> not
             .GUnknown :> not
         }
@@ -1012,8 +1018,9 @@ ${
             .GShrink(at: a) :> a
             .GGrow(at: a) :> not
             .GRetired(grow: g) :> not
+            .GRenamed(to: t) :> not
             .GFree :> not
-            .GWritable :> not
+            .GWrite :> not
             .GReplace :> not
             .GUnknown :> not
         }
@@ -1024,8 +1031,9 @@ ${
             .GRetired(grow: gw, shrink: sw) :> "`" + g + "` no longer names a grant: growing and shrinking are separate grants at each place (RULED S442) — write `" + gw + "` (grow), `" + sw + "` (shrink), or both"
             .GGrow(at: a) :> ""
             .GShrink(at: a) :> ""
+            .GRenamed(to: t) :> "`" + g + "` is spelled `" + t + "` (RULED S469, O10) — write `" + t + "`"
             .GFree :> ""
-            .GWritable :> ""
+            .GWrite :> ""
             .GReplace :> ""
             .GUnknown :> "`" + g + "` is not a permission axis value (§66.12.2; there is no `any` / `all`, §66.12.4)"
         }
@@ -5813,7 +5821,7 @@ ${
             "splice" :> "`.remove(i)` for each removed position and `.insert(i, x)` for each inserted value"
             "toSorted" :> "`.sort()` — a scrml `sort` already returns a new tape"
             "toReversed" :> "`.reverse()` — a scrml `reverse` already returns a new tape"
-            "with" :> "a position write, `xs[i] = v` (granted by `writable`)"
+            "with" :> "a position write, `xs[i] = v` (granted by `write`)"
             _ :> ""
         }
     }
@@ -6167,7 +6175,7 @@ ${
     // has nothing to write back to — bind the result.
     fn discardedMessage(at: string, method: string, where: string) -> string {
         if (at == "") return "`." + method + "(…)` returns a NEW tape, and its value is discarded " + where + ", so it does nothing (§66.12.6 rule 3) — bind the result (`const t = …." + method + "(…);`)"
-        return "`" + at + "." + method + "(…)` returns a NEW tape and leaves `" + at + "` unchanged, and its value is discarded " + where + ", so it does nothing (§66.12.6 rule 3) — write `" + at + " = " + at + "." + method + "(…);` (needs `writable`), or bind the result"
+        return "`" + at + "." + method + "(…)` returns a NEW tape and leaves `" + at + "` unchanged, and its value is discarded " + where + ", so it does nothing (§66.12.6 rule 3) — write `" + at + " = " + at + "." + method + "(…);` (needs `write`), or bind the result"
     }
 
     // s469 F/U-4 — a statement whose VALUE is discarded through a ternary or a

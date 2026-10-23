@@ -224,7 +224,7 @@ describe("A — int→string is NOT built (no ruled spelling)", () => {
 
 // ---------------------------------------------------------------------------
 describe("C — tape functions return a NEW tape; JavaScript's names are refused", () => {
-  const T = `    <xs:int[free, append, writable]=([3, 1, 2])/>\n    <ws:string[]=(["b", "a"])/>`;
+  const T = `    <xs:int[free, append, write]=([3, 1, 2])/>\n    <ws:string[]=(["b", "a"])/>`;
   test("sort() picks the natural order by element type (Core SortNum / SortStr); sort(cmp) is a SeqCall SortBy", () => {
     const json = JSON.stringify(clean(prog(T, `        <p>\${@xs.sort().length}</p>\n        <p>\${@ws.sort().join(",")}</p>\n        <p>\${@xs.sort((a, b) => a - b).length}</p>`)).core);
     for (const op of ["SortNum", "SortStr", "SortBy", "Join"]) expect(json).toContain(op);
@@ -234,7 +234,7 @@ describe("C — tape functions return a NEW tape; JavaScript's names are refused
     expect(codes(prog(T, `        <p>\${@ws.sort((a, b) => a + b).length}</p>`))).toEqual(["E-TYPE-031"]);
     expect(codes(prog(T, `        <p>\${@ws.sort((a, b) => a.length - b.length).join(",")}</p>`))).toEqual([]);
   });
-  test("`@xs = @xs.sort()` / `.reverse()` is a position write (§66.12.6 rule 3): `writable` grants it, its absence refuses it", () => {
+  test("`@xs = @xs.sort()` / `.reverse()` is a position write (§66.12.6 rule 3): `write` grants it, its absence refuses it", () => {
     expect(codes(prog(`    <xs:int[free, append]=([1])/>\n    function go() {\n        @xs = @xs.sort();\n    }`, `        <button onclick=go()>go</button>`))).toEqual(["E-WRITE-NOT-GRANTED"]);
     expect(diag(prog(`    <xs:int[free, append]=([1])/>\n    function go() {\n        @xs = @xs.reverse();\n    }`, `        <button onclick=go()>go</button>`), "E-WRITE-NOT-GRANTED")?.message).toContain("position-write");
   });
@@ -272,7 +272,7 @@ describe("C — tape functions return a NEW tape; JavaScript's names are refused
     expect(granted.length).toBe(4);                // the four receivers `@xs`
   });
   test("F/U-6: C9 — a PositionWrite's value must be a map / sort / reverse OF THE FIELD (checked in Core)", () => {
-    const src = prog(T + `\n    <ys:int[free, append, writable]=([9])/>\n    function go() {\n        @xs = @xs.sort();\n    }`, `        <button onclick=go()>go</button>`);
+    const src = prog(T + `\n    <ys:int[free, append, write]=([9])/>\n    function go() {\n        @xs = @xs.sort();\n    }`, `        <button onclick=go()>go</button>`);
     const r = clean(src);
     expect(mods.check.checkCore(r.core)).toEqual([]);
     // graft: the same write with another field's tape as its value
@@ -292,7 +292,7 @@ describe("C — tape functions return a NEW tape; JavaScript's names are refused
     const fn = (body) => prog(S + `\n    function go() {\n        ${body}\n    }`, `        <button onclick=go()>go</button>`);
     const m = diag(fn(`@s.split(",").reverse();`), "E-TAPE-JS-METHOD")?.message ?? "";
     expect(m).toContain("bind the result");
-    expect(m).not.toContain("writable");
+    expect(m).not.toContain("needs `write`");
   });
   test("F/U-8: the arity message of `sort` names its two forms", () => {
     expect(diag(prog(T, `        <p>\${@xs.sort((a, b) => a - b, 1).length}</p>`), "E-CALL-ARITY")?.message).toContain("no argument (the natural order) or one comparator");
