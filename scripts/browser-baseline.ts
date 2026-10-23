@@ -99,18 +99,10 @@ interface Baseline {
 // So it is (a) named per-entry with a reason, (b) COUNTED on every run — the skip-rate is printed
 // beside the asserted count so growth is visible, and (c) deliberately not pattern-based: adding an
 // entry costs a line of justification, which is the friction that keeps it small.
-const ENV_EXCLUDED: EnvExclusion[] = [
-  {
-    name: "TodoMVC §0: SKIP — dist not compiled > benchmarks/todomvc/dist/app.html must exist",
-    reason:
-      "reads gitignored benchmarks/todomvc/dist/ — absent in a fresh checkout, present only where the benchmark has been built. Environment state, not repo state.",
-  },
-  {
-    name: "TodoMVC §1: initial render — HTML structure > dist files exist (app.html, app.client.js)",
-    reason:
-      "same gitignored benchmarks/todomvc/dist/ dependency as the §0 guard above; fails in CI and passes on a machine that has built the benchmark.",
-  },
-];
+// S469: EMPTY. The two TodoMVC dist entries that lived here are gone — `scripts/compile-test-samples.sh`
+// (the `pretest` step CI and local runs share) now builds benchmarks/todomvc/dist/, so a TodoMVC
+// dist failure is a real failure, not environment state, and excluding it would only hide one.
+const ENV_EXCLUDED: EnvExclusion[] = [];
 
 async function runTier(): Promise<{
   names: string[];

@@ -31,3 +31,10 @@ for name in "${SAMPLES[@]}"; do
 done
 
 echo "Compiled ${#SAMPLES[@]} test samples -> $DIST_DIR/"
+
+# S469 — browser-todomvc.test.js reads the gitignored benchmarks/todomvc/dist/ (its header's
+# "Requires:" line). Nothing in the tier's setup built it: it passed only where something else had
+# (CI's gauntlet step, or todomvc-e2e.test.js's beforeAll when bun happened to run that file first),
+# and could read a STALE build otherwise. Build it here, with the same flags as CI's gauntlet step.
+bun run "$CLI" compile benchmarks/todomvc/app.scrml --output benchmarks/todomvc/dist/ --convert-legacy-css 2>/dev/null
+echo "Compiled benchmarks/todomvc/app.scrml -> benchmarks/todomvc/dist/"
