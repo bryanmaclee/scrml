@@ -4,7 +4,7 @@
 
   type Todo:struct = { id: int, body: string, done: bool }
 
-  <items:Todo[free, append, remove, writable]=[]/>
+  <items:Todo[free, append, remove, write]=[]/>
   let <draft:string=""/>
   let <nextId:int=1/>
 

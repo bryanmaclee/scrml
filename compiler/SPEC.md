@@ -6,6 +6,7 @@
 > **Amendments applied:** 2026-04-07 — §49 added: `while`, `do...while`, `break`, `continue` with labeled control flow (E-LOOP-001..E-LOOP-007).
 > **Amendments applied:** 2026-10-18 (S469) — §49 rewritten: one loop keyword `for` (iterate / condition / counted / infinite heads), `while` and `do...while` retired, the `a..b` / `a..=b` range head, the value form from every head (E-LOOP-007 rewritten), index reads (§49.13) and the trap kind (§19.17). §17.4, §8.10.1, §32.6, §35.4, §48.2 and the §66.12.2 bounded-length token amended to match.
 > **Amendments applied:** 2026-10-20 (S469 follow-up) — returns always explicit (§48 "The return rule"; §42.3.3 / §42.9 / §48.2 / §48.8 / §48.11 / §48.13; E-TYPE-043 widened, E-RETURN-INCOMPLETE); string iteration and every string position by code point (§49.3.5, Appendix D.1, §66.12.8 rule 6); §49.13 moved to §66.12.8; O65 ruled (natural-order `sort()`, `toSorted` / `toReversed` / `with` refused, E-TAPE-JS-METHOD §34 row); conversions (§14.13 new, §20.7.2 honest text, §5.4, §5.5.3, §7.3.4, §7.4.2, §14.4.1 `E.parse`, §41.18 `Rounding` / `trunc` / `round(x, mode)`, §41.22 `scrml:format` new, §19.17 `E-INT-CONVERSION-RT`, Appendix D rewrite); `int` / `bool` spellings; §34 row for the S469 provisional code W-STRING-INTERP-LITERAL.
+> **Amendments applied:** 2026-10-23 (S469) — O10 RULED complete: the tape grant vocabulary `free` · `append`/`pop` · `prepend`/`shift` · `insert`/`remove` · `write` · `replace` and the bracket form `T[grants]` (§66.12.2, §66.12.3); the position-overwrite grant is spelled `write` (was `writable`), and `writable` is refused, `E-GRANT-UNKNOWN` with the fix-it "`writable` is spelled `write`", no deprecation window.
 > **Amendments applied:** 2026-04-07 — §50 added: Assignment as Expression (W-ASSIGN-001, E-ASSIGN-001..E-ASSIGN-004).
 > **Amendments applied:** 2026-04-08 — §51 added: State Transition Rules and `<machine>` state type (E-ENGINE-001..E-ENGINE-012, E-ENGINE-001-RT). §14.4 amended: `transitions {}` block grammar. §6.1 amended: machine-bound reactive variable declaration.
 > **Amendments applied:** 2026-04-08 — §52 added: State Authority Declarations. Two-tier authority model (`<var server>` Tier 2 — V-kill decl form per §6.1.5; `authority=` on `<Type>` Tier 1), compiler-generated sync infrastructure. §6.1.5 grammar: `state-decl` production carries the `server` decl-attr. §11.3.5 added: `protect=` / `authority=` relationship. E-AUTH-001..E-AUTH-005, W-AUTH-001.
@@ -27464,6 +27465,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-RANGE-BOUND-NOT-INT | §49.2.5, §49.9 | A range bound whose type is not `int`. **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F3 *"`..` and `..=` (Recommended)"*. | Error |
 | E-INDEX-OUT-OF-RANGE-RT | §66.12.8 (was §49.13), §19.17 | Runtime trap: an index read `xs[i]` on a tape with `i < 0` or `i >= xs.length`. **(S469)** Also `s[i]` out of range on a string, and a negative COMPUTED position or count in `s.slice(…)` / `s.repeat(n)` (Appendix D.1; ruling:user-voice-scrml.md S469 "⭐ RULED — no negative positions anywhere" — *"No negatives anywhere (Recommended)"*; Nominal). Stops the current unit of execution; not a `!` error (§19.17). `xs.at(i)` is the non-trapping form (`T \| not`). **Nominal / spec-ahead — not yet emitted** (impl#1 reads JavaScript's `undefined`, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F4 *"Trap + `.at()` (Recommended)"*. | Runtime |
 | E-TAPE-JS-METHOD | §66.12.6, §66.20 | (a) A JavaScript array method name called on a tape, in any position, whatever the tape grants — the mutating `push` / `unshift` / `splice` (S469 "tape methods are named after their grants") or the copy-returning `toSorted` / `toReversed` / `with` (S469, O65 (a)); the fix-it names the scrml form (`.append(x)`, `.prepend(x)`, `.remove(i)` / `.insert(i, x)`, `.sort(…)`, `.reverse()`, a position write `xs[i] = v`). (b) A call of `sort`, `reverse`, `fill` or `copyWithin` on a tape whose result is discarded (a statement) — these return a new tape, so the JavaScript in-place idiom would do nothing (derived, §66.12.6 rule 3). Code inside a `_{ }` slice is not checked. **Nominal on impl#1** (impl#1 does not implement §66; it carries the code, §34.0). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`tapeJsFix`, `tapeMethodStmt`). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — tape methods are named after their grants" — *"Names match the grants (Recommended)"*; ruling:user-voice-scrml.md S469 "⭐ RULED — open items from the loops + tapes SPEC PRs" — *"Refuse, one name each (Recommended)"*, *"E-TAPE-JS-METHOD (Recommended)"*. Direction of change: newly-rejecting. | Error |
+| E-GRANT-UNKNOWN | §66.12.2, §66.12.4, §66.20 | A tape grant token that is not a permission axis value: `any` / `all` (there is no all-grant, §66.12.4), a repeated token (the list is a set), any unknown word; the retired single-token places `end` / `front` / `anywhere` (the fix-it names both halves, `append` / `pop`, `prepend` / `shift`, `insert` / `remove` — S442); and the retired spelling `writable` (the fix-it: *"`writable` is spelled `write`"* — O10 RULED S469, no deprecation window). **Nominal on impl#1** (impl#1 does not implement §66 grants; it carries the code, §34.0). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`grantAxis`, `resolveSeqType`, `grantUnknownMessage`). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED (partial O10) — the position-write grant is spelled `write`, not `writable`" — *"I dont like writable, I think I prefer write"*; ruling:user-voice-scrml.md S469 "⭐ RULED — O10 complete: `free`, `write`, `replace`" — *"Keep free and replace (Rec)"*; ruling:user-voice-scrml.md S442 — *"spellings are fine"*. Direction of change: newly-rejecting (`writable`). | Error |
 | E-POSITION-NEGATIVE | Appendix D.1 | A negative LITERAL `slice` position — `s.slice(-1)`, `s.slice(0, -2)` — refused at compile time: no position counts from the end (as ruled). Also, *derived* (the ruling applied to a count or width): a negative literal `s.repeat(n)` count or `s.padStart` / `s.padEnd` width. ~~`xs[-1]`, `s[-1]`~~ *(struck S469 r4: an index read is NOT this code — `xs[-1]` / `s[-1]` trap with `E-INDEX-OUT-OF-RANGE-RT`, literal or computed, §66.12.8 rule 2.)* A negative COMPUTED `slice` position, count or width traps instead (`E-INDEX-OUT-OF-RANGE-RT`); `xs.at(-1)` is `not` and `s.charAt(-1)` is `""`, literal or computed. Fix-it: count from the end explicitly (`s.slice(s.length - 1)`). **Code name provisional (PA, S469).** **Nominal / spec-ahead — not yet emitted** (the bootstrap's `slice` still counts a negative from the end). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — no negative positions anywhere" — *"No negatives anywhere (Recommended)"* (*"`slice(-1)` is refused (a literal at compile time; a computed one traps at run time, the PA reading)"*). Direction of change: newly-rejecting. | Error |
 | E-STRING-METHOD-UNKNOWN | Appendix D.1 | A call on a `string` of a method that is not in Appendix D.1's table (`codePointAt`, `normalize`, `localeCompare`, `match`, `search`, `substring`, `at`, …). The message names the nearest admitted form where there is one. **Code name provisional (PA, S469).** **Nominal / spec-ahead — not yet emitted** (impl#1 passes host methods through; the bootstrap refuses them as `E-BOOTSTRAP-UNSUPPORTED`). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — more string methods admitted" — *"Anything not admitted is refused."* Direction of change: newly-rejecting. | Error |
 | E-TEXT-NON-PRIMITIVE | §14.13.2, §7.4.2, §5.5.3 | A value that is not a primitive (`string`, `int`, `number`, `bool`, unit enum value) in a text sink other than `print` / `println`: markup text `${e}`, a `${e}` in a quoted attribute value, or a `${e}` slot of a logic backtick template — a struct, tape, tuple, map or set, payload enum value, function, or a value of unresolved type. The message names a field read, a `scrml:format` call (§41.22) or `log()`. A markup value is not text (it renders as markup). `print` keeps E-PRINT-NON-PRIMITIVE. **Code name provisional (PA, S469).** **Nominal / spec-ahead — not yet emitted** (impl#1 renders JavaScript `String()`; the bootstrap's `typeInterp` does not check it, deep-dive slice C2). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: what MUST be spelled out" — *"yeah, I like that better"*. Direction of change: newly-rejecting. | Error |
@@ -48724,11 +48726,11 @@ of check:
 1. **Invariants** — length bounds and per-position types (§66.12) — are checked on **EVERY** write, however it
    is spelled.
 2. **Edits** — grow / shrink at the end / front / anywhere (each a separate grant, S442 — §66.12.2) and
-   positions-writable — are **classified at compile time**, from mutating method calls AND from **recognized
+   position writes (granted by `write`, O10 RULED S469 — §66.12.2) — are **classified at compile time**, from mutating method calls AND from **recognized
    reassignment shapes**:
    - `@x = [...@x, e]` is an **end-append** (the same edit as `@x.append(e)`, §66.12.6 rule 3; granted by `append`);
    - `@x = @x.filter(…)` is a **shrink-anywhere** (granted by `remove`);
-   - `@x = @x.map(…)` is a **position-write**.
+   - `@x = @x.map(…)` is a **position-write** (granted by `write`).
 3. **`replace`** — writing an unrelated whole value, including `reset(@x)` and a server reload of the cell — is
    its **OWN explicit grant**, still **bounded by the invariants**. `replace` is NOT an "any" grant.
 
@@ -48908,7 +48910,7 @@ using only non-mutating operations). Permissions are therefore **axes**, checkab
 |---|---|
 | **length** | fixed · bounded (e.g. `1..=10`) · free |
 | **where it changes** | grow and shrink, granted SEPARATELY at each place: end (`append` · `pop`) · front (`prepend` · `shift`) · anywhere (`insert` · `remove`) — `anywhere` covers end and front |
-| **positions** | read-only · writable |
+| **positions** | read-only · overwritable in place (`write`) |
 | **position types** | uniform (an array) · per-position (a tuple) |
 
 > **Amendment S442 — the "where it changes" axis splits grow from shrink; `anywhere` covers end and front.**
@@ -48937,14 +48939,40 @@ anywhere-shrink grant (`remove`) admits pops and shifts.
 
 A stack grants both halves at the end — `Frame[free, append, pop]`. An append-only log grants only the grow half —
 `Entry[free, append]` (§66.19.5). A splice changes anywhere: its removals are a shrink-anywhere (`remove`), its
-insertions a grow-anywhere (`insert`). (The bracket-list form these examples are written in is still ⚑ O10; the six
-tokens are ruled.)
+insertions a grow-anywhere (`insert`). (The bracket-list form these examples are written in, and every grant token,
+are ruled — O10, S442 + S469.)
 
 > **Amendment S469 — the bounded-length token uses the range glyphs.** `a..b` is half-open and `a..=b` inclusive,
 > exactly as in a loop head (§49.2.5), so a length of up to 10 is `1..=10`. **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F3
 > *"`..` and `..=` (Recommended)"* (*"Ruled together with the O10 bounded-length token (`1..10` → `1..=10` where it
 > means "up to 10")"*). **supersedes:** *"bounded (e.g. `1..10`)"*. The rest of O10 — the bracket form itself,
-> `free` / `writable` / `replace` — stays open.
+> `free` / `writable` / `replace` — stays open. *(Closed by the next amendment: O10 RULED complete S469.)*
+
+> **Amendment S469 — O10 RULED complete: the tape grant vocabulary and the bracket form.**
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED (partial O10) — the position-write grant is spelled `write`, not `writable`" — *"I dont like writable, I think I prefer write"*; ruling:user-voice-scrml.md S469 "⭐ RULED — O10 complete: `free`, `write`, `replace`" — *"Keep free and replace (Rec)"*. The ruled entry's text: *"The tape grant vocabulary is fully ruled: `free`: the
+> length can change; it names the length axis; `append` / `pop`, `prepend` / `shift`, `insert` / `remove`: grow and
+> shrink at the end, the front and anywhere; `write`: positions may be overwritten (replacing `writable`);
+> `replace`: whole-value reassignment. The bracket form `T[grants]` is ruled with it."*
+> **supersedes:** the token `writable` (the positions-axis grant in the answered one-axis text
+> `Todo[free, anywhere, writable, replace]`, and in every §66 example and table that spelled it); the ⚑ OPEN
+> residue of O10 (§66.12.3, §66.22).
+
+**The grant vocabulary (O10, RULED S469).** A tape type's grants are a bracket list on the element type,
+`T[g, …]`, each token once (§66.12.3):
+
+| Token | Grants | Axis |
+|---|---|---|
+| `free` | the length can change (bounded: `a..=b`, above) | length |
+| `append` / `pop` | grow / shrink at the end | where it changes |
+| `prepend` / `shift` | grow / shrink at the front | where it changes |
+| `insert` / `remove` | grow / shrink anywhere (covers end and front) | where it changes |
+| `write` | positions may be overwritten in place (`xs[i] = v`; a `map` / `sort` / `reverse` written back) | positions |
+| `replace` | whole-value reassignment, bounded by the invariants (§66.11.2) | — |
+
+`write` matches the verb style of the other grants. **The old spelling `writable` is refused:** it is
+`E-GRANT-UNKNOWN` (§66.20), with the fix-it *"`writable` is spelled `write`"*. There is no deprecation window *(PA
+default, stated in the ruled entry: "refused, with a 'did you mean `write`' fix-it, since the bootstrap is
+pre-release"; impl#1 does not implement §66 grants, so nothing it accepts changes)*.
 
 #### 66.12.3 Permissions live on the TYPE
 
@@ -48986,6 +49014,13 @@ superset grant.)
 > callee's BODY as an edit kind (the compiler classifies what the function does to its parameter); **(c)** leave
 > it a `replace` (helpers cannot write into `replace`-less sequences). PA lean: (b), certify.
 
+> ✅ **RULED S469 — O10 complete.** The bracket-list-on-the-element-type form (`Entry[free, append]`) and the
+> tokens `free`, `write` (renamed from `writable`) and `replace` are ruled; with the six S442 tokens and the S469
+> range glyphs for the bounded length, every part of O10 is ruled (§66.12.2). `writable` is refused
+> (`E-GRANT-UNKNOWN`, fix-it *"`writable` is spelled `write`"*). The S442 block and the prior OPEN text below are
+> kept for the record; their `writable` is the superseded spelling.
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED (partial O10) — the position-write grant is spelled `write`, not `writable`" — *"I dont like writable, I think I prefer write"*; ruling:user-voice-scrml.md S469 "⭐ RULED — O10 complete: `free`, `write`, `replace`" — *"Keep free and replace (Rec)"*.
+
 > ✅ **RULED S442 — O10, in part: the six grow/shrink grant tokens.** `append` / `pop` (end), `prepend` / `shift`
 > (front), `insert` / `remove` (anywhere) are the grant spellings for grow / shrink at each place (§66.12.2).
 > **O10 stays OPEN for the rest:** the bracket-list-on-the-element-type form itself (`Entry[free, append]`),
@@ -48995,7 +49030,7 @@ superset grant.)
 > **Provenance:** ruling:user-voice-scrml.md S442 — *"spellings are fine"* (answering *"The token spelling —
 > `append`/`pop`, `prepend`/`shift`, `insert`/`remove` — is still your call under O10."*).
 >
-> ⚑ **OPEN (not ruled, narrowed S442) — O10: the concrete spelling of a grant.** The grant spellings in the PA text bryan
+> *(superseded S469 — ruled above)* **OPEN (not ruled, narrowed S442) — O10: the concrete spelling of a grant.** The grant spellings in the PA text bryan
 > answered *"1 yes, 2 yes"* (the one-axis ruling) are a bracket list on the element type — `Entry[free, end]`
 > (append-only), `Todo[free, anywhere, writable, replace]`, and a tuple with `replace`, `[:number, :number,
 > replace]` — and `Edit[end]` in a parameter appears in an earlier sketch explicitly marked "illustrative, not a
@@ -49132,7 +49167,7 @@ sequence whose positions carry `:Type` and an optional default, **in the Q3 `:Ty
 > `xs.splice(i, n, …items)`, and `xs.sort(…)` / `xs.reverse()` / `xs.fill(…)` / `xs.copyWithin(…)` as position
 > writes); the ⚑ OPEN O63 and O64 blocks below (now RULED blocks); the §66.11.2 and §66.10 example spellings
 > `@x.push(e)` / `@a.push(3)`; the §66.19.5 `@audit.push(…)`. Not superseded: the six grant tokens (S442) and the
-> ⚑ O10 bracket form, which stays open.
+> O10 bracket form (then open; RULED S469, §66.12.2).
 
 The rules of §66.12.1–§66.12.4 are not a property of cells. **A tape is immutable unless its TYPE grants the
 write, wherever the tape is held, wherever it came from, and however the write is spelled.**
@@ -49178,7 +49213,7 @@ write, wherever the tape is held, wherever it came from, and however the write i
    | `xs.shift()` | shrink at the front | `shift` (or `remove`) |
    | `xs.insert(i, x)` | grow anywhere: `x` becomes position `i` | `insert` |
    | `xs.remove(i)` | shrink anywhere: position `i` is removed | `remove` |
-   | `xs[i] = v` | a position write | `writable` |
+   | `xs[i] = v` | a position write | `write` |
    | `xs.length = n` | a shrink at the end | `pop` (or `remove`) |
 
    Each grow method adds ONE value; to add several, call it once per value or write the recognized shape
@@ -49190,7 +49225,7 @@ write, wherever the tape is held, wherever it came from, and however the write i
    that lengthens would each create a position that holds no value. scrml has no `undefined` (§42.1), so such a
    write breaks the per-position type: `E-WRITE-INVARIANT` (where the compiler cannot prove the index in range,
    enforcement is ⚑ O36). Any other in-place mutation the compiler cannot classify is a `replace` (§66.11.2). (The
-   grant tokens are ruled S442; the bracket form is still ⚑ O10.)
+   grant tokens and the bracket form are ruled — O10, S442 + S469.)
 
    **JS mutating names are refused.** JavaScript's `push`, `unshift` and `splice` are not tape methods. A call of
    one on a tape, in any rule-1 position, is **`E-TAPE-JS-METHOD`** (§66.20), whatever the tape grants: the name
@@ -49215,13 +49250,13 @@ write, wherever the tape is held, wherever it came from, and however the write i
    The arguments and position ranges are JavaScript's; only the mutation is gone. The returned tape is a value,
    so a binding of it carries the grants of its own type, and inference never invents one (rule 1). Writing the
    result back, `xs = xs.sort();`, is a whole-value write (rule 4). It keeps the length and changes positions, so
-   it is classified as a position write, granted by `writable`, like `xs = xs.map(…)` *(derived: the §66.11.2
+   it is classified as a position write, granted by `write`, like `xs = xs.map(…)` *(derived: the §66.11.2
    classifier applied to these forms)*.
 
    A call of one of these four whose result is DISCARDED (`xs.sort();` as a statement) is the JavaScript in-place
    idiom. Under these rules it would do nothing, and `E-STMT-NO-EFFECT` does not catch it, because a call counts as
    an effect (§7.2.2 rule 9). It is therefore `E-TAPE-JS-METHOD` as well, with the fix-it `xs = xs.sort();` (needs
-   `writable`) or a binding of the result *(derived: the refusal that keeps "non-mutating" from being a silent
+   `write`) or a binding of the result *(derived: the refusal that keeps "non-mutating" from being a silent
    no-op; not separately ruled)*. ~~JavaScript's copy-returning twins of these (`toSorted`, `toReversed`, `with`)
    are ⚑ O65 (§66.22).~~ *(RULED S469 — the two paragraphs below.)*
 
@@ -49239,7 +49274,7 @@ write, wherever the tape is held, wherever it came from, and however the write i
    **JavaScript's copy-returning twins are refused, one name each (S469, O65 (a)).** `toSorted`, `toReversed` and
    `with` are not tape methods: a call of one on a tape is **`E-TAPE-JS-METHOD`**, whatever the tape grants, with a
    fix-it naming the scrml form — `xs.toSorted(…)` → `xs.sort(…)` (a scrml `sort` already returns a new tape),
-   `xs.toReversed()` → `xs.reverse()`, `xs.with(i, v)` → a position write `xs[i] = v` (granted by `writable`).
+   `xs.toReversed()` → `xs.reverse()`, `xs.with(i, v)` → a position write `xs[i] = v` (granted by `write`).
    There is one name for each operation.
 
    > **Amendment S469 — O65 ruled.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — open items from
@@ -49279,7 +49314,7 @@ write, wherever the tape is held, wherever it came from, and however the write i
 
 ```scrml
 type Entry:struct = { at: number, actor: string, action: string }
-type Box:struct = { title: string, xs: Entry[free, append] }    // ⚑ O10: bracket form
+type Box:struct = { title: string, xs: Entry[free, append] }    // O10 RULED S469: bracket form
 
 let <b:Box=({ title: "log", xs: [] })/>          // `let` on the struct: it grants replacing the struct (O3)
 
@@ -49297,7 +49332,7 @@ function rebuild(t: string) {
 ```scrml
 type Entry:struct = { at: number, actor: string, action: string }
 
-function record(log: Entry[free, append], e: Entry) -> Entry[free, append] {   // ⚑ O10: bracket form
+function record(log: Entry[free, append], e: Entry) -> Entry[free, append] {   // O10 RULED S469: bracket form
     log.append(e);                                 // end-append: granted by the parameter type
     // log.push(e);                                → E-TAPE-JS-METHOD (fix-it: `log.append(e)`)
     // log.pop();                                  → E-WRITE-NOT-GRANTED (shrink at the end; only `append`)
@@ -50088,7 +50123,7 @@ ${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } f
 <program>
     type Entry:struct = { at: number, actor: string, action: string }   // fields carry no contract → fixed
 
-    <audit:Entry[free, append]=[]/>                 // free length, grows at the end only, NO replace — ⚑ O10: bracket form (tokens ruled S442)
+    <audit:Entry[free, append]=[]/>                 // free length, grows at the end only, NO replace — bracket form + tokens ruled (O10, S442 + S469)
     let <actor:string="ops"/>
 
     function record(action: string) {
@@ -50232,8 +50267,8 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit (including an in-place tape method — `.append`, `.pop`, `.prepend`, `.shift`, `.insert`, `.remove`, an index or `length =` write — on a tape in ANY position: a local, a parameter, a return value, a struct field, a tuple position, or a host / `asIs` value given no granting tape type; §66.12.6, S469), or a write off a lifecycle path — including a transition off a lifecycle path or sequence edit grant on a SUB-FIELD, written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-WRITE-INVARIANT`** | Error | A write that provably violates a sequence invariant — a length bound or a per-position type (§66.11.2; enforcement of the unprovable case is O36). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`W-GRANT-REDUNDANT`** | Warning | A type grants `replace` together with edit grants, which `replace` subsumes (§66.11.3). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-GRANT-UNKNOWN`** | Error | A grant token that is not a permission axis value — including `any` / `all`, which do not exist (§66.12.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-TAPE-JS-METHOD`** | Error | (a) A JavaScript array method name — the mutating `push`, `unshift` or `splice`, or (S469, O65 (a)) the copy-returning `toSorted`, `toReversed` or `with` — called on a tape, in any position (§66.12.6 rule 1), whatever the tape grants; the fix-it names the scrml method (`push` → `.append(x)`, `unshift` → `.prepend(x)`, `splice` → `.remove(i)` / `.insert(i, x)`, `toSorted` → `.sort(…)`, `toReversed` → `.reverse()`, `with` → a position write `xs[i] = v`). (b) A call of `sort`, `reverse`, `fill` or `copyWithin` on a tape whose result is discarded (a statement): these return a new tape and do not mutate, so the JavaScript in-place idiom would do nothing; fix-it `xs = xs.sort();` (needs `writable`) or a binding of the result. Trigger (b) is derived, not separately ruled (§66.12.6 rule 3). Code inside a `_{ }` slice is host code and is not checked. **Nominal on impl#1** (impl#1 does not implement §66); **the bootstrap emits it** (`compiler/self-host-v2/analyze.scrml` — `tapeJsFix`, `tapeMethodStmt`; S469 s469-boot-strings-1). Code name confirmed S469 (*"E-TAPE-JS-METHOD (Recommended)"*). Full row §34. |
+| **`E-GRANT-UNKNOWN`** | Error | A grant token that is not a permission axis value — including `any` / `all`, which do not exist (§66.12.4); the retired single-token places `end` / `front` / `anywhere` (fix-it naming both halves, S442); and the retired spelling `writable` (fix-it *"`writable` is spelled `write`"*, O10 RULED S469, §66.12.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-TAPE-JS-METHOD`** | Error | (a) A JavaScript array method name — the mutating `push`, `unshift` or `splice`, or (S469, O65 (a)) the copy-returning `toSorted`, `toReversed` or `with` — called on a tape, in any position (§66.12.6 rule 1), whatever the tape grants; the fix-it names the scrml method (`push` → `.append(x)`, `unshift` → `.prepend(x)`, `splice` → `.remove(i)` / `.insert(i, x)`, `toSorted` → `.sort(…)`, `toReversed` → `.reverse()`, `with` → a position write `xs[i] = v`). (b) A call of `sort`, `reverse`, `fill` or `copyWithin` on a tape whose result is discarded (a statement): these return a new tape and do not mutate, so the JavaScript in-place idiom would do nothing; fix-it `xs = xs.sort();` (needs `write`) or a binding of the result. Trigger (b) is derived, not separately ruled (§66.12.6 rule 3). Code inside a `_{ }` slice is host code and is not checked. **Nominal on impl#1** (impl#1 does not implement §66); **the bootstrap emits it** (`compiler/self-host-v2/analyze.scrml` — `tapeJsFix`, `tapeMethodStmt`; S469 s469-boot-strings-1). Code name confirmed S469 (*"E-TAPE-JS-METHOD (Recommended)"*). Full row §34. |
 | **`E-FIELD-PRIVATE-WRITE`** | Error | A write from a file other than the defining file to a field that is not `export`ed (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-FOREIGN-REPLACE-PRIVATE`** | Error | A whole-value replace, from outside the defining file, of a value whose type has any private field (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-THEME-TOKEN-CELL-COLLISION`** | Error | A `<theme>` token and a cell are declared with the same name in one program — tokens and cells share ONE namespace (§66.17 item 4), so the pair cannot coexist silently. The message names both declarations. (No existing code fits: `E-NAME-COLLIDES-STATE` is a *local* reusing a cell name, §6.1.3; `E-SCOPE-REDECLARE` is function-body scope, §7.3.3.) **Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §66; the bootstrap front end does not parse T3 yet, so it has no fire site). Provenance: ruling:user-voice-scrml.md S440 (all recs #2, item 5). |
@@ -50378,7 +50413,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O7 | §66.13 | Whether contract kinds combine on one field (lifecycle + graph; `let` + graph — `replace` subsumes edits, §66.11.3, so `let` would make a graph dead); the fate of §14.12.4's carve-out. |
 | ~~O8~~ RULED wiring | §66.15 | Function-typed attributes vs the passed-vs-stored rule (§15.11.5.1, `E-STRUCT-FUNCTION-FIELD`, `E-EQ-003`). |
 | O9 | §66.15.2 | Named and parametric slots on a declaration. |
-| O10 (narrowed S442) | §66.12.3 | Whether the grant spellings in the answered one-axis text (`Entry[free, end]`, `Todo[free, anywhere, writable, replace]`) are the final syntax; the bounded-length token. PARTLY RULED S442: the six grow/shrink tokens (`append`/`pop`, `prepend`/`shift`, `insert`/`remove`) are ruled. Still OPEN: the bracket-list-on-the-element-type form itself, `free` / `writable` / `replace` as tokens. The bounded-length token's glyphs are RULED S469 (`1..=10`, §66.12.2; ruling:user-voice-scrml.md S469 F3 *"`..` and `..=` (Recommended)"*). Provenance: ruling:user-voice-scrml.md S442 — *"spellings are fine"*. |
+| ~~O10~~ RULED S469 | §66.12.2, §66.12.3 | The concrete spelling of a grant. RULED in full: the six grow/shrink tokens (`append`/`pop`, `prepend`/`shift`, `insert`/`remove`; S442, *"spellings are fine"*), the bounded-length glyphs (`1..=10`; S469 F3 *"`..` and `..=` (Recommended)"*), and the bracket-list form `T[grants]` with `free` / `write` / `replace` (S469; `write` renamed from `writable`, which is refused with a fix-it — `E-GRANT-UNKNOWN`). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED (partial O10) — the position-write grant is spelled `write`, not `writable`" — *"I dont like writable, I think I prefer write"*; ruling:user-voice-scrml.md S469 "⭐ RULED — O10 complete: `free`, `write`, `replace`" — *"Keep free and replace (Rec)"*. |
 | O12 (MOOT for tapes, S469) | §66.12.4 | The "hard" severity of the legacy-RHS deprecation within §63 ("clear dep terms" = removal at a MAJOR with `scrml fix`, per the answered L362 text). S469: a legacy tape cell is an error with no window, so O12 no longer concerns tapes; it remains for impl#1's legacy path and for scalar / struct legacy cells. |
 | O13 | §66.9 | Whether logic-local `const` (and §50.8.5's keywordless-binding-is-`const`) retires. |
 | O14 | §66.11 | Whether field contracts govern non-cell (local) values — reversing §50.9's `const`-property-write sentence (lean: yes — an error; the §50.9 reversal was parked on dpa-052, which has ruled). **Record lag:** ruled S440 in user-voice (*"take it, next Q"* — value contracts govern LOCAL values); that text has not landed at §66.11.7. §66.12.6 (S469) states it for tapes. |
@@ -50428,7 +50463,7 @@ modifier — Q6 "a"), O40 (the `given` binding writes the instance — lists "ye
 Q6 "a", "E2, move on", "yes, :struct,") — **O53's attribute half is SUPERSEDED S447** (§66.4 rule 6 retires;
 writable / exported fields are children — ruling:user-voice-scrml.md S447, *"your recs"*, item 2, sub-rec 4). Ruled S437 (*"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*): O21 (by derivation from L6), O57, O58, O59, O60.
 Ruled S442: O55 (*"1 your rec, 2 deliberate, 3 your rec"* — a plain use of a `single` declaration is an error);
-O10 in part (*"spellings are fine"* — the six grow/shrink tokens; the rest of O10 stays OPEN).
+O10 in part (*"spellings are fine"* — the six grow/shrink tokens; the rest of O10 RULED S469 — *"I dont like writable, I think I prefer write"*, *"Keep free and replace (Rec)"*).
 Ruled S462: O18 (*"I really like X so I accept your rec as a ratified path to X"* — undeclared use-site
 attributes are refused; explicit forwarding is the ratified destination; residue O18-r stays open). Ruled S462: O46 (*"go on the package"*, Q14 — `${...}` retires as the children spread; X spelled
 `...attrs:button`, applied bare).
