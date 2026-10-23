@@ -22,6 +22,7 @@ import { setActiveClientAsync, resetListenerSources } from "./js-async-analysis.
 import { eventUnboundErrors } from "./listener-event-check.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { getNodes, isServerOnlyNode, collectFunctions, collectTopLevelStatements } from "./collect.ts";
+import { setLiftFileFunctionNames } from "./emit-lift.js";
 import { emitLogicNode, beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
 import { workerBundleFilename } from "./emit-worker.ts";
 import { emitBindings } from "./emit-bindings.ts";
@@ -2364,6 +2365,10 @@ export function generateClientJs(ctx: CompileContext): string {
   lines.push("// --- end scrml reactive runtime ---");
   lines.push("");
   clientStage(ctx, "detect-runtime-chunks", () => { detectRuntimeChunks(fileAST, ctx); });
+  // S469 round 4 — a lifted if= / show= that calls one of the file's top-level functions
+  // is a self-contained gate (emit-lift.js _liftGateIsSelfContained); every other name
+  // a gate reads makes it inline. Set before any markup / lift is emitted.
+  setLiftFileFunctionNames(collectFunctions(fileAST).map((n: any) => n && n.name).filter((n: unknown) => typeof n === "string"));
 
   // Emit JS imports from use-decl and import-decl nodes (§40, §21.3, §41.3).
   // Local .scrml imports are rewritten to .client.js (compiled browser output).

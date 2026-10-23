@@ -177,24 +177,37 @@ describe("S469 round 2 — show=, the top-level bare `if`, and a component's `@`
   });
 });
 
-describe("S469 round 3 — a gate reading a body local snapshots it at render", () => {
-  test("plain group: the local is a parameter of the gate's effect scope, and the group keeps the read", () => {
+describe("S469 round 4 — a gate is its own effect only when its condition is self-contained", () => {
+  test("a body local: read inline in the render (main's lowering), no own effect", () => {
     const r = compile(`<n> = 1\n<div>\${ let i = 0\n while (i < 3) { lift <span><b if=(i == @n)>x</b></span>\n i = i + 1 } }</div>\n`);
     expect(r.errors).toEqual([]);
-    expect(r.js).toMatch(/let (_scrml_cur_\w+) = \(_scrml_structural_eq\(i, _scrml_cs_reactive_get\("n"\)\)\) \? _scrml_lift_el_\w+ : _scrml_ph_\w+;\n\s*\(\(i\) => \{\n\s*_scrml_effect\(function\(\) \{ \1 = _scrml_ifrow_apply\(/);
-    expect(r.js).toMatch(/\}\)\(i\);/);
+    expect(r.js).toMatch(/let _scrml_cur_\w+ = \(_scrml_structural_eq\(i, _scrml_cs_reactive_get\("n"\)\)\) \? _scrml_lift_el_\w+ : _scrml_ph_\w+;/);
+    expect(r.js).not.toMatch(/_scrml_ifrow_apply\(/);
   });
 
-  test("a called function is not snapshot; a gate with no local keeps the plain effect", () => {
-    const r = compile(`<role> = "admin"\n\${ function isAdmin() { return @role == "admin" } }\n<div>\${ lift <span><b if=(isAdmin() && true)>x</b></span> }</div>\n`);
+  test("a local closure: inline, never an effect", () => {
+    const r = compile(`<n> = 1\n<div>\${ let ok = false\n const allowed = () => ok || @n > 5\n lift <span><b if=(allowed())>x</b></span>\n ok = true }</div>\n`);
     expect(r.errors).toEqual([]);
-    expect(r.js).not.toMatch(/\(\(isAdmin\) =>/);
-    expect(r.js).toMatch(/let _scrml_cur_\w+ = _scrml_lift_el_\w+;\n\s*_scrml_effect\(function\(\) \{/);
+    expect(r.js).toMatch(/let _scrml_cur_\w+ = \(allowed\(\)\) \? /);
+    expect(r.js).not.toMatch(/_scrml_ifrow_apply\(/);
+  });
+
+  test("a keyed loop whose gate reads a local is lowered plain (the group re-runs it)", () => {
+    const r = compile(`<n> = 1\n<rows> = [{ id: 1 }]\n<div>\${ let ok = false\n const allowed = () => ok || @n > 5\n for (row of @rows) { lift <b if=(allowed())>x</b> }\n ok = true }</div>\n`);
+    expect(r.errors).toEqual([]);
+    expect(r.js).not.toMatch(/_scrml_reconcile_list\(/);
+  });
+
+  test("a file-level function, a cell, the row item: self-contained — own effect, keyed row kept", () => {
+    const r = compile(`<role> = "admin"\n<rows> = [{ id: 1, ok: true }]\n\${ function isAdmin() { return @role == "admin" } }\n<div>\${ for (row of @rows) { lift <b if=(isAdmin() && row.ok)>x</b> } }</div>\n`);
+    expect(r.errors).toEqual([]);
+    expect(r.js).toMatch(/_scrml_reconcile_list\(/);
+    expect(r.js).toMatch(/_scrml_ifrow_apply\(/);
   });
 
   test("an arrow parameter inside the condition is not a free name", () => {
     const r = compile(`<xs> = [1]\n<div>\${ lift <span><b if=(@xs.some(v => v > 0))>x</b></span> }</div>\n`);
     expect(r.errors).toEqual([]);
-    expect(r.js).not.toMatch(/\}\)\(v\);/);
+    expect(r.js).toMatch(/_scrml_effect\(function\(\) \{ _scrml_cur_\w+ = _scrml_ifrow_apply\(/);
   });
 });

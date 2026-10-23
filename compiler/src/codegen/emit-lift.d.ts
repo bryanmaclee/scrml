@@ -43,6 +43,7 @@ export declare function liftNonKeyedActive(): boolean;
 
 /** Restore every emit-lift module stack / counter to its initial value (head of every runCG). */
 export declare function resetLiftModuleState(): void;
+export declare function setLiftFileFunctionNames(names: Iterable<string> | null | undefined): void;
 
 /** Build a reconcile ctx (call BEFORE pushing it — the item-local scan reads the ancestor stack). */
 export declare function buildLiftReconcileCtx(

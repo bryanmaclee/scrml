@@ -666,3 +666,51 @@ describe("S469 round 3 — F2: a gate whose row an OUTER owner removes is releas
     expect(globalThis.__sw).toBe(0);
   });
 });
+
+describe("S469 round 4 — F-A: a gate reading a local CLOSURE or a mutated local reads it in the render (fail closed)", () => {
+  const SHAPES = [
+    ["a closure over a flag set after the lift", (a) => `let ok = false
+ const allowed = () => ok || @n > 5
+ lift <span><b class="g" ${a}=(allowed())>x</b></span>
+ ok = true`, 1, [[2, 0], [9, 1], [2, 0]]],
+    ["a closure over a counter", (a) => `let pos = 0
+ const isCurrent = () => pos == @n
+ for (it of @items) { pos = pos + 1
+ lift <b class="g" ${a}=(isCurrent())>x</b> }`, 3, [[3, 1], [1, 1], [5, 0], [2, 1]]],
+    ["a mutated local array", (a) => `let seen = []
+ for (it of @items) { seen.push(it.id)
+ lift <b class="g" ${a}=(seen.length == @n)>x</b> }`, 3, [[2, 1], [3, 1], [7, 0]]],
+    ["a mutated local object", (a) => `let o = { c: 0 }
+ for (it of @items) { o.c = o.c + 1
+ lift <b class="g" ${a}=(o.c == @n)>x</b> }`, 3, [[2, 1], [9, 0], [1, 1]]],
+  ];
+  const CONTEXTS = [
+    ["a plain group", (body) => `\${ ${body} }`],
+    ["an \`if … lift\` arm", (body) => `\${ if (@on) { ${body} } }`],
+    ["a reconciled row", (body) => `\${ for (row of @rows) { ${body} } }`],
+  ];
+  for (const [cname, ctx] of CONTEXTS) {
+    for (const [sname, body, total, steps] of SHAPES) {
+      for (const attr of ["if", "show"]) {
+        test(`${cname}: ${sname} (${attr}=)`, async () => {
+          const app = compileAndMount(`<n> = 1
+<on> = true
+<rows> = [{ id: 1 }]
+<items> = [{ id: 1 }, { id: 2 }, { id: 3 }]
+<div id="out">${ctx(body(attr))}</div>
+`);
+          expect(app.errors).toEqual([]);
+          await flush();
+          const open = () => attr === "if"
+            ? count("#out b.g")
+            : [...document.querySelectorAll("#out b.g")].filter((e) => e.style.display !== "none").length;
+          for (const [n, want] of steps) {
+            await set("n", n);
+            expect([n, open()]).toEqual([n, want]);
+          }
+          if (attr === "show") expect(count("#out b.g")).toBe(total);
+        });
+      }
+    }
+  }
+});

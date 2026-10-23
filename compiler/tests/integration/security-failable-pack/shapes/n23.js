@@ -135,6 +135,22 @@ const LOCALS = [
   ["flag set after the lift", `let ok = false
  lift <b if=(ok || @pw == "secret")>LOGGED IN</b>
  ok = true`],
+  // S469 round 4 (F-A) — a local CLOSURE reads its locals by reference, and a mutated local
+  // array / object is the same value at every later read: neither may reach a later re-run.
+  ["closure over a flag set after the lift", `let ok = false
+ const allowed = () => ok || @pw == "secret"
+ lift <b if=(allowed())>LOGGED IN</b>
+ ok = true`],
+  ["closure over a counter", `let pos = 0
+ const later = () => pos > 1 || @pw == "secret"
+ for (it of @items) { pos = pos + 1
+ lift <b if=(later())>\${pos == 1 ? "LOGGED IN" : ""}</b> }`],
+  ["mutated local array", `let seen = []
+ for (it of @items) { seen.push(it.id)
+ lift <b if=(seen.length > 1 || @pw == "secret")>\${seen.length == 1 ? "LOGGED IN" : ""}</b> }`],
+  ["mutated local object", `let o = { c: 0 }
+ for (it of @items) { o.c = o.c + 1
+ lift <b if=(o.c > 1 || @pw == "secret")>\${o.c == 1 ? "LOGGED IN" : ""}</b> }`],
 ];
 const LOCAL_CTX = [
   ["plain group", (b) => `\${ ${b} }`],
