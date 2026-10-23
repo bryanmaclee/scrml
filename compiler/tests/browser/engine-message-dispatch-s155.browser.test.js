@@ -35,7 +35,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
-import { captureInsideChunkScope, chunkNamespaceToken } from "../helpers/chunk-scope.js";
+import { captureInsideChunkScope, chunkNamespaceToken, chunkCellKey } from "../helpers/chunk-scope.js";
 import { tmpdir } from "os";
 
 const tmpRoot = resolve(tmpdir(), "scrml-msg-dispatch-browser");
@@ -83,7 +83,14 @@ function mountModule(source, baseName, varName) {
     "document",
     `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
       `globalThis.__scrml_get__ = _scrml_reactive_get;\n` +
-      `globalThis.__scrml_dispatch_fn__ = _scrml_engine_dispatch_message;\n` +
+      // S469: the compiled `.advance(.Msg)` call site calls the chunk's SCOPED wrapper
+      // `_scrml_cs_engine_dispatch_message`, which namespaces the engine var through
+      // `_scrml_cs_key` (BUG-6). The wrapper is emitted only when the program itself has a
+      // call site; when it doesn't, the bare runtime fn read the UN-namespaced key "dragPhase" —
+      // a cell that does not exist — so every dispatch silently no-op'd. Key it the same way.
+      `globalThis.__scrml_dispatch_fn__ = (typeof _scrml_cs_engine_dispatch_message === "function") ? _scrml_cs_engine_dispatch_message\n` +
+      `  : (typeof _scrml_cs_key === "function") ? (n, ...r) => _scrml_engine_dispatch_message(_scrml_cs_key(n), ...r)\n` +
+      `  : _scrml_engine_dispatch_message;\n` +
       `globalThis.__scrml_arm_table__ = (typeof ${armTableName} !== "undefined") ? ${armTableName} : null;\n` +
       `globalThis.__scrml_tx_table__ = (typeof ${txTableName} !== "undefined") ? ${txTableName} : null;\n` +
       `globalThis.__scrml_idle__ = (typeof ${idleName} !== "undefined") ? ${idleName} : null;\n` +
@@ -98,6 +105,9 @@ function mountModule(source, baseName, varName) {
   }
   return {
     threw,
+    /** The chunk-namespaced store key for an author name (BUG-6) — runtime-side keys
+     *  such as the onIdle timer (`<varName>::__idle`) are built from it. */
+    cellKey: chunkCellKey(clientJs),
     get: (name) => globalThis.__scrml_get__(name),
     set: (name, v) => globalThis.__scrml_set__(name, v),
     armTable: () => globalThis.__scrml_arm_table__,
@@ -231,7 +241,8 @@ describe("§51.0.S.3 same-state arm — effect runs, onIdle resets, onTransition
 
   test(".Tick (same-state arm) RESETS the <onIdle> watchdog — §51.0.R handled-message reset", () => {
     const m = mountModule(TICK, "tick", "game");
-    const timerKey = "game::__idle";
+    // S469: the runtime builds the key from the NAMESPACED var (`<token>$game::__idle`).
+    const timerKey = m.cellKey("game") + "::__idle";
     const before = m.timers()[timerKey];
     expect(before).toBeDefined(); // watchdog armed at boot
     m.dispatch("game", "Tick", true);

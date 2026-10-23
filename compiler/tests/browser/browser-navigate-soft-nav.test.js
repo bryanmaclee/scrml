@@ -26,6 +26,7 @@ import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { chunkCellKey } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -35,6 +36,10 @@ function compileInline(src) {
   const f = join(dir, "app.scrml");
   writeFileSync(f, src);
   const r = compileScrml({ inputFiles: [f], write: false, outputDir: join(dir, "out"), log: () => {} });
+  // S469: a fixture that no longer compiles must fail HERE, by name — not mount half-emitted
+  // output and fail later on a symptom (the `pick(event)` fixture had been E-EVENT-UNBOUND).
+  const errs = (r.errors || []).filter((e) => e && (e.severity ?? "error") === "error");
+  if (errs.length) throw new Error("fixture compile errors: " + errs.map((e) => e.code).join(", "));
   const out = r.outputs.get(f);
   return { html: out.html, clientJs: (out && out.clientJs) || "" };
 }
@@ -47,18 +52,30 @@ function mount(html, clientJs) {
   document.body.innerHTML = cleanHtml;
   const code =
     "(function(){\n" + SCRML_RUNTIME + "\n" + clientJs + "\n" +
+    "window._scrml_reactive_get = _scrml_reactive_get;\n" +
+    "window._scrml_reactive_set = _scrml_reactive_set;\n" +
     "window._scrml_navigate_soft = typeof _scrml_navigate_soft === 'function' ? _scrml_navigate_soft : undefined;\n" +
     "window._scrml_rehydrate_region = typeof _scrml_rehydrate_region === 'function' ? _scrml_rehydrate_region : undefined;\n" +
     "window._scrml_register_rehydrator = typeof _scrml_register_rehydrator === 'function' ? _scrml_register_rehydrator : undefined;\n" +
-    "window._scrml_reactive_get = _scrml_reactive_get;\n" +
-    "window._scrml_reactive_set = _scrml_reactive_set;\n" +
     "window._scrml_timer_registry = typeof _scrml_timer_registry !== 'undefined' ? _scrml_timer_registry : undefined;\n" +
     "window._scrml_ssr_seed_apply = typeof _scrml_ssr_seed_apply === 'function' ? _scrml_ssr_seed_apply : undefined;\n" +
+    "window._scrml_ssr_seed_apply_scoped = typeof _scrml_ssr_seed_apply_scoped === 'function' ? _scrml_ssr_seed_apply_scoped : undefined;\n" +
     "window._scrml_shell_cells = typeof _scrml_shell_cells !== 'undefined' ? _scrml_shell_cells : undefined;\n" +
     "window._scrml_input_keyboard_registry = typeof _scrml_input_keyboard_registry !== 'undefined' ? _scrml_input_keyboard_registry : undefined;\n" +
     "})();";
   // eslint-disable-next-line no-eval
   eval(code);
+  // S469: since BUG-6 chunk namespacing the store key of a program cell is `<token>$name`; the
+  // bare runtime accessors captured above key `count` UN-namespaced — a cell nothing reads — which
+  // is why every "stays reactive after the swap" case here read a frozen value. Key test reads and
+  // writes the way the chunk's own `_scrml_cs_*` wrappers do.
+  const cellKey = chunkCellKey(clientJs);
+  const rawGet = window._scrml_reactive_get;
+  const rawSet = window._scrml_reactive_set;
+  window._scrml_reactive_get = (name, ...r) => rawGet(cellKey(name), ...r);
+  window._scrml_reactive_set = (name, ...r) => rawSet(cellKey(name), ...r);
+  window._scrml_reactive_get_raw = rawGet; // UN-namespaced key — only for proving a write went astray
+  window._scrml_cell_key = cellKey;
   document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
 }
 
@@ -289,7 +306,7 @@ describe("§20.8.2 step 3 — rehydration re-wires the swapped region", () => {
       "  ${ function go() { navigate(\"/page2\") } }",
       "  ${ function pick(e) { @picked = \"changed\" } }",
       "  <button onclick=go()>Go</button>",
-      "  <select onchange=pick(event)><option>a</option><option>b</option></select>",
+      "  <select onchange=pick()><option>a</option><option>b</option></select>",
       "</program>",
     ].join("\n");
     const { html, clientJs } = compileInline(shell);
@@ -670,8 +687,42 @@ describe("finding #5 — a persistent SHELL cell is NOT reset by a soft-nav rehy
     // Load-bearing proof: the seed DID contain `accounts`, and the INITIAL-load
     // seed-apply (no skipShell) DOES set it — so the skip above is what protected
     // the mutation, not an inert no-op.
-    window._scrml_ssr_seed_apply(false);
+    // S469: the chunk's initial-load apply is its SCOPED wrapper
+    // (`_scrml_cs_ssr_seed_apply` → `_scrml_ssr_seed_apply_scoped(_scrml_cs_key, …)`,
+    // codegen/index.ts cellScopeWrapper "ssrApply"); the bare runtime
+    // `_scrml_ssr_seed_apply` keys the seed UN-namespaced since BUG-6. Drive the
+    // scoped form, as the chunk does.
+    // CAVEAT (gap g-soft-nav-rehydrate-seed-apply-unscoped): the runtime's REHYDRATE
+    // path still calls the bare `_scrml_ssr_seed_apply(true)`, so the "kept its mutated
+    // value" assertion above holds even without the shell skip — the seed never reaches
+    // the namespaced cell. The test below pins that defect.
+    window._scrml_ssr_seed_apply_scoped(window._scrml_cell_key, false);
     expect(window._scrml_reactive_get("accounts")).toEqual([{ id: 1, name: "ssr-initial" }]);
+  });
+
+  // KNOWN-RED (gap g-soft-nav-rehydrate-seed-apply-unscoped, S469). `_scrml_rehydrate_region`
+  // (runtime-template.js) applies the fetched route's SSR seed through the UNSCOPED
+  // `_scrml_ssr_seed_apply(true)`, which writes each seed key BARE. Since BUG-6 every program
+  // cell lives at `<token>$name`, so on a soft nav the seed lands in phantom un-namespaced cells:
+  // route cells are never re-seeded from the fetched route, and the shell skip (#5) is vacuous.
+  test("[gap g-soft-nav-rehydrate-seed-apply-unscoped] the rehydrate seed-apply keys route cells into the chunk namespace (no phantom bare cell)", async () => {
+    const { html, clientJs } = compileInline(SHELL5);
+    restoreFetch = globalThis.fetch;
+    globalThis.fetch = (input) => {
+      const path = typeof input === "string" ? input : (input && input.url) || "";
+      if (path.indexOf("/page2") !== -1) return Promise.resolve({ ok: true, status: 200, redirected: false, url: path, text: async () => ssrDoc("<p>two</p>", { accounts: [{ id: 1, name: "ssr-initial" }], routeNote: "from-route-seed" }) });
+      return Promise.resolve({ ok: true, status: 200, redirected: false, url: path, json: async () => [], text: async () => "[]" });
+    };
+    mount(html, clientJs);
+    await flush();
+    expect(window._scrml_reactive_get_raw("accounts")).toBeUndefined(); // clean before the nav
+    window._scrml_navigate_soft("/page2");
+    await flush();
+    // `routeNote` is NOT a shell cell, so the rehydrate seed-apply applies it — and must apply
+    // it under this chunk's key, exactly as the chunk's own initial-load apply would.
+    expect(window._scrml_reactive_get_raw("routeNote")).toBeUndefined();
+    expect(window._scrml_reactive_get("routeNote")).toBe("from-route-seed");
+    expect(window._scrml_reactive_get_raw("accounts")).toBeUndefined();
   });
 });
 

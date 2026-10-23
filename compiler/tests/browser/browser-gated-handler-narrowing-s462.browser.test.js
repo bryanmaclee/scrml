@@ -14,17 +14,28 @@
  * the impl-neutral driver, whose selector verbs cannot address a removed element.)
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { createMountIsolation } from "../helpers/mount-isolation.js";
 import { tmpdir } from "os";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
 const tmpRoot = resolve(tmpdir(), "scrml-gated-handler-s462");
+
+// Every case mounts a fresh program into the one shared document. Tear the previous program's
+// document/window listeners down first — otherwise its delegated click listener resolves a later
+// program's `data-scrml-bind-onclick` id against ITS OWN handler table (ids restart per compile)
+// and runs a stale handler (S469: the stale `@out = @user.name` threw into the next file).
+const iso = createMountIsolation();
+afterAll(async () => {
+  iso.teardown();
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+});
 
 function compileAndMount(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -41,14 +52,17 @@ function compileAndMount(source, baseName) {
   const runtimeJs = readFileSync(resolve(outDir, result.runtimeFilename ?? "scrml-runtime.js"), "utf8");
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
   const bodyHtml = (bodyMatch ? bodyMatch[1] : html).replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
+  iso.teardown();
   document.body.innerHTML = bodyHtml;
   const exec = new Function(
     "window",
     "document",
     `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__s462q18_get = _scrml_reactive_get;\n`),
   );
-  exec(window, document);
-  document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+  iso.track(() => {
+    exec(window, document);
+    document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+  });
   return { errors };
 }
 
@@ -194,12 +208,15 @@ function compileMountCount(source, baseName) {
   const clientJs = readFileSync(resolve(outDir, `${baseName}.client.js`), "utf8");
   const runtimeJs = readFileSync(resolve(outDir, result.runtimeFilename ?? "scrml-runtime.js"), "utf8");
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  iso.teardown();
   document.body.innerHTML = (bodyMatch ? bodyMatch[1] : html).replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
   globalThis.__s462_renders = 0;
-  new Function("window", "document",
-    `${runtimeJs}\nconst __rv = _scrml_render_value; _scrml_render_value = function(el, v) { globalThis.__s462_renders++; return __rv(el, v); };\n${clientJs}`,
-  )(window, document);
-  document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+  iso.track(() => {
+    new Function("window", "document",
+      `${runtimeJs}\nconst __rv = _scrml_render_value; _scrml_render_value = function(el, v) { globalThis.__s462_renders++; return __rv(el, v); };\n${clientJs}`,
+    )(window, document);
+    document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+  });
   return errors;
 }
 async function rendersOf(id) {
@@ -223,7 +240,12 @@ ${TOGGLES}
     await flush();
     expect([await rendersOf("#on"), await rendersOf("#off"), await rendersOf("#on")]).toEqual([4, 0, 4]);
   });
-  test("a nested gated subtree: 8 renders per toggle-on, as on main; none into the removed subtree", async () => {
+  // S469: was 8. The 8 was measured with the PREVIOUS case's program still listening on the shared
+  // document — its delegated #on/#off listeners (same handler ids) ran its own on()/off() and its
+  // spy-wrapped renders landed in the same global counter. Mounted alone (`-t "nested gated subtree"`)
+  // or with the previous program torn down, the nested program's own count is 6 — 2 per gated
+  // interpolation (3 of them), the same per-interpolation rate as the flat case's 4 (2 of them).
+  test("a nested gated subtree: 6 renders per toggle-on (2 per gated interp, as the flat case); none into the removed subtree", async () => {
     expect(compileMountCount(`<program>
 <show> = false
 <inner> = true
@@ -233,7 +255,7 @@ ${TOGGLES}
 </program>
 `, "snapnested")).toEqual([]);
     await flush();
-    expect([await rendersOf("#on"), await rendersOf("#off"), await rendersOf("#on")]).toEqual([8, 0, 8]);
+    expect([await rendersOf("#on"), await rendersOf("#off"), await rendersOf("#on")]).toEqual([6, 0, 6]);
   });
 });
 
