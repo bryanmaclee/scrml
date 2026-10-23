@@ -2042,7 +2042,7 @@ An event-handler attribute value takes one of the following shapes:
 
 **Normative statements:**
 
-- An event-handler attribute value MAY be an **inline block**: a `{`, a statement list, and the matching `}`. The statement list is logic context — the same statement grammar as a function body (§7.3): statements are separated by a newline or by `;`, exactly as §7.2.2 defines for every statement list (a newline ends a statement unless the line ends in a continuation token; a line starting with an operator is `E-STMT-LEADING-OPERATOR`; two statements on one line need a `;`), and assignments, calls, `const`/`let` declarations, and `if`/loop statements are all legal. The block MAY span any number of lines. *(Amended S446, dpa-063: the separator sentence now points at §7.2.2's one rule — **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — "b, your rec" · dd:`scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md` (cross-cutting table, inline-handler row) · **supersedes:** the three S437 round-4 pins that read a leading-`+` / leading-`?`/`:` line as continuing a handler statement — see §7.2.2.)*
+- An event-handler attribute value MAY be an **inline block**: a `{`, a statement list, and the matching `}`. The statement list is logic context — the same statement grammar as a function body (§7.3): statements ~~are separated by a newline or by `;`, exactly as §7.2.2 defines for every statement list (a newline ends a statement unless the line ends in a continuation token; a line starting with an operator is `E-STMT-LEADING-OPERATOR`; two statements on one line need a `;`),~~ *(S469, dpa-073 F1 (a))* each end with `;`, exactly as §7.2.2 defines for every statement list (`onclick={ @n = @n + 1; }`; a newline is whitespace), and assignments, calls, `const`/`let` declarations, and `if`/loop statements are all legal. The block MAY span any number of lines. *(Amended S446, dpa-063: the separator sentence now points at §7.2.2's one rule — **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — "b, your rec" · dd:`scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md` (cross-cutting table, inline-handler row) · **supersedes:** the three S437 round-4 pins that read a leading-`+` / leading-`?`/`:` line as continuing a handler statement — see §7.2.2.)*
 - On each dispatch of the event, the statements of an inline block SHALL run in source order, each one exactly once, with `@var` reads and writes lowered exactly as they are in a function body. No statement of the block SHALL be dropped, whatever its kind or position — in particular, a statement's effect SHALL NOT depend on whether an earlier statement is a call or an assignment, or on whether the handler sits at top level, inside an engine state-child (§51.0.I), or inside an `<each>` row (§17.7).
 - A cell write from a server call (`@x = save()`) in any handler — inline block, `${…}` value, or nested in an `if` / loop / block / `match` arm of one — is awaited before the next statement runs; only a write that is the handler's SOLE root statement may run fire-and-forget. §13.2 states the rule. *(Added S450 — **Provenance:** ruling:user-voice-scrml.md S447 "stamp all" — "(iii) nested-sequence stale read: keep the fire-and-forget skip only when the cell write is the handler's SOLE root statement, await in place everywhere else.")*
 - The inline block is NOT invoked at render time; it runs only when the event fires. An inline block holding a single statement (`onclick={@filter = .All}`) is legal and equivalent to the bare shape of the same statement.
@@ -4554,6 +4554,9 @@ ${ function computeHash(pw: string) {       // escalates server-side per §12.2 
 
 ### 6.7 Lifecycle and Timing Model
 
+> **Amendment S469 — §6.7's examples end their statements with `;`.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐⭐⭐ RULED — dpa-073 F1 = (a)" — *"(a) `;` terminates (Recommended)"* · ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2(i) / F3(i) / F4(ii)" — F3 *"Every statement (Recommended)"* (*"`;` after every non-block statement including the last before `}` (`onclick={ @n = @n + 1; }`); block-like statements and closer-delimited items take none."*) · the F6 disposition *"`lift <…>` takes `;`"*, confirmed by ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 1.
+>
+> What changed: in every non-struck `scrml` block of §6.7 (§6.7.1a – §6.7.11), each statement now ends with `;` — a statement in a `${ … }` logic body (including the one assignment of a `<request>` / `<poll>` / `<timer>` / `<timeout>` body and an `<onMount>` / `<effect>` body), in a function or arrow body, at a `<program>` body top (a `<name> = value` declaration), and a `lift <…>`. What takes none, per F3 (i): a block-like statement (`if` / `else`, `for`, a function declaration), an item delimited by its own closer (`let <x/>`, a markup child), a value position (a markup `${ … }` interpolation in render position, a bare handler value `onclick=${ … }`). Struck blocks, grammar blocks and compiler-output blocks are unchanged (`request-body`'s `assignment-expression` takes the `;` in the examples but its production is not rewritten here). No example changes meaning. §66.19 is not touched by this amendment (its blocks are verbatim copies of the bootstrap's slice sources and move with them).
 
 ### 6.7.1 Overview
 
@@ -4645,8 +4648,8 @@ onmount-body  ::= '$' '{' logic-content '}'
 ```
 
 ```scrml
-<onMount>${ @noteBox.focus() }</>
-<onMount>${ track("view", { page: "load-detail", loadId: @loadId }) }</>
+<onMount>${ @noteBox.focus(); }</>
+<onMount>${ track("view", { page: "load-detail", loadId: @loadId }); }</>
 ```
 
 - An `<onMount>` SHALL appear where an `<effect>` may: as a child element of an element scope (§6.7.4 "Syntax").
@@ -4738,7 +4741,7 @@ chain down to the write, and SHALL name the home for the job, picked by shape wh
 
 ```scrml
 let <mode:DiffMode=.WorkingCopy/>
-<onMount>${ @mode = modeFromParam(changeParam()) }</>      // E-MOUNT-WRITES-STATE
+<onMount>${ @mode = modeFromParam(changeParam()); }</>      // E-MOUNT-WRITES-STATE
 // E-MOUNT-WRITES-STATE: this mount body writes `@mode`. <onMount> prepares the outside world and may not write
 // reactive state during the mount. A value computed from the URL belongs in the cell's initializer:
 //     let <mode:DiffMode=modeFromParam(changeParam())/>
@@ -4794,11 +4797,11 @@ let <mapEl:HTMLElement|not=not/>
 let <noteBox:HTMLElement|not=not/>
 
 <onMount>${
-    const map = createRouteMap(@mapEl, @center, 9)                // third-party widget, needs the element
-    map.on("moveend", () => { @center = map.getCenter() })        // legal: the widget writes LATER (3m)
-    @noteBox.focus()                                              // the box exists: after render and ref= (1c)
-    track("view", { page: "load-detail", loadId: @loadId })       // analytics page view
-    cleanup(() => map.remove())                                   // teardown beside the setup (3a)
+    const map = createRouteMap(@mapEl, @center, 9);               // third-party widget, needs the element
+    map.on("moveend", () => { @center = map.getCenter(); });       // legal: the widget writes LATER (3m)
+    @noteBox.focus();                                             // the box exists: after render and ref= (1c)
+    track("view", { page: "load-detail", loadId: @loadId });      // analytics page view
+    cleanup(() => map.remove());                                  // teardown beside the setup (3a)
 }</>
 <div ref=@mapEl class="h-64"></div>
 <textarea ref=@noteBox bind:value=@note></textarea>
@@ -4965,11 +4968,11 @@ that produces a non-function.
 
 ```scrml
 // Valid forms
-cleanup(() => { closeConnection() })
-cleanup(teardownFn)
+cleanup(() => { closeConnection(); });
+cleanup(teardownFn);
 
 // Invalid — cleanup() argument is not a function
-cleanup(closeConnection())   // E-LIFECYCLE-002
+cleanup(closeConnection());  // E-LIFECYCLE-002
 ```
 
 #### Semantics
@@ -4997,14 +5000,14 @@ defines it. Scope resolution is determined at the call site, not the definition 
 ```scrml
 // In utils.scrml
 export fn setupSocket {
-    const ws = new WebSocket(url)
-    cleanup(() => ws.close())   // registers on CALLER's scope
-    return ws
+    const ws = new WebSocket(url);
+    cleanup(() => ws.close());  // registers on CALLER's scope
+    return ws;
 }
 
 // In app.scrml
 <div class="chat" if=@showChat>
-    <onMount>${ setupSocket() }</>   // cleanup fires when <div if=@showChat> destroys
+    <onMount>${ setupSocket(); }</>  // cleanup fires when <div if=@showChat> destroys
 </>
 ```
 
@@ -5125,9 +5128,9 @@ effect-body   ::= '$' '{' logic-content '}'
 ```
 
 ```scrml
-<effect deps=[@category]>${ track("filter", { category: @category, query: @query }) }</>
-<effect deps=[@messages]>${ scrollToBottom(@logEl) }</>
-<effect deps=[@mapCenter, @zoom]>${ leafletMap.setView([@mapCenter.lat, @mapCenter.lng], @zoom) }</>
+<effect deps=[@category]>${ track("filter", { category: @category, query: @query }); }</>
+<effect deps=[@messages]>${ scrollToBottom(@logEl); }</>
+<effect deps=[@mapCenter, @zoom]>${ leafletMap.setView([@mapCenter.lat, @mapCenter.lng], @zoom); }</>
 ```
 
 - `deps=` is REQUIRED and SHALL list at least one cell. An `<effect>` with no `deps=`, or with `deps=[]`, never
@@ -5306,7 +5309,7 @@ homes for the job, picked by shape where the compiler can tell:
 let <query:string=""/>
 let <page:int=1/>
 
-<effect deps=[@query]>${ @page = 1 }</>          // E-EFFECT-WRITES-STATE
+<effect deps=[@query]>${ @page = 1; }</>         // E-EFFECT-WRITES-STATE
 // E-EFFECT-WRITES-STATE: this effect writes `@page`. An <effect> drives the outside world and may not write
 // reactive state. To reset `@page` when `@query` changes, declare it on the cell:
 //     let <page:int=1 reset-on=[@query]/>
@@ -5402,9 +5405,9 @@ the **transition-write graph** and reject a cycle in it:
 type SyncState:enum = { Idle, Pushing, Failed }
 <engine for=SyncState initial=.Idle>
     <Idle rule=.Pushing/>
-    <Pushing rule=(.Idle | .Failed) effect=${ push() !{ _ e :> { @syncState = .Failed } } }/>
+    <Pushing rule=(.Idle | .Failed) effect=${ push() !{ _ e :> { @syncState = .Failed; } } }/>
     <Failed rule=.Pushing>
-        <onTransition from=.Pushing>${ @syncState = .Pushing }</>   // E-TRANSITION-WRITE-CYCLE: Pushing → Failed → Pushing
+        <onTransition from=.Pushing>${ @syncState = .Pushing; }</>  // E-TRANSITION-WRITE-CYCLE: Pushing → Failed → Pushing
     </>                                                            // fix: <onTimeout after=5s to=.Pushing/> in Failed
 </>
 ```
@@ -5492,17 +5495,17 @@ to become un-paused without a reactive variable. The compiler SHALL emit W-LIFEC
 ```scrml
 // Minimal timer — fires every 1000ms, always running
 <timer interval=1000>
-    ${ @tick = @tick + 1 }
+    ${ @tick = @tick + 1; }
 </>
 
 // Named, conditionally running timer
 <timer id="refresh" interval=5000 running=@autoRefreshEnabled>
-    ${ @data = fetchData() }
+    ${ @data = fetchData(); }
 </>
 
 // Produces W-LIFECYCLE-007: running=false literal is useless
 <timer interval=1000 running=false>
-    ${ @tick = @tick + 1 }
+    ${ @tick = @tick + 1; }
 </>
 ```
 
@@ -5546,7 +5549,7 @@ properties are available on a timer reference:
 
 ```scrml
 <timer id="poller" interval=3000 running=@pollEnabled>
-    ${ @messages = fetchMessages() }
+    ${ @messages = fetchMessages(); }
 </>
 
 <p>Poll active: ${<#poller>.running}</>
@@ -5656,7 +5659,7 @@ its first execution SHALL remain one interval after arming (§6.7.5).
 
 ```scrml
 <poll id="serverTime" interval=10000>
-    ${ @serverTime = fetchServerTime() }
+    ${ @serverTime = fetchServerTime(); }
 </>
 ```
 
@@ -5690,7 +5693,7 @@ poll body has no observable data-loading effect).
 
 ```scrml
 <poll id="price" interval=5000>
-    ${ @currentPrice = fetchPrice(@tickerId) }
+    ${ @currentPrice = fetchPrice(@tickerId); }
 </>
 
 <p>Price: ${<#price>.value}</>
@@ -5779,17 +5782,17 @@ The `cache` attribute is optional and bare (S444, dpa-060 — **Nominal / spec-a
 ```scrml
 // Minimal — fetches on mount, re-fetches when @userId changes (inferred)
 <request id="profile">
-    ${ @user = fetchUser(@userId) }
+    ${ @user = fetchUser(@userId); }
 </>
 
 // Explicit deps — re-fetches when @page or @filter changes
 <request id="results" deps=[@page, @filter]>
-    ${ @items = fetchItems(@page, @filter) }
+    ${ @items = fetchItems(@page, @filter); }
 </>
 
 // Fetch on mount only — no reactive deps
 <request id="config" deps=[]>
-    ${ @appConfig = fetchConfig() }
+    ${ @appConfig = fetchConfig(); }
 </>
 ```
 
@@ -5900,22 +5903,22 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 
 ```scrml
 <program>
-    <userId> = 42
+    <userId> = 42;
 
     <request id="profile">
-        ${ @user = fetchUser(@userId) }
+        ${ @user = fetchUser(@userId); }
     </>
 
     <div>
         ${
             if (<#profile>.loading && !<#profile>.stale) {
-                lift <p>Loading...</>
+                lift <p>Loading...</>;
             } else if (<#profile>.error) {
-                lift <p>Error: ${<#profile>.error.message}</>
-                lift <button onclick=${<#profile>.refetch()}>Retry</>
+                lift <p>Error: ${<#profile>.error.message}</>;
+                lift <button onclick=${<#profile>.refetch()}>Retry</>;
             } else {
-                lift <h1>${@user.name}</>
-                lift <p>${@user.email}</>
+                lift <h1>${@user.name}</>;
+                lift <p>${@user.email}</>;
             }
         }
     </>
@@ -5927,18 +5930,18 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 ```scrml
 <program>
     <request id="config" deps=[]>
-        ${ @appConfig = fetchConfig() }
+        ${ @appConfig = fetchConfig(); }
     </>
 
     <div>
         ${
             if (@appConfig is not) {
-                lift <p>Loading config...</>
+                lift <p>Loading config...</>;
             } else {
                 lift <div class="app">
                     <h1>${@appConfig.title}</h1>
                     <p>${@appConfig.tagline}</p>
-                </>
+                </>;
             }
         }
     </>
@@ -6183,8 +6186,8 @@ let <issueId:int=42/>
 let <body:string="" debounced=800ms/>
 let <savedAt:string=""/>
 
-<request id="load" deps=[@issueId]>${ @body = loadIssueBody(@issueId) }</>      // READ: runs on mount
-<request id="save" deps=[@body]>${ @savedAt = saveIssueBody(@issueId, @body) }</>  // provably writes (UPDATE)
+<request id="load" deps=[@issueId]>${ @body = loadIssueBody(@issueId); }</>     // READ: runs on mount
+<request id="save" deps=[@body]>${ @savedAt = saveIssueBody(@issueId, @body); }</> // provably writes (UPDATE)
 
 <textarea bind:value=@body/>
 <p>${ <#save>.error ? "Not saved" : <#save>.loading ? "Saving…" : "Saved " + @savedAt }</p>
@@ -6248,12 +6251,12 @@ Use `<#id>.cancel()` to prevent firing.
 ```scrml
 // Minimal timeout — fires once after 5000ms
 <timeout delay=5000>
-    ${ @sessionExpired = true }
+    ${ @sessionExpired = true; }
 </>
 
 // Named timeout — supports .cancel() and .fired
 <timeout id="paymentGuard" delay=10000>
-    ${ @paymentTimedOut = true }
+    ${ @paymentTimedOut = true; }
 </>
 
 // Cancellable on user action
@@ -6300,11 +6303,11 @@ properties and methods are available:
 
 ```scrml
 <timeout id="paymentGuard" delay=10000>
-    ${ @paymentTimedOut = true }
+    ${ @paymentTimedOut = true; }
 </>
 
 when <#paymentGuard>.fired changes {
-    ${ logPaymentTimeout() }
+    ${ logPaymentTimeout(); }
 }
 
 <p>${<#paymentGuard>.fired ? "Expired" : "Active"}</>
@@ -6369,10 +6372,10 @@ compiler SHALL emit E-LIN-004 if a `lin` variable is referenced inside a `<timeo
 
 ```scrml
 <program>
-    <sessionExpired> = false
+    <sessionExpired> = false;
 
     <timeout id="sessionGuard" delay=1800000>
-        ${ @sessionExpired = true }
+        ${ @sessionExpired = true; }
     </>
 
     <div if=@sessionExpired class="expired-banner">
@@ -6395,7 +6398,7 @@ write inside the body triggers reactive re-render of the conditional `<div>`.
 
 ```scrml
 <timeout id="guard">
-    ${ @timedOut = true }
+    ${ @timedOut = true; }
 </>
 ```
 
@@ -6409,10 +6412,10 @@ Error E-TIMEOUT-001 at line 1: `<timeout>` requires a `delay` attribute.
 
 ```scrml
 <program>
-    <paymentTimedOut> = false
+    <paymentTimedOut> = false;
 
     <timeout id="paymentGuard" delay=10000>
-        ${ @paymentTimedOut = true }
+        ${ @paymentTimedOut = true; }
     </>
 
     <div>
@@ -6427,7 +6430,7 @@ Error E-TIMEOUT-001 at line 1: `<timeout>` requires a `delay` attribute.
 
 ```scrml
 <timeout delay=0>
-    ${ doSomething() }
+    ${ doSomething(); }
 </>
 ```
 
@@ -6488,14 +6491,14 @@ E-LIFECYCLE-017 if `animationFrame()` is called outside any element scope (as de
 <canvas ref=@canvasEl width="800" height="600">
     ${
         function draw() {
-            const ctx = @canvasEl.getContext('2d')
-            ctx.clearRect(0, 0, 800, 600)
+            const ctx = @canvasEl.getContext('2d');
+            ctx.clearRect(0, 0, 800, 600);
             for (shape of @shapes) {
-                lift ctx.strokeRect(shape.x, shape.y, shape.w, shape.h)
+                lift ctx.strokeRect(shape.x, shape.y, shape.w, shape.h);
             }
-            animationFrame(draw)
+            animationFrame(draw);
         }
-        animationFrame(draw)
+        animationFrame(draw);
     }
 </>
 ```
@@ -6621,18 +6624,18 @@ E-RESET-ON-ENGINE-REFUSED · E-RESET-ON-SHARED-CELL (S449) (§34).
 
 ```scrml
 <program>
-    ${ loadDashboard() }
+    ${ loadDashboard(); }
 
-    <autoRefresh>  = false
-    <intervalSecs> = 30      // reactive @ cell — this is NOT the timer interval attribute
-    <countdown>    = 30
+    <autoRefresh>  = false;
+    <intervalSecs> = 30;     // reactive @ cell — this is NOT the timer interval attribute
+    <countdown>    = 30;
 
     <timer id="refresh" interval=1000 running=@autoRefresh>
         ${
-            @countdown = @countdown - 1
+            @countdown = @countdown - 1;
             if (@countdown <= 0) {
-                loadDashboard()
-                @countdown = @intervalSecs   // reads current value of @intervalSecs
+                loadDashboard();
+                @countdown = @intervalSecs;  // reads current value of @intervalSecs
             }
         }
     </>
@@ -6664,19 +6667,19 @@ callbacks (none were registered).
 
 ```scrml
 <program>
-    <showChat> = false
+    <showChat> = false;
 
     <button onclick=${@showChat = !@showChat}>Toggle Chat</>
 
     <div class="chat-panel" if=@showChat>
         <timer id="poll" interval=3000>
-            ${ @messages = fetchMessages() }
+            ${ @messages = fetchMessages(); }
         </>
 
-        cleanup(() => { disconnectFromRoom() })
+        cleanup(() => { disconnectFromRoom(); });
 
         <div class="messages">
-            ${ for (m of @messages) { lift <p>${m.text}/ } }
+            ${ for (m of @messages) { lift <p>${m.text}/; } }
         </>
     </>
 </>
@@ -6708,16 +6711,16 @@ When `@showChat` transitions false → true a second time:
     let <results:Item[replace]=[]/>
 
     <request id="search" deps=[@query, @minPrice, @maxPrice, @page]>
-        ${ @results = searchItems(@query, @minPrice, @maxPrice, @page) }
+        ${ @results = searchItems(@query, @minPrice, @maxPrice, @page); }
     </>
-    <effect deps=[@query]>${ track("search", { q: @query }) }</>
+    <effect deps=[@query]>${ track("search", { q: @query }); }</>
 
     <input bind:value=@query placeholder="Search..."/>
     <input bind:value=@minPrice type="number" placeholder="Min price"/>
     <input bind:value=@maxPrice type="number" placeholder="Max price"/>
 
     <p>Page: ${@page}</>
-    ${ for (r of @results) { lift <p>${r.name}/ } }
+    ${ for (r of @results) { lift <p>${r.name}/; } }
 </>
 ```
 
@@ -6738,10 +6741,10 @@ does not run on mount and writes nothing — it only reports the search to analy
     let <page:int=1/>
     let <lastSeen:string=""/>
 
-    ${ function remember(p: int) { @lastSeen = `page ${p}` } }
+    ${ function remember(p: int) { @lastSeen = `page ${p}`; } }
 
-    <effect deps=[@page]>${ @page = 1 }</>             // E-EFFECT-WRITES-STATE (direct; also a self-trigger)
-    <effect deps=[@page]>${ remember(@page) }</>       // E-EFFECT-WRITES-STATE (through remember())
+    <effect deps=[@page]>${ @page = 1; }</>            // E-EFFECT-WRITES-STATE (direct; also a self-trigger)
+    <effect deps=[@page]>${ remember(@page); }</>      // E-EFFECT-WRITES-STATE (through remember())
 </>
 ```
 
@@ -6763,7 +6766,7 @@ Move the write into the code that changes `@page`, or derive the value (§6.6).
 
 ```scrml
 <program>
-    cleanup(closeConnection())   // E-LIFECYCLE-002
+    cleanup(closeConnection());  // E-LIFECYCLE-002
 </>
 ```
 
@@ -6784,7 +6787,7 @@ E-LIFECYCLE-002: `cleanup()` argument must be a function expression, not a call 
     let <qty:number=2/>
     let <total:number=0/>
 
-    <effect deps=[@price]>${ @total = @price * @qty }</>   // E-EFFECT-WRITES-STATE
+    <effect deps=[@price]>${ @total = @price * @qty; }</>  // E-EFFECT-WRITES-STATE
 </>
 ```
 
@@ -6800,11 +6803,11 @@ third fix text says so.
 
 ```scrml
 <program>
-    <tickerId>     = "AAPL"
-    <currentPrice> = not
+    <tickerId>     = "AAPL";
+    <currentPrice> = not;
 
     <poll id="price" interval=5000>
-        ${ @currentPrice = fetchPrice(@tickerId) }
+        ${ @currentPrice = fetchPrice(@tickerId); }
     </>
 
     <p>Price: ${@currentPrice ?? "Loading..."}</>
@@ -6817,19 +6820,19 @@ third fix text says so.
 
 ```scrml
 <program>
-    <shapes> = []
+    <shapes> = [];
 
     <canvas ref=@canvasEl width="800" height="600">
         ${
             function draw() {
-                const ctx = @canvasEl.getContext('2d')
-                ctx.clearRect(0, 0, 800, 600)
+                const ctx = @canvasEl.getContext('2d');
+                ctx.clearRect(0, 0, 800, 600);
                 for (shape of @shapes) {
-                    lift ctx.strokeRect(shape.x, shape.y, shape.w, shape.h)
+                    lift ctx.strokeRect(shape.x, shape.y, shape.w, shape.h);
                 }
-                animationFrame(draw)
+                animationFrame(draw);
             }
-            animationFrame(draw)
+            animationFrame(draw);
         }
     </>
 </>
@@ -6851,14 +6854,14 @@ The `<canvas>` element is not conditionally rendered here, so its scope is perma
 ```scrml
 // In network.scrml
 export fn openConnection(url: string) {
-    const ws = new WebSocket(url)
-    cleanup(() => ws.close())   // cleanup() inside this function => RI classifies as client-side
-    return ws
+    const ws = new WebSocket(url);
+    cleanup(() => ws.close());  // cleanup() inside this function => RI classifies as client-side
+    return ws;
 }
 
 // In app.scrml
 <div if=@connected>
-    ${ const conn = openConnection(@serverUrl) }
+    ${ const conn = openConnection(@serverUrl); }
 </>
 ```
 
@@ -6869,12 +6872,12 @@ is not server-escalated. When the `<div if=@connected>` scope destroys, `ws.clos
 
 ```scrml
 <program>
-    <count>   = 0
-    <enabled> = true
+    <count>   = 0;
+    <enabled> = true;
 
     ${
         if (@enabled) {
-            cleanup(() => { console.log("cleanup", @count) })
+            cleanup(() => { console.log("cleanup", @count); });
         }
     }
 </>
@@ -8041,105 +8044,204 @@ c = stepped(c)
 
 **Why this section, not §19 or §21.** §7.2 is where logic content is defined as "all JavaScript" — the exclusion belongs next to the claim it qualifies. `class` is not an error-handling concept (§19, the home of `try`/`throw`/`async`) nor a module concept (§21, the home of the dynamic-import rule).
 
-#### 7.2.2 Statement termination — a newline ends a statement; continuation is explicit (S446, dpa-063)
+#### 7.2.2 Statement termination — `;` ends a statement; a newline is whitespace (S469, dpa-073)
 
-**Added 2026-10-01 (S446).** This is the ONE statement-termination rule of scrml logic. §7.2's "all JavaScript is valid" sentence does **not** carry JavaScript's automatic semicolon insertion (ASI) into scrml: termination is defined here, not inherited, and it is the same rule in every logic body. Before S446 the SPEC stated no rule; the three front ends each ran a different one (impl#1's default parser a heuristic, `--parser=scrml-native` ECMAScript ASI, the bootstrap a hybrid), and `console.log("m")⏎-3102` silently compiled as `console.log("m") - 3102`.
+**Rewritten S469.** This is the ONE statement-termination rule of scrml logic. §7.2's "all JavaScript is valid" sentence does **not** carry JavaScript's automatic semicolon insertion (ASI) into scrml: termination is defined here, not inherited, and it is the same rule in every logic body. Before S469 this section held the S446 rule (dpa-063 Call 1 (b): a newline ends a statement, continuation is explicit). dpa-073 F1 (a) superseded that rule, and the S446 text is quoted, for the record, at the end of this section.
 
-> **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — *"b, your rec"* · ruling:user-voice-scrml.md S446 "dpa-063 pole (c) eliminated" — *"before I rule on this (c is out) I am not familiar with "rust-style tail expression". expound first."* · ruling:user-voice-scrml.md S446 "dpa-063 Call 4 = PA recs" — *"I do agree with your recs, BUT, every other language that I know allows . chaining to start a line. Its where we look. this is not a decision just a concern. I suppose that code formating could indent the line after a trailing . to make it clear."* · ruling:user-voice-scrml.md S446 "dpa-063 Call 5 = (i)" — *"(i), your rec, and yes on +/-"* · ruling:user-voice-scrml.md S446 "`when` re-trigger … dpa-063 Calls 6 + 7 = PA recs" — *"b on retrigger, your recs on 6 and 7"* · ruling:user-voice-scrml.md S445 "statement termination → dPA" — *"your solution seems reasonable. but a ; really clarifies things. That is huge though. And I am not a fan of specific silent carve-outs like this. lets dpa it"* · dd:`scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md` (Approach B; the cross-cutting locus table; C1 SPEC sites) · **supersedes:** ruling:user-voice-scrml.md S440 JS-WAT #6 (*"ASI: `return` followed by a newline and an expression is an error; scrml's statement splitter stops copying JS's semicolon insertion (a statement-start `(`/`[`/template never silently joins the previous line)"*) — subsumed, never built as its own list (Call 7); the three S437 round-4 conformance pins `markup-handler/s437-r4-continuation-{leading-plus,expr-form-leading-plus,leading-question-colon}` (positive → negative); the body-top-only scope of S445 #2 `E-STMT-NO-EFFECT` (§40.8, widened by rule 9 below); the S441 round-5 "a `;` is source formatting" (§34 `E-INTERNAL-BODY-TOP-DROPPED`) · direction-of-change: **newly-rejecting** (a leading-operator line; two statements on one line in front ends that accepted them) and **meaning-changing** (a line starting with `(`, `[`, a template, a regex, `-` or `+` no longer joins the line above — it now errors or starts a statement).
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐⭐⭐ RULED — dpa-073 F1 = (a)" — *"(a) `;` terminates (Recommended)"* (*"Pole A: `;` is the statement terminator; newlines carry no grammar."*) · ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2(i) / F3(i) / F4(ii), all as recommended" — *"F2 "Always a comma (Recommended)" · F3 "Every statement (Recommended)" · F4 "Error on ( [ ` (Recommended)""* (*"**F3(i):** `;` after every non-block statement including the last before `}` (`onclick={ @n = @n + 1; }`); block-like statements and closer-delimited items take none. **F4(ii):** an error when an expression continues across a line break into a line starting with `(`, `[` or a template literal (keeps S440 #6 as a diagnostic; measured 0 real non-test sites)."*) · ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F5 "Bootstrap enforces (Recommended)"" — *"(4) the BOOTSTRAP enforces `;` + commas by construction. impl#1 does NOT enforce `;`/commas — it keeps accepting newline-terminated code as a carried, impl#1-labelled divergence"* · ruling:user-voice-scrml.md S469 "⚑ PA READING (veto window, S469) — dpa-073 F6 dispositions" — *"`E-STMT-LEADING-OPERATOR` deleted (never emitted); dpa-063 Call 4a moot, 4b superseded; the leading `+`/`-` error moot; §7.2.2 rules 1–5/7/8 + "Arm heads" replaced; `E-STMT-MISSING-SEMICOLON` becomes THE termination code ("Expected `;` to end the statement"); `E-STMT-NO-EFFECT` language-wide KEPT; `~` exemption unchanged (`;` does not discard a value — no Rust tail semantics, S446); `lift <…>` takes `;`; S440 #6 kept via F4(ii); `return⏎expr;` returns `expr`; "unreachable after `return`" stays OPEN (S447 reading 9)."* · dd:`scrml-support/docs/deep-dives/newline-syntax-dpa-073-2026-10-18.md` (§4.1 pole A — what takes no `;`; §9 F1–F6) · **supersedes:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — *"b, your rec"* (this section's S446 rules 1–5, 7, 8, "Arm heads", "Leading-dot chains", the S446 Call 6 migration paragraph and both worked examples; quoted below) · **Direction of change:** **newly-rejecting** — a statement with no `;` (E-STMT-MISSING-SEMICOLON); **meaning-changing** — a line that starts with an operator, `.` or `?` now continues the expression on the line above, and `return⏎expr;` returns `expr`. · ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" — *"Confirm all four"* · *"Attach to the line above"* · *"Keyword at statement start"* · *"Build both"* (the F6 dispositions confirmed; line starts, contextual keywords, E-STMT-NO-EFFECT in the bootstrap and E-STMT-SPLIT-CONTINUATION ruled — rules 4, 5, 8, 9 and 10). *(The F6 dispositions were a PA reading in its veto window until that ruling.)*
 
-**Status: Nominal / spec-ahead.** No front end implements this section yet: impl#1 (both parsers) and the bootstrap still run their pre-S446 rules (`docs/known-gaps.md` §S446). Build order (Call 6): the bootstrap by construction first; impl#1 parity under the security/bootstrap exception so the two compilers agree; then the corpus codemod.
+**Status.** The BOOTSTRAP enforces rules 1–3 and the comma list by construction (s469-boot-semicolons, #1510: `compiler/self-host-v2/parse.scrml` `parseTermStmt` / `termAfter` / `missingSemi`, `parseArms` / `missingArmComma`). It still reads a line break in a few places — each listed, and labelled, under "Remaining newline-sensitive readings" below. impl#1 does not enforce `;` and keeps its pre-S446 termination heuristic: a carried, impl#1-labelled divergence (dpa-073 F5; `g-dpa063-termination-unbuilt-impl1-legacy`). (`--parser=scrml-native` is retired, S449 — `compiler/src/commands/compile.js` refuses the flag — so the native parser runs only at its fixed internal call sites.)
 
-**Terms.** A **statement list** is the content of: a `${ … }` logic context; a function or `fn` body; an inline handler block `onclick={ … }` (§5.2.3); a `^{ … }` meta body; a `when … { … }` / `on mount { … }` body; any `{ … }` block of a statement (`if` / `else` / loop / bare block) or of an arrow / function expression; a `{ … }` match or `!{}` arm block; an if-as-expression arm block (§17.6); a `~{ … }` test body; the statements of a code-default body (§4.18 — engine state-child, `<match>` block-form arm) and of a `<program>` / `<page>` / `<channel>` body top (§40.8). Inside a statement list the **statement level** is bracket depth 0 relative to that list. A newline at statement level is a **line break**; a newline anywhere else (rule 4) is whitespace.
+**Terms.** A **statement list** is the content of: a `${ … }` logic context; a function or `fn` body; an inline handler block `onclick={ … }` (§5.2.3); a `^{ … }` meta body; a `when … { … }` / `on mount { … }` body; any `{ … }` block of a statement (`if` / `else` / loop / bare block) or of an arrow / function expression; a `{ … }` match or `!{}` arm block; an if-as-expression arm block (§17.6); a `~{ … }` test body; the statements of a code-default body (§4.18 — engine state-child, `<match>` block-form arm) and of a `<program>` / `<page>` / `<channel>` body top (§40.8). *(Unchanged from S446.)*
 
 **Normative statements:**
 
-1. **A line break ends a statement.** At statement level a statement SHALL end at the first line break that follows a complete statement, unless rule 2 continues it. A statement also ends at a `;` (rule 6) and at the `}` that closes its enclosing statement list. A `//` comment or whitespace between the statement's last token and the line break does not change this.
-2. **Continuation is explicit, at the END of a line.** A statement SHALL continue onto the next line only when the last token of the line (ignoring a trailing `//` comment) is a **continuation token** — exactly this closed list:
-   - a binary (infix) operator: `+` `-` `*` `/` `%` `**` `==` `!=` `===` `!==` `<` `>` `<=` `>=` `&&` `||` `??` `&` `|` `^` `<<` `>>` `>>>` `in` `instanceof`, and scrml's `is` (§42; `@x is not` / `@x is given` — and the soft-deprecated `@x is some` — are complete: `not` / `given` / `some` end the expression);
-   - `=` and every compound assignment operator (`+=` `-=` `*=` `/=` `%=` `**=` `&&=` `||=` `??=` `&=` `|=` `^=` `<<=` `>>=` `>>>=`);
-   - member access `.` and optional chaining `?.`;
-   - the conditional operator's `?` and `:`. A conditional `?` has whitespace before it (`ready ?`). A `?` written directly against the end of its operand, with no whitespace (`load(id)?`), is the §19.5 propagation operator: a complete postfix expression that ends the statement like any other operand. Adjacency decides the role, as the whitespace before a `:`-shorthand `:` does (§4.14);
-   - `,`;
-   - the arrow `=>` and the arm separator `:>` (with its deprecated aliases, §18.2);
-   - a prefix operator that cannot end an expression: `!`, `typeof`, `new`.
+1. **`;` ends a statement.** In a statement list, every statement that is not block-like (rule 2) SHALL end with `;` — the last one before the list's closing `}` included (`onclick={ @n = @n + 1; }`). A statement with no `;` after it SHALL be **`E-STMT-MISSING-SEMICOLON`** (§34), message *"Expected `;` to end the statement"*, reported at the end of the statement — where the `;` goes. *(F1 (a), F3 (i); the code and message: F6, confirmed — ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 1.)*
+2. **What takes no `;`.** *(F3 (i): "block-like statements and closer-delimited items take none"; the list is dd §4.1's.)*
+   - A **block-like statement**, whose `{ … }` body ends it: `if` / `else`, a loop (`for`, §49), a statement-position `match`, `given`, the retiring `when … changes { … }`, a function / `fn` declaration, and the retiring `on mount { … }`. *(PA reading of "whose body is a `{ }`": `defer { … }` and `transaction { … }` are block-like too.)* A statement after the `}` needs no `;` of its own beyond rule 1's: `if (c) { a(); } b();`. A statement-position `match` ends at its `}`: a token that continues it on the same line (`match k { … } + 2`) is not part of it — the bootstrap reports **E-PARSE-TRAILING** (§34.2) there; write the `match` in a value position (`const v = match k { … } + 2;`), where the declaration is the statement and takes the `;`.
+   - An **item delimited by its own closer**: a `let <x/>` declaration, a markup child, a standalone display-text literal (§40.8), a `type … = { … }` declaration.
+   - A braceless body is a statement and takes its own `;` (`if (c) x = 1;`).
+   - `lift <…>` is a statement and takes `;` *(F6, confirmed — ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 1: *"`lift <…>` takes `;`"*)*. A value declaration whose initializer is a block-like expression still ends with `;` (`const xs = for (…) { lift e; };`, §49.6).
+3. **Single-expression positions are unchanged.** A `:`-shorthand body (§4.14), a bare handler value `onclick=expr` (§5.2.3 — a top-level `;` there is still `E-MULTI-STATEMENT-HANDLER`), a markup `${ … }` interpolation in a render position (§17.6.10), and a single-expression arm body (`.A :> expr`, ended by its `,` or the list's `}`, §18.2) hold one expression and take no `;`.
+4. **A newline is whitespace.** In logic, a line break SHALL NOT end, continue or separate a statement or an arm: it is whitespace to the grammar of an accepted program. *(F1 (a): "newlines carry no grammar".)* Its only lexical job is ending a `//` comment. So a line that starts with an operator, `.`, `?.`, `?` or `:` continues the expression on the line above — the leading-dot chain needs no parentheses (`o.items⏎    .map(f)⏎    .reduce(g, 0);`) and a leading ternary is legal. **Line starts (RULED):** `!{ … }`, `is given` / `is not` and `?` cannot start a statement, so on a new line each continues the expression before it — `x⏎!{ … }` handles `x`, and `x⏎is given` tests `x`. A `?` is decided by adjacency only: glued (`x?`) it is the §19.5 propagation operator, spaced it is the conditional; whether a line ends after it plays no part. *(ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 2 — *"Attach to the line above"*; it confirms S447 reading 2's adjacency rule and drops the end-of-line test.)* **Hazard (accepted by the ruling):** a forgotten `;` before a line that starts with `-`, `+`, `/` or `.` joins the two lines into one expression (`console.log("m")⏎-3102;` is `console.log("m") - 3102`); dd §4.1 measured 0 such non-test sites, and F4 (iii), which would have made `-` / `+` / `/` errors, was not chosen. Rule 5 is the one exception.
+5. **A continuation into `(`, `[` or a template is an error.** An expression SHALL NOT continue across a line break into a line that starts with `(`, `[` or a template literal: `let b = a⏎(a + 1).toString();` is a compile error, not the call `a(a + 1)`. This keeps S440 JS-WAT #6's guarantee as a diagnostic, not as a grammar rule. The error SHALL be **`E-STMT-SPLIT-CONTINUATION`** (§34), message *"add `;` to the line above, or join the lines"*. *(F4 (ii), RULED; the code and message: ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 4.)* **Not yet emitted** — the bootstrap reports a generic code today ("Remaining newline-sensitive readings").
+6. **`;` is never text and never "source formatting".** It is legal between two statements on one line (`@a = 1; @b = 2;`). At a `<program>` / `<page>` / `<channel>` body top it is this terminator (§40.8). *(Restated from S446 rule 6, which F6 does not list as replaced; "a formatter MAY strip a line-final `;`" is struck — `;` is required.)*
+7. **Two statements on one line** need no rule of their own: by rule 1, `let a = 1 let b = 2;` is E-STMT-MISSING-SEMICOLON after `1`.
+8. **`return` and the leaving statements.** `return;` returns nothing; `return expr;` returns `expr`, and since a newline is whitespace, so does `return⏎    expr;`; likewise `lift⏎expr;` lifts `expr`. *(F6, confirmed — ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 1: *"`return⏎expr;` returns `expr`"*, *"`lift⏎expr` lifts `expr`, the same as return"*.)* For the other leaving statements this follows from F1 (a) (a newline is whitespace): for `fail` it is ruled — rule 10, `fail⏎.E;` is `fail .E;`; for a `break` / `continue` label it is derived, not separately ruled, and the bootstrap's same-line label reading stays INTERIM (table below). **INTERIM — fails closed:** the bootstrap REFUSES `return⏎expr` and `lift⏎expr` with E-STMT-MISSING-SEMICOLON at the end of the keyword, its message naming both repairs (`return;`, or the value on the keyword's line), so that a legacy `return⏎next()` is never silently read as `return next();`. The refusal stays *"until the SPEC, docs and corpus are migrated, then switches to the ruled reading"* (ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 1). ⚑ **OPEN:** whether unreachable code after `return` / `fail` / `break` / `continue` is an error is not ruled (S447 reading 9, kept by F6); no front end SHALL invent a diagnostic for it.
+9. **An expression statement with no effect is an error in every statement list** — `E-STMT-NO-EFFECT` (§34), defined at §40.8 (S445 #2) and made language-wide by S446 Call 5. *(KEPT by F6.)* It is what flags an orphan value: `f(x);⏎(y);` is two statements, and the second, `(y);`, does nothing. The definition of an effect, its exemptions (a value read through `~` — `;` does not discard a value, there is no tail-expression semantics, S446) and the value positions that are not expression statements are stated once, at §40.8. Wherever `${ @count }` is a logic block whose content is read as STATEMENTS, its `@count` is a no-effect statement; a markup interpolation in a render position (`<p>${ @count }</p>`) is a value position and is not. **RULED to be built in the bootstrap**, for a pure expression statement on either line, including one after a block-like `}` (`if (c) { … }⏎-1;`) — ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 4 (*"Build both"*). **Status:** not yet built beyond the body top (`g-stmt-no-effect-language-wide-unbuilt`); the bootstrap reads such a statement silently today.
 
-   No other token continues a statement across a line break. A statement whose line ends in a token NOT on this list ends there. (The `>` or `/>` that closes a markup tag in a markup-as-value expression, §7.4, is not an operator: markup is delimited by its closer, rule 4.)
+   > **Provenance (rule 9, kept):** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 7, ACCEPTED: *"value positions are not expression statements (so `${ @count }` as a logic-block STATEMENT is E-STMT-NO-EFFECT — settles the S445 #2 reach question: yes, everywhere)"*).
+10. **`fail`, `defer` and `transaction` are keywords at statement start.** Each SHALL be read as its keyword at the start of a statement whenever the next token can begin its operand, regardless of line: `fail⏎    .NotFound;` is `fail .NotFound;`, and `transaction⏎{ … }` is a `transaction` block. The bare name `fail` is reserved in statement position. *(ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 3 — *"Keyword at statement start"*; answers dpa-073 route-to-PA R8.)*
 
-   > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 1, ACCEPTED: *"the END-token closed list"* — S446 Call 1 ruled the token CLASSES; the exact membership above is ratified as stated) · (reading 2, ACCEPTED: *"`?` by ADJACENCY (glued = §19.5 propagation, ends the statement; spaced = conditional, continues)"* — the alternative "a conditional `?` never ends a line" is not adopted).
-3. **A line that STARTS with a token that can only continue an expression is an error.** At statement level, a line whose first token is one of: a binary operator other than `/` and `<` (rule 3a), including `+` and `-`; `.`; `?.`; `?`; `:`; `=` or a compound assignment operator; `,`; `=>`; `:>` — SHALL be **`E-STMT-LEADING-OPERATOR`** (§34). It never continues the line above and is never read as a new statement. The message SHALL suggest the fix: *"move the operator to the end of the previous line, or wrap the expression in `( )`"*. This holds for a leading `.` / `?.` (no method-chain exception) and for a leading `+` / `-` (a line-leading `-3102` is the error, not a negation).
-   - 3a. A line-leading `/` is a regex literal and a line-leading `<` is markup (§7.4) — both START an expression (rule 5), so neither is in this set.
-     > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 3, ACCEPTED: *"leading `/` and `<` are expression starts"*).
-   - 3b. A line-leading keyword that continues a STATEMENT (not an expression) is not a leading operator: `else` after the `}` of an `if` body continues that `if` statement (`}⏎else {` and `}⏎else if (…) {` are one `if`).
-     > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 4, ACCEPTED: *"`}⏎else` legal"*).
-4. **Inside an open bracket, newlines are insignificant.** Between an unclosed `(` or `[`, an unclosed expression-position `{` (an object literal, a destructuring pattern), an open template literal (including the `${ … }` interpolations inside it), or an open markup-as-value element (§7.4, delimited by its closer), a newline SHALL be whitespace: a token at the start of such a line is not "line-leading" for rule 3, and rule 1 does not apply. So `(o.items⏎    .map(f)⏎    .reduce(g, 0))` is one expression with leading-dot layout. A `{` that opens a statement-list (a block, an arrow / function body, a handler block) restarts statement level inside it.
-5. **A line that starts with an expression-start token starts a new statement.** A line whose first token can start an expression — `(`, `[`, a template literal, a regex literal, `!`, an identifier, a literal, `@`, `<` (markup), a keyword — SHALL begin a new statement. It SHALL NOT join the line above, whatever that line ends with other than a continuation token (rule 2). (This is S440 JS-WAT #6's "a statement-start `(`/`[`/template never silently joins the previous line", extended from three tokens to every expression start.)
-6. **`;` is the statement separator.** A `;` SHALL end the statement before it. It is legal between two statements on one line (`@a = 1; @b = 2`), and legal at the end of a line (`@a = 1;`) — redundant there, a formatter MAY strip it. A `;` is never text and never "source formatting": at a `<program>` / `<page>` / `<channel>` body top it is this separator (§40.8).
-7. **Two statements on one line need a `;`.** A complete statement followed on the SAME line by a token that neither continues it (rule 2 applies only at line end; on one line the expression grammar decides) nor is a `;` / closing `}` SHALL be **`E-STMT-MISSING-SEMICOLON`** (§34): `let a = 1 let b = 2`. The `}` that closes a block-bodied statement (`if` / `else` / loop / `function` declaration) ends that statement, so a statement after it on the same line needs no `;` (`if (c) { a() } b()`).
-   > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 5, ACCEPTED: *"a block `}` ends its statement"*).
-8. **`return` ends at the line break.** A `return` (likewise `break` / `continue` / `fail` with an optional operand) whose line ends after the keyword is a complete statement; an expression on the next line is a NEW statement (rule 5). `return⏎    @total * 2` is `return` followed by the orphan statement `@total * 2`, which is `E-STMT-NO-EFFECT` (rule 9). S440 JS-WAT #6's `return⏎expr` error is this consequence; there is no separate `return` rule. ⚑ **OPEN:** an orphan that HAS an effect (`return⏎f()`) is not `E-STMT-NO-EFFECT` — it is an unreachable statement after `return`, and no code catches it today (S440 #6 would have). Whether unreachable code after `return` / `fail` / `break` / `continue` is an error is not ruled; the dd measured 0 real `return⏎expr` sites in 2,489 files. This stays OPEN by ruling: S447 accepted the PA reading that leaves it open (reading 9, *"`return⏎f()` stays OPEN"*) — no front end SHALL invent a diagnostic for it until it is ruled.
-   > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 9 — explicitly OPEN).
-9. **An expression statement with no effect is an error in every statement list** — `E-STMT-NO-EFFECT` (§34), defined at §40.8 (S445 #2) and widened by S446 Call 5 to every logic body: function / `fn` bodies, handler blocks, `${ … }`, `^{ … }`, code-default bodies and the body top. It is what makes a mis-split line loud: `console.log("m")⏎-3102` is `E-STMT-LEADING-OPERATOR` on line 2; `f(x)⏎(y)` is `f(x)` followed by the orphan `(y)` → `E-STMT-NO-EFFECT`. The definition of an effect, its exemptions (a value read through `~`) and the value positions that are not expression statements are stated once, at §40.8. The rule reaches every statement list with no carve-out: wherever `${ @count }` is a logic block whose content is read as STATEMENTS, its `@count` is a no-effect statement and is `E-STMT-NO-EFFECT`. Only a value position escapes it — `<p>${ @count }</p>`, a markup interpolation in a render position (§17.6.10), renders `@count` and is not a statement. (This settles S445 #2's reach question: yes, everywhere.)
+**Arms and arm heads (S469 — replaces the S446 "Arm heads" paragraph).** Directly inside a `match { … }` body or a `!{ … }` handler body (and, S452, in the leading message-arm region of an engine state-child, §51.0.S.2.3), the unit is the **arm**, not a statement, and the arms are a comma list (§18.2, dpa-073 F2). The token after the list's `{`, and the token after each arm's `,`, begins an arm — so a leading `.` there is the arm's pattern, decided by position, never by a lookahead for `:>` (S447 reading 6). A single-expression arm body ends at its `,` or at the list's `}`, never at a line break (rule 4). Inside an arm's `{ … }` block body the level is statement level again, and rules 1–9 apply.
 
-   > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 7, ACCEPTED: *"value positions are not expression statements (so `${ @count }` as a logic-block STATEMENT is E-STMT-NO-EFFECT — settles the S445 #2 reach question: yes, everywhere)"*).
-
-**Every locus, one rule** (dd cross-cutting table, resolved for pole B):
+**Every locus, one rule:**
 
 | Locus | Rule |
 |---|---|
 | `${ … }` logic context; function / `fn` body; `when` / `on mount` body; `~{ }` test | rules 1–9 |
-| inline handler block `onclick={ … }` (§5.2.3) | rules 1–9; "separated by `;` or by a newline" in §5.2.3 is this section |
-| bare handler value `onclick=expr` (§5.2.3) | one expression, unchanged; a top-level `;` stays `E-MULTI-STATEMENT-HANDLER` |
-| `^{ … }` meta (§22) | rules 1–9 (at compile time — `let n = 1⏎-3102` is `E-STMT-LEADING-OPERATOR`, not `-3101`) |
-| code-default body — engine state-child, `<match>` block-form arm (§4.18) | rules 1–9 for its statements. A standalone `"…"` display-text literal and a markup child are items, not statements: a display literal is a `"…"` that stands alone on its line (§40.8 S441 sub-bullet — whose "nothing but whitespace, `;` or a `//` comment follows" now reads `;` as this separator) |
-| `<program>` / `<page>` / `<channel>` body top (§40.8) | rules 1–9; a `;` is the separator (rule 6) |
-| `:`-shorthand body (§4.14) | exactly one expression; newlines between the `:` and the opener's `>` are insignificant (rule 4 — the body is bracket-like). Not a statement list |
-| JS-style `match` arms (§18) and `!{}` arms (§19) | ~~arms are newline-separated (§18.2, unchanged)~~ arms are a comma list, trailing `,` optional (S469, dpa-073 F2 — §18.2 amendment; newline-separated lists are still read during the F5 migration). See "Arm heads" below |
-| `?{ … }` SQL (§8), `_{ … }` foreign code (§23.2.3), `#{ … }` CSS | **exempt** — a foreign grammar; its own newlines and `;` are its own. The block itself is an expression inside a scrml statement and takes this rule after its closing `}` |
+| inline handler block `onclick={ … }` (§5.2.3) | rules 1–9 (`onclick={ @n = @n + 1; }`) |
+| bare handler value `onclick=expr` (§5.2.3) | one expression, no `;`; a top-level `;` stays `E-MULTI-STATEMENT-HANDLER` |
+| `^{ … }` meta (§22) | rules 1–9, at compile time |
+| code-default body — engine state-child, `<match>` block-form arm (§4.18) | rules 1–9 for its statements. A standalone `"…"` display-text literal and a markup child are items delimited by their closer, not statements (rule 2) |
+| `<program>` / `<page>` / `<channel>` body top (§40.8) | rules 1–9 |
+| `:`-shorthand body (§4.14) | exactly one expression, no `;` (rule 3) |
+| JS-style `match` arms (§18) and `!{}` arms (§19) | a comma list, trailing `,` optional (§18.2, dpa-073 F2); "Arms" above |
+| `?{ … }` SQL (§8), `_{ … }` foreign code (§23.2.3), `#{ … }` CSS | **exempt** — a foreign grammar; its own newlines and `;` are its own. The block itself is an expression inside a scrml statement and takes rule 1 after its closing `}` |
 
-**Arm heads — the `.Variant :>` line (structural, not a lookahead).** Directly inside a `match { … }` body or a `!{ … }` handler body (and, S452, in the leading message-arm region of an engine state-child, §51.0.S.2.3), the unit at depth 0 is the **arm**, not a statement (§18.2: ~~arms are juxtaposed, one per line~~ arms are a comma list, trailing `,` optional — S469 — dpa-073 F2, the §18.2 comma-list amendment). A line at that level begins an arm, so its first token is an arm pattern (`.Variant`, `::Variant`, `Type.Variant`, `| ::E` (the soft-deprecated `|`-led `!{}` arm, §19.4.5), `else`, `_`, a literal or `(` tuple pattern) — a leading `.` there is the arm's pattern, not a leading operator. Which reading applies is decided by **position** (arm level vs statement level), never by looking ahead for `:>`. Inside an arm's `{ … }` block body the level is statement level again, and a line starting with `.` there is `E-STMT-LEADING-OPERATOR`. A single-expression arm body (`.A :> expr`) ends at its line break unless the line ends in a continuation token (rule 2); a following line that starts with `.` at arm level is read as an arm head, and if it does not form an arm (`.map(f)` with no `:>`) it is a parse error whose message SHOULD carry the rule-3 suggestion.
-
-> **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 6, ACCEPTED: *"arm heads by position"* — position, never a `:>` lookahead, decides arm head vs statement; S446 Call 4a (i) already ruled out a `.Variant`-arm vs chain lookahead).
-
-**Leading-dot chains.** Write the dot at the end of the line (`o.items.⏎    map(f).⏎    reduce(g, 0)`), or wrap the chain in parentheses and keep the leading-dot layout (rule 4). A formatter MAY indent the line after a trailing `.` (bryan's S446 Call 4 concern, recorded, not a rule).
-
-**Migration (RULED S446 Call 6): an immediate error, pre-1.0, with a codemod — no §63 warning window.** `E-STMT-LEADING-OPERATOR`, `E-STMT-MISSING-SEMICOLON` and the widened `E-STMT-NO-EFFECT` fire from the landing version; there is no `W-` lint window. This is the §63.7 pre-1.0 route — deciding what language-1.0 contains, not removing a released form. A `scrml migrate --fix` rule SHALL ship with the implementation: it moves each leading operator to the end of the previous line (before any trailing `//` comment there), and MAY instead wrap a leading-`.` chain in `( )`. The rule SHALL be verified by emit diff — every migrated file compiles to identical JS (modulo the content hash). Measured stake (dd C4, ±10%): ≈205 leading-operator lines in 2,489 core `.scrml` files (105 `?`/`:`, 50 `.`/`?.`, 42 `&&`/`||`, 8 `+`), plus the three S437 round-4 conformance pins, which are rewritten as negatives rather than migrated, and two further S437 positive cases whose 12 leading-`?`/`:`/`.` lines are migrated (`markup-handler/s437-handler-shape-ternary-continuation-lines`, 8 lines; `markup-handler/s437-handler-shape-member-continuation-line`, 4 lines — with the `…-leading-question-colon` pin, these are the dd's 16 conformance ternary + 4 conformance `.` lines). Adopter repos (flogence, giti, 6NZ) migrate via their inboxes.
+**Migration (RULED, dpa-073 F5): the §63.7 pre-1.0 route, no Stage-1 window.** A `scrml fix` rule inserts `;` and arm `,` at impl#1-legacy's parsed boundaries, verified by emit diff (identical JS modulo the content hash); the codemod runs over this repo, then over flogence / giti / 6nz through their inboxes; the bootstrap enforces by construction. impl#1 never enforces. *(Supersedes the S446 Call 6 leading-operator codemod: under rule 4 a leading operator is legal, so that rule has nothing to move.)* **Status:** the `scrml fix` rule is not yet built (`g-scrml-fix-semicolon-arm-comma-rule-unbuilt-s469`); the conformance corpus was migrated ad hoc.
 
 **Worked example:**
 
 ```scrml
 <program>
-    <count> = 0
-    function total(o: Order) {
-        return o.items.
-            map(i => i.price * i.qty).
-            reduce((a, b) => a + b, 0)
+    let <count:int=0/>
+    function total(o: Order) -> number {
+        return o.items
+            .map(i => i.price * i.qty)                 // rule 4: a leading `.` continues
+            .reduce((a, b) => a + b, 0);
     }
-    function label(o: Order) {
-        const tag = o.rush ?
-            "RUSH " :
-            ""
-        return tag + o.id
+    function label(o: Order) -> string {
+        const tag = o.rush
+            ? "RUSH "
+            : "";
+        return tag + o.id;
     }
-    function chained(o: Order) {
-        return (o.items
-            .map(i => i.qty)
-            .reduce((a, b) => a + b, 0))     // inside ( ): leading dots are fine
+    function badge(s: Status) -> string {
+        const short = match s { .Open :> "O", .Shipped :> "S", .Cancelled :> "C" };
+        if (short == "C") { return "cancelled"; }      // block-like: no `;` after the `}`
+        return short;
     }
-    <button onclick={
-        @count = @count + 1; console.log("bumped")
-        @count = @count
-            + 1                             // E-STMT-LEADING-OPERATOR — move `+` to the end of the line above
-    }>go</button>
+    <button onclick={ @count = @count + 1; console.log("bumped"); }>go</button>
 </program>
 ```
 
 ```scrml
 <program>
-    console.log("m")
-    -3102                // E-STMT-LEADING-OPERATOR (was: silently `console.log("m") - 3102`)
-    let a = 1 let b = 2  // E-STMT-MISSING-SEMICOLON
+    function f(a: int) -> int {
+        let x = a let y = 2;          // E-STMT-MISSING-SEMICOLON after `a` (rule 1)
+        let b = a
+        (a + 1).toString();           // an error (rule 5, F4 (ii)) — not the call `a(a + 1)`
+        console.log("m")
+        -3102;                        // ONE statement, `console.log("m") - 3102` (rule 4's hazard)
+        return a * 2;
+    }
 </program>
 ```
+
+**Remaining newline-sensitive readings — the bootstrap, labelled.** Rule 4 says a newline is whitespace. The bootstrap still decides the constructs below by the line (`g-bootstrap-newline-sensitive-rules-remain-s469`). **RULED** marks a reading the rulings settle; where the bootstrap does not do it yet the row says so — *"ruled; bootstrap refuses today (fails closed), owed"*, owed to the bootstrap lane. **INTERIM** marks behaviour that is implemented, fails closed (an error, never a silent misreading) unless the row says otherwise, and has no ruling of its own.
+
+| Source | The bootstrap today | Label |
+|---|---|---|
+| `x⏎(y)`, `x⏎[y]`, `x⏎` + a template | The expression ends at the line break; the next line is a new statement, so `x` has no `;`: **E-STMT-MISSING-SEMICOLON** at the end of `x` (a template: **E-PARSE-TEMPLATE**, "reads two ways"). The index test is adjacency, so a spaced `x [y]` on one line splits too. | The error and its code E-STMT-SPLIT-CONTINUATION: **RULED** (rule 5) — the bootstrap reports a generic code today, owed. The spaced same-line `x [y]`: **INTERIM** (no ruling names it). |
+| `x⏎!{ … }` | A handler attaches only on the line of the expression it handles; on the next line it does not attach, and the body fails to parse (an E-PARSE-ITEM / E-ERROR-002 cascade, probed). | **RULED** (rule 4: `x⏎!{ … }` handles `x`) — ruled; bootstrap refuses today (fails closed), owed. |
+| `x⏎is given` / `x⏎is not` | A presence test is read only on the line of what it tests (an E-PARSE-* / E-SYNTAX-044 cascade otherwise). | **RULED** (rule 4: `x⏎is given` tests `x`) — ruled; bootstrap refuses today (fails closed), owed. |
+| `x?` at a line end; `x⏎?` | The propagation `?` must be on the line of what it follows, and a `?` followed by the end of the line is read as propagation (`isPropagate`). | **RULED** (rule 4: adjacency only, the end-of-line test dropped) — ruled; the bootstrap still applies the end-of-line test, owed. |
+| `return⏎expr`, `lift⏎expr` | Refused: E-STMT-MISSING-SEMICOLON at the end of the keyword (rule 8). | `return⏎expr;` returns `expr` and `lift⏎expr;` lifts `expr`: **RULED** (rule 8, F6 confirmed). The refusal: **INTERIM**, until the SPEC, docs and corpus are migrated. |
+| A body-top display-text literal (§40.8) | §40.8 decides it by line: a `"…"` is display text only when it opens a line and nothing but whitespace, `;` or a `//` comment follows it on that line. | **INTERIM** — ⚑ OPEN (dpa-073 route-to-PA R7: a newline-free test needs design). Related, R6 (§7.4): the `;` that closes an inline markup expression also ends the statement — not yet reconciled. |
+| `break⏎label`, `continue⏎label` | A label is read only on the keyword's line; on the next line it is a new statement (E-STMT-MISSING-SEMICOLON). | **INTERIM**. |
+| `fail⏎.E`, `defer⏎…`, `transaction⏎{` | The contextual keyword is a keyword only before a token on its own line; split, it is read as a name: E-STMT-MISSING-SEMICOLON plus a misleading E-SCOPE-001 (`fail` is not declared). | **RULED** (rule 10) — ruled; bootstrap refuses today (fails closed), owed. |
+| A pure expression after a block-like `}` (`if (c) { … }⏎-1;`, `match k { … }⏎(x);`) | Read as a statement of its own, which does nothing — **silently** (the bootstrap has no E-STMT-NO-EFFECT yet); after an `if` / `for` / `given` / `defer` `}` this holds on the same line too (`if (c) { … } -1;`, probed). After a statement `match`'s `}`, the same token on the SAME line is E-PARSE-TRAILING (rule 2), while on the next line it is the silent statement. | Two statements: **RULED** (F3 (i)); the second is E-STMT-NO-EFFECT on either line: **RULED** (rule 9). The bootstrap is silent today — **NOT fail-closed**; owed. |
+
+> **The superseded S446 text (dpa-063 Call 1 (b)), quoted for the record — no longer normative.** The S446 provenance block, rules 1–9, the "Every locus" table, "Arm heads", "Leading-dot chains", the Call 6 migration paragraph and the two worked examples follow as they stood on 2026-10-01, with later in-place amendments.
+>
+> **Added 2026-10-01 (S446).** This is the ONE statement-termination rule of scrml logic. §7.2's "all JavaScript is valid" sentence does **not** carry JavaScript's automatic semicolon insertion (ASI) into scrml: termination is defined here, not inherited, and it is the same rule in every logic body. Before S446 the SPEC stated no rule; the three front ends each ran a different one (impl#1's default parser a heuristic, `--parser=scrml-native` ECMAScript ASI, the bootstrap a hybrid), and `console.log("m")⏎-3102` silently compiled as `console.log("m") - 3102`.
+>
+> > **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — *"b, your rec"* · ruling:user-voice-scrml.md S446 "dpa-063 pole (c) eliminated" — *"before I rule on this (c is out) I am not familiar with "rust-style tail expression". expound first."* · ruling:user-voice-scrml.md S446 "dpa-063 Call 4 = PA recs" — *"I do agree with your recs, BUT, every other language that I know allows . chaining to start a line. Its where we look. this is not a decision just a concern. I suppose that code formating could indent the line after a trailing . to make it clear."* · ruling:user-voice-scrml.md S446 "dpa-063 Call 5 = (i)" — *"(i), your rec, and yes on +/-"* · ruling:user-voice-scrml.md S446 "`when` re-trigger … dpa-063 Calls 6 + 7 = PA recs" — *"b on retrigger, your recs on 6 and 7"* · ruling:user-voice-scrml.md S445 "statement termination → dPA" — *"your solution seems reasonable. but a ; really clarifies things. That is huge though. And I am not a fan of specific silent carve-outs like this. lets dpa it"* · dd:`scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md` (Approach B; the cross-cutting locus table; C1 SPEC sites) · **supersedes:** ruling:user-voice-scrml.md S440 JS-WAT #6 (*"ASI: `return` followed by a newline and an expression is an error; scrml's statement splitter stops copying JS's semicolon insertion (a statement-start `(`/`[`/template never silently joins the previous line)"*) — subsumed, never built as its own list (Call 7); the three S437 round-4 conformance pins `markup-handler/s437-r4-continuation-{leading-plus,expr-form-leading-plus,leading-question-colon}` (positive → negative); the body-top-only scope of S445 #2 `E-STMT-NO-EFFECT` (§40.8, widened by rule 9 below); the S441 round-5 "a `;` is source formatting" (§34 `E-INTERNAL-BODY-TOP-DROPPED`) · direction-of-change: **newly-rejecting** (a leading-operator line; two statements on one line in front ends that accepted them) and **meaning-changing** (a line starting with `(`, `[`, a template, a regex, `-` or `+` no longer joins the line above — it now errors or starts a statement).
+>
+> **Status: Nominal / spec-ahead.** No front end implements this section yet: impl#1 (both parsers) and the bootstrap still run their pre-S446 rules (`docs/known-gaps.md` §S446). Build order (Call 6): the bootstrap by construction first; impl#1 parity under the security/bootstrap exception so the two compilers agree; then the corpus codemod.
+>
+> **Terms.** A **statement list** is the content of: a `${ … }` logic context; a function or `fn` body; an inline handler block `onclick={ … }` (§5.2.3); a `^{ … }` meta body; a `when … { … }` / `on mount { … }` body; any `{ … }` block of a statement (`if` / `else` / loop / bare block) or of an arrow / function expression; a `{ … }` match or `!{}` arm block; an if-as-expression arm block (§17.6); a `~{ … }` test body; the statements of a code-default body (§4.18 — engine state-child, `<match>` block-form arm) and of a `<program>` / `<page>` / `<channel>` body top (§40.8). Inside a statement list the **statement level** is bracket depth 0 relative to that list. A newline at statement level is a **line break**; a newline anywhere else (rule 4) is whitespace.
+>
+> **Normative statements:**
+>
+> 1. **A line break ends a statement.** At statement level a statement SHALL end at the first line break that follows a complete statement, unless rule 2 continues it. A statement also ends at a `;` (rule 6) and at the `}` that closes its enclosing statement list. A `//` comment or whitespace between the statement's last token and the line break does not change this.
+> 2. **Continuation is explicit, at the END of a line.** A statement SHALL continue onto the next line only when the last token of the line (ignoring a trailing `//` comment) is a **continuation token** — exactly this closed list:
+>    - a binary (infix) operator: `+` `-` `*` `/` `%` `**` `==` `!=` `===` `!==` `<` `>` `<=` `>=` `&&` `||` `??` `&` `|` `^` `<<` `>>` `>>>` `in` `instanceof`, and scrml's `is` (§42; `@x is not` / `@x is given` — and the soft-deprecated `@x is some` — are complete: `not` / `given` / `some` end the expression);
+>    - `=` and every compound assignment operator (`+=` `-=` `*=` `/=` `%=` `**=` `&&=` `||=` `??=` `&=` `|=` `^=` `<<=` `>>=` `>>>=`);
+>    - member access `.` and optional chaining `?.`;
+>    - the conditional operator's `?` and `:`. A conditional `?` has whitespace before it (`ready ?`). A `?` written directly against the end of its operand, with no whitespace (`load(id)?`), is the §19.5 propagation operator: a complete postfix expression that ends the statement like any other operand. Adjacency decides the role, as the whitespace before a `:`-shorthand `:` does (§4.14);
+>    - `,`;
+>    - the arrow `=>` and the arm separator `:>` (with its deprecated aliases, §18.2);
+>    - a prefix operator that cannot end an expression: `!`, `typeof`, `new`.
+>
+>    No other token continues a statement across a line break. A statement whose line ends in a token NOT on this list ends there. (The `>` or `/>` that closes a markup tag in a markup-as-value expression, §7.4, is not an operator: markup is delimited by its closer, rule 4.)
+>
+>    > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 1, ACCEPTED: *"the END-token closed list"* — S446 Call 1 ruled the token CLASSES; the exact membership above is ratified as stated) · (reading 2, ACCEPTED: *"`?` by ADJACENCY (glued = §19.5 propagation, ends the statement; spaced = conditional, continues)"* — the alternative "a conditional `?` never ends a line" is not adopted).
+> 3. **A line that STARTS with a token that can only continue an expression is an error.** At statement level, a line whose first token is one of: a binary operator other than `/` and `<` (rule 3a), including `+` and `-`; `.`; `?.`; `?`; `:`; `=` or a compound assignment operator; `,`; `=>`; `:>` — SHALL be **`E-STMT-LEADING-OPERATOR`** (§34). It never continues the line above and is never read as a new statement. The message SHALL suggest the fix: *"move the operator to the end of the previous line, or wrap the expression in `( )`"*. This holds for a leading `.` / `?.` (no method-chain exception) and for a leading `+` / `-` (a line-leading `-3102` is the error, not a negation).
+>    - 3a. A line-leading `/` is a regex literal and a line-leading `<` is markup (§7.4) — both START an expression (rule 5), so neither is in this set.
+>      > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 3, ACCEPTED: *"leading `/` and `<` are expression starts"*).
+>    - 3b. A line-leading keyword that continues a STATEMENT (not an expression) is not a leading operator: `else` after the `}` of an `if` body continues that `if` statement (`}⏎else {` and `}⏎else if (…) {` are one `if`).
+>      > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 4, ACCEPTED: *"`}⏎else` legal"*).
+> 4. **Inside an open bracket, newlines are insignificant.** Between an unclosed `(` or `[`, an unclosed expression-position `{` (an object literal, a destructuring pattern), an open template literal (including the `${ … }` interpolations inside it), or an open markup-as-value element (§7.4, delimited by its closer), a newline SHALL be whitespace: a token at the start of such a line is not "line-leading" for rule 3, and rule 1 does not apply. So `(o.items⏎    .map(f)⏎    .reduce(g, 0))` is one expression with leading-dot layout. A `{` that opens a statement-list (a block, an arrow / function body, a handler block) restarts statement level inside it.
+> 5. **A line that starts with an expression-start token starts a new statement.** A line whose first token can start an expression — `(`, `[`, a template literal, a regex literal, `!`, an identifier, a literal, `@`, `<` (markup), a keyword — SHALL begin a new statement. It SHALL NOT join the line above, whatever that line ends with other than a continuation token (rule 2). (This is S440 JS-WAT #6's "a statement-start `(`/`[`/template never silently joins the previous line", extended from three tokens to every expression start.)
+> 6. **`;` is the statement separator.** A `;` SHALL end the statement before it. It is legal between two statements on one line (`@a = 1; @b = 2`), and legal at the end of a line (`@a = 1;`) — redundant there, a formatter MAY strip it. A `;` is never text and never "source formatting": at a `<program>` / `<page>` / `<channel>` body top it is this separator (§40.8).
+> 7. **Two statements on one line need a `;`.** A complete statement followed on the SAME line by a token that neither continues it (rule 2 applies only at line end; on one line the expression grammar decides) nor is a `;` / closing `}` SHALL be **`E-STMT-MISSING-SEMICOLON`** (§34): `let a = 1 let b = 2`. The `}` that closes a block-bodied statement (`if` / `else` / loop / `function` declaration) ends that statement, so a statement after it on the same line needs no `;` (`if (c) { a() } b()`).
+>    > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 5, ACCEPTED: *"a block `}` ends its statement"*).
+> 8. **`return` ends at the line break.** A `return` (likewise `break` / `continue` / `fail` with an optional operand) whose line ends after the keyword is a complete statement; an expression on the next line is a NEW statement (rule 5). `return⏎    @total * 2` is `return` followed by the orphan statement `@total * 2`, which is `E-STMT-NO-EFFECT` (rule 9). S440 JS-WAT #6's `return⏎expr` error is this consequence; there is no separate `return` rule. ⚑ **OPEN:** an orphan that HAS an effect (`return⏎f()`) is not `E-STMT-NO-EFFECT` — it is an unreachable statement after `return`, and no code catches it today (S440 #6 would have). Whether unreachable code after `return` / `fail` / `break` / `continue` is an error is not ruled; the dd measured 0 real `return⏎expr` sites in 2,489 files. This stays OPEN by ruling: S447 accepted the PA reading that leaves it open (reading 9, *"`return⏎f()` stays OPEN"*) — no front end SHALL invent a diagnostic for it until it is ruled.
+>    > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 9 — explicitly OPEN).
+> 9. **An expression statement with no effect is an error in every statement list** — `E-STMT-NO-EFFECT` (§34), defined at §40.8 (S445 #2) and widened by S446 Call 5 to every logic body: function / `fn` bodies, handler blocks, `${ … }`, `^{ … }`, code-default bodies and the body top. It is what makes a mis-split line loud: `console.log("m")⏎-3102` is `E-STMT-LEADING-OPERATOR` on line 2; `f(x)⏎(y)` is `f(x)` followed by the orphan `(y)` → `E-STMT-NO-EFFECT`. The definition of an effect, its exemptions (a value read through `~`) and the value positions that are not expression statements are stated once, at §40.8. The rule reaches every statement list with no carve-out: wherever `${ @count }` is a logic block whose content is read as STATEMENTS, its `@count` is a no-effect statement and is `E-STMT-NO-EFFECT`. Only a value position escapes it — `<p>${ @count }</p>`, a markup interpolation in a render position (§17.6.10), renders `@count` and is not a statement. (This settles S445 #2's reach question: yes, everywhere.)
+>
+>    > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 7, ACCEPTED: *"value positions are not expression statements (so `${ @count }` as a logic-block STATEMENT is E-STMT-NO-EFFECT — settles the S445 #2 reach question: yes, everywhere)"*).
+>
+> **Every locus, one rule** (dd cross-cutting table, resolved for pole B):
+>
+> | Locus | Rule |
+> |---|---|
+> | `${ … }` logic context; function / `fn` body; `when` / `on mount` body; `~{ }` test | rules 1–9 |
+> | inline handler block `onclick={ … }` (§5.2.3) | rules 1–9; "separated by `;` or by a newline" in §5.2.3 is this section |
+> | bare handler value `onclick=expr` (§5.2.3) | one expression, unchanged; a top-level `;` stays `E-MULTI-STATEMENT-HANDLER` |
+> | `^{ … }` meta (§22) | rules 1–9 (at compile time — `let n = 1⏎-3102` is `E-STMT-LEADING-OPERATOR`, not `-3101`) |
+> | code-default body — engine state-child, `<match>` block-form arm (§4.18) | rules 1–9 for its statements. A standalone `"…"` display-text literal and a markup child are items, not statements: a display literal is a `"…"` that stands alone on its line (§40.8 S441 sub-bullet — whose "nothing but whitespace, `;` or a `//` comment follows" now reads `;` as this separator) |
+> | `<program>` / `<page>` / `<channel>` body top (§40.8) | rules 1–9; a `;` is the separator (rule 6) |
+> | `:`-shorthand body (§4.14) | exactly one expression; newlines between the `:` and the opener's `>` are insignificant (rule 4 — the body is bracket-like). Not a statement list |
+> | JS-style `match` arms (§18) and `!{}` arms (§19) | ~~arms are newline-separated (§18.2, unchanged)~~ arms are a comma list, trailing `,` optional (S469, dpa-073 F2 — §18.2 amendment; newline-separated lists are still read during the F5 migration). See "Arm heads" below |
+> | `?{ … }` SQL (§8), `_{ … }` foreign code (§23.2.3), `#{ … }` CSS | **exempt** — a foreign grammar; its own newlines and `;` are its own. The block itself is an expression inside a scrml statement and takes this rule after its closing `}` |
+>
+> **Arm heads — the `.Variant :>` line (structural, not a lookahead).** Directly inside a `match { … }` body or a `!{ … }` handler body (and, S452, in the leading message-arm region of an engine state-child, §51.0.S.2.3), the unit at depth 0 is the **arm**, not a statement (§18.2: ~~arms are juxtaposed, one per line~~ arms are a comma list, trailing `,` optional — S469 — dpa-073 F2, the §18.2 comma-list amendment). A line at that level begins an arm, so its first token is an arm pattern (`.Variant`, `::Variant`, `Type.Variant`, `| ::E` (the soft-deprecated `|`-led `!{}` arm, §19.4.5), `else`, `_`, a literal or `(` tuple pattern) — a leading `.` there is the arm's pattern, not a leading operator. Which reading applies is decided by **position** (arm level vs statement level), never by looking ahead for `:>`. Inside an arm's `{ … }` block body the level is statement level again, and a line starting with `.` there is `E-STMT-LEADING-OPERATOR`. A single-expression arm body (`.A :> expr`) ends at its line break unless the line ends in a continuation token (rule 2); a following line that starts with `.` at arm level is read as an arm head, and if it does not form an arm (`.map(f)` with no `:>`) it is a parse error whose message SHOULD carry the rule-3 suggestion.
+>
+> > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 6, ACCEPTED: *"arm heads by position"* — position, never a `:>` lookahead, decides arm head vs statement; S446 Call 4a (i) already ruled out a `.Variant`-arm vs chain lookahead).
+>
+> **Leading-dot chains.** Write the dot at the end of the line (`o.items.⏎    map(f).⏎    reduce(g, 0)`), or wrap the chain in parentheses and keep the leading-dot layout (rule 4). A formatter MAY indent the line after a trailing `.` (bryan's S446 Call 4 concern, recorded, not a rule).
+>
+> **Migration (RULED S446 Call 6): an immediate error, pre-1.0, with a codemod — no §63 warning window.** `E-STMT-LEADING-OPERATOR`, `E-STMT-MISSING-SEMICOLON` and the widened `E-STMT-NO-EFFECT` fire from the landing version; there is no `W-` lint window. This is the §63.7 pre-1.0 route — deciding what language-1.0 contains, not removing a released form. A `scrml migrate --fix` rule SHALL ship with the implementation: it moves each leading operator to the end of the previous line (before any trailing `//` comment there), and MAY instead wrap a leading-`.` chain in `( )`. The rule SHALL be verified by emit diff — every migrated file compiles to identical JS (modulo the content hash). Measured stake (dd C4, ±10%): ≈205 leading-operator lines in 2,489 core `.scrml` files (105 `?`/`:`, 50 `.`/`?.`, 42 `&&`/`||`, 8 `+`), plus the three S437 round-4 conformance pins, which are rewritten as negatives rather than migrated, and two further S437 positive cases whose 12 leading-`?`/`:`/`.` lines are migrated (`markup-handler/s437-handler-shape-ternary-continuation-lines`, 8 lines; `markup-handler/s437-handler-shape-member-continuation-line`, 4 lines — with the `…-leading-question-colon` pin, these are the dd's 16 conformance ternary + 4 conformance `.` lines). Adopter repos (flogence, giti, 6NZ) migrate via their inboxes.
+>
+> **Worked example:**
+>
+> ```scrml
+> <program>
+>     <count> = 0
+>     function total(o: Order) {
+>         return o.items.
+>             map(i => i.price * i.qty).
+>             reduce((a, b) => a + b, 0)
+>     }
+>     function label(o: Order) {
+>         const tag = o.rush ?
+>             "RUSH " :
+>             ""
+>         return tag + o.id
+>     }
+>     function chained(o: Order) {
+>         return (o.items
+>             .map(i => i.qty)
+>             .reduce((a, b) => a + b, 0))     // inside ( ): leading dots are fine
+>     }
+>     <button onclick={
+>         @count = @count + 1; console.log("bumped")
+>         @count = @count
+>             + 1                             // E-STMT-LEADING-OPERATOR — move `+` to the end of the line above
+>     }>go</button>
+> </program>
+> ```
+>
+> ```scrml
+> <program>
+>     console.log("m")
+>     -3102                // E-STMT-LEADING-OPERATOR (was: silently `console.log("m") - 3102`)
+>     let a = 1 let b = 2  // E-STMT-MISSING-SEMICOLON
+> </program>
+> ```
 
 ### 7.3 Function Declaration Forms
 
@@ -8307,7 +8409,7 @@ Markup syntax is valid as an expression inside `${ }` logic contexts.
 let aDiv = <div id="staticId" class=dynamicClass()>;
 ```
 
-- The `;` at the end of an inline markup expression closes the element (no block content). This is distinct from the block closer forms in Section 4.4.
+- The `;` at the end of an inline markup expression closes the element (no block content). This is distinct from the block closer forms in Section 4.4. *(S469 — ⚑ OPEN, dpa-073 route-to-PA R6: under §7.2.2 rule 1 that `;` also ends the statement; the two jobs are not yet reconciled in one sentence.)*
 - All attribute quoting rules from Section 5 apply to inline markup expressions.
 - The compiler SHALL generate DOM construction code for inline markup expressions.
 - An inline markup expression MAY be assigned to a variable, passed as a function argument, or returned from a function.
@@ -17321,7 +17423,8 @@ arm-body      ::= '{' statement* lift-stmt statement* '}'
                |  '{' expression '}'       -- value-form sugar for `{ lift expression }`; §17.6.10
 
 lift-stmt     ::= 'lift' expression ';'
-               |  'lift' expression        -- the `;` is optional: a newline ends the statement (§7.2.2)
+                                           -- S469: the alternative `| 'lift' expression` ("the `;` is optional: a newline
+                                           -- ends the statement") is removed — `lift` takes `;` (§7.2.2 rule 2, dpa-073 F6)
 
 if-binding    ::= ('const' | 'let') identifier '=' if-as-expr
 ```
@@ -18500,11 +18603,15 @@ leave the enclosing function, `break` / `continue` leave or continue the enclosi
   declaration and value position, a `!{}` handler arm (§19.4.5) and an engine message arm
   (§51.0.S.2.3). It is NOT an expression anywhere else: `x ?? return`, `c ? v : fail .E` and
   `f(return)` stay outside the language.
-- **Extent.** `fail`'s operand is required and SHALL begin on the `fail` line. Any operand ends where a
-  single-expression arm body ends: at the line break unless the line ends in a §7.2.2 rule-2
-  continuation token, at the `}` closing the arm list, or at a same-line arm head. So
-  `.A :> return⏎    "orphan"` is `return` followed by a line at arm level that forms no arm — a parse
-  error (§7.2.2 "Arm heads"), never `return "orphan"`.
+- **Extent.** `fail`'s operand is required. Any operand ends where a single-expression arm body ends: at
+  the arm's `,` or at the `}` closing the arm list. A line break is whitespace (§7.2.2 rules 4, 8 and 10), so
+  `.A :> fail⏎    .NotFound,` is `.A :> fail .NotFound,` and `.A :> return⏎    "x",` returns `"x"`. *(The
+  bootstrap refuses a split `return⏎` / `lift⏎` for now — §7.2.2 rule 8, INTERIM.)* *(S469 — rewritten for
+  dpa-073 F1 (a) and ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" items 1 and 3. **supersedes:** ~~"SHALL begin on the `fail` line"~~;
+  ~~"at the line break unless the line ends in a §7.2.2 rule-2 continuation token … or at a same-line arm
+  head. So `.A :> return⏎ "orphan"` is … a parse error (§7.2.2 "Arm heads"), never `return "orphan"`"~~ — the
+  S446 reading, which impl#1 keeps as its carried divergence, pinned by
+  `conformance/cases/match-leave/arm-body-ends-at-line-break-neg`.)*
 - **Legality by context, through the existing rules.** `return` needs an enclosing function — in an
   engine message arm, which is not a function body, it is **E-STMT-RETURN-OUTSIDE-FUNCTION**; `fail`
   needs a `!` function (**E-ERROR-001**, §19.3.3); `break` / `continue` need an enclosing loop
@@ -18566,10 +18673,13 @@ tuple value (no-tuple, §59.7 / §14.11). Full grammar + product-exhaustiveness 
 > new one)*: an arm list that does not separate its arms with `,`. In the BOOTSTRAP every missing `,` is this code
 > (dpa-073 F5(4): the bootstrap enforces commas by construction). ~~While the codemod has not run, a list written
 > wholly newline-separated is still read (both compilers), and~~ Only impl#1 keeps reading a wholly
-> newline-separated list (its carried divergence). **Today** the bootstrap still reads a wholly newline-separated
+> newline-separated list (its carried divergence). ~~**Today** the bootstrap still reads a wholly newline-separated
 > list and reports only a list that MIXES `,` and newline boundaries, once, at the first arm with no `,` before it
 > (`compiler/self-host-v2/parse.scrml`, the arm-list parser) — an owed bootstrap change,
-> `g-bootstrap-newline-arm-lists-accepted-s469` (its own source is still newline-separated until the codemod runs).
+> `g-bootstrap-newline-arm-lists-accepted-s469` (its own source is still newline-separated until the codemod runs).~~
+> *(S469, s469-boot-semicolons #1510 — resolved:)* the bootstrap reports every arm after the first that does not follow
+> a `,`, once per missing `,`, at the end of the arm before it (`compiler/self-host-v2/parse.scrml` `parseArms` /
+> `missingArmComma`).
 
 - An arm pattern MAY list several alternates separated by `|` (`.B | .C :> r`, `"a" | "b" :> r`,
   `1 | 2 :> r` — the §51.0.J `derived=match` form), at ANY arm position. An alternation containing
@@ -20528,7 +20638,7 @@ legacy-arm-pattern ::= arm-pattern                                              
 
 | Retired form | W-lint (Stage 1) | Reserved E | `scrml fix` rule |
 |---|---|---|---|
-| `\| <pattern> :> body` in a `!{}` (including the paren-free binder `\| .V m :> body`) or as an engine message arm (§51.0.S.2.3) | `W-ARM-PIPE-LEGACY` | `E-ARM-PIPE-LEGACY` | Delete the leading `\|` (and the space after it): `\| <pattern> :>` → `<pattern> :>`. A paren-free binder gains its parentheses: `.V m` → `.V(m)` (`::V m` → `::V(m)`, `T.V m` → `T.V(m)`). Where two or more legacy arms share a line (`!{ \| .A :> 1 \| .B :> 2 }`), put each arm on its own line (§18.2: one arm per line). The separator, the pattern's prefix (`.` / `::`) and the arm body are left as written — the separator has its own lint and rule (`W-MATCH-ARROW-LEGACY`, §18.2). |
+| `\| <pattern> :> body` in a `!{}` (including the paren-free binder `\| .V m :> body`) or as an engine message arm (§51.0.S.2.3) | `W-ARM-PIPE-LEGACY` | `E-ARM-PIPE-LEGACY` | Delete the leading `\|` (and the space after it): `\| <pattern> :>` → `<pattern> :>`. A paren-free binder gains its parentheses: `.V m` → `.V(m)` (`::V m` → `::V(m)`, `T.V m` → `T.V(m)`). Where two or more legacy arms share a line (`!{ \| .A :> 1 \| .B :> 2 }`), put each arm on its own line ~~(§18.2: one arm per line)~~ *(S469: as the rule is built, `compiler/src/commands/fix-arm-pipe.js`; one arm per line no longer separates arms — the list still needs its `,` between arms, §18.2, which the dpa-073 F5 comma codemod inserts; until then such a list is E-MATCH-ARM-SEPARATOR in the bootstrap)*. The separator, the pattern's prefix (`.` / `::`) and the arm body are left as written — the separator has its own lint and rule (`W-MATCH-ARROW-LEGACY`, §18.2). |
 | `\| e :> body` in a `!{}` — a `\|`-led bare binder with no pattern, read as the whole-error arm | `W-ARM-PIPE-LEGACY` | `E-ARM-PIPE-LEGACY` | `\| e :>` → `_ e :>` — the same arm, spelled as §18.2's `whole-error-arm` (§18.6.1); a pipe-less `e :>` would be E-MATCH-BARE-BINDER. *(S454 currency: the case the built rule handles that this table did not name — `compiler/src/commands/fix-arm-pipe.js`, #1285.)* |
 
 **Normative statements:**
@@ -20544,8 +20654,23 @@ legacy-arm-pattern ::= arm-pattern                                              
   paren-free binder after a `|`-led variant (`| .V m :>`) SHALL be the same pattern as `.V(m) :>`
   (its meaning and arity rules: §19.4.3, *"A binder without parentheses binds the payload"*). At
   arm level (the §7.2.2 "arm heads" position) a `|` that begins an arm is this lead, never an
-  alternation separator; a `|` between two patterns of one arm is alternation (§18.2). On one line,
-  a `|` that begins a legacy arm also ends the arm before it.
+  alternation separator; a `|` between two patterns of one arm is alternation (§18.2). ~~On one line,
+  a `|` that begins a legacy arm also ends the arm before it.~~ *(S469)* A `|` that begins a legacy arm ends the
+  BODY of the arm before it, but it does not separate the two arms: the `,` does (next bullet).
+- **The legacy `|` arm is accepted only inside a comma list (S469).** A `|`-led arm is read (with
+  W-ARM-PIPE-LEGACY, Info) only as one arm of a §18.2 comma list — `!{ | .A :> 0, | .B :> 1 }`. Its leading `|`
+  is not an arm separator. A list whose arms are separated only by their leading `|` or by line breaks —
+  `!{ | .A :> 0 | .B :> 1 }` on one line, or one `|`-led arm per line with no `,` — separates no two arms with
+  `,` and SHALL be **E-MATCH-ARM-SEPARATOR** (§18.2), like any arm list without commas; each such arm still
+  surfaces its W-ARM-PIPE-LEGACY. **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2 = (iii)
+  \"Comma list (Recommended)\"" — *"one arm grammar for match arms, `!{}` handler arms and engine message arms"* ·
+  ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2(i) / F3(i) / F4(ii)" — F2 *"a `,` between every pair of
+  arms, block arms included, trailing `,` optional"*. **supersedes:** the struck sentence above, and this
+  section's unqualified "the legacy form keeps compiling everywhere" (below). **Status:** the bootstrap does this
+  (`compiler/self-host-v2/parse.scrml` `parseArms` / `missingArmComma`, s469-boot-semicolons, #1510: the one-line
+  pipe-only list is E-MATCH-ARM-SEPARATOR at the second arm, the comma list compiles with two W-ARM-PIPE-LEGACY).
+  impl#1 reads a pipe-only list as before — its carried divergence (dpa-073 F5: impl#1 never enforces commas)
+  — and does not yet read the comma form (`g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469`).
 - Each `|`-led arm SHALL surface **W-ARM-PIPE-LEGACY** (Info; one per arm). The message
   SHALL name the canonical rewrite of that arm, `scrml fix`, and this section: `Arm '| {pattern} :>'
   uses the deprecated leading '|'. A pattern arm is a match arm (§18.2): write '{canonical} :>'. Run
@@ -20593,7 +20718,7 @@ legacy-arm-pattern ::= arm-pattern                                              
 > `::Bad(m) :>` and `_ :>` already compile, and the `|`-led forms (`| .Bad(m) :>`, `| ::Bad m :>`)
 > compile clean with no lint. Filed `g-impl1-handler-arm-pipeless-dropped-s452` (impl#1 frozen —
 > carried, §34.0) — *since RESOLVED S452 under the "yes exception granted" freeze exception
-> (`79cd61d15`): impl#1 accepts the canonical arm.* The legacy form keeps compiling everywhere; W-ARM-PIPE-LEGACY is
+> (`79cd61d15`): impl#1 accepts the canonical arm.* ~~The legacy form keeps compiling everywhere;~~ *(S469: the legacy form keeps compiling as an arm of a comma list; a pipe-only list is E-MATCH-ARM-SEPARATOR — the comma-list bullet above.)* W-ARM-PIPE-LEGACY is
 > non-fatal. **Corpus measured** (each `!{` brace-matched, strings and comments skipped; every lone
 > `|` at the handler's top level is one arm, since impl#1 ends an arm at any `|`): **186 `|`-led
 > arms in 70 files** — `examples/` 4 in 3 (all `| err :>`, already E-MATCH-BARE-BINDER),
@@ -27919,7 +28044,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-MATCH-ALT-BINDING | §18.2, §18.7 | A `|` alternation arm whose alternates carry PAYLOAD PATTERNS — a binding (`.P(a: x) \| .Q(a: x) :> x`, `.P(x) \| .Q(x) :> x`), a NAMED field even when discarded (`.P(a: _) \| .Q(a: _)`), or a nested / literal pattern — in a JS-style `match`, at any arm position. The arm has no lowering (dispatch compares the variant tags only); before S438 it compiled with ZERO diagnostics and the arm silently never matched (or, as a non-first arm, satisfied exhaustiveness while being dropped). Only POSITIONAL `_` discards are accepted in an alternation. Resolution: give each variant its own arm, or use positional `_` discards (`.P(_) \| .Q(_) :> …`) when the body does not need the payload. (Catalog addition S438 — g-impl1-match-miscompiles F12 review F1; emitted at `compiler/src/ast-builder.js` `armChainBindingAlternate`.) | Error |
 | E-MATCH-SUBSET-DEAD-ARM | §18.8.1, §53.15 | A concrete arm names a variant that is excluded by the matched value's enum-subset refinement type (`oneOf([…])` / `notIn([…])`) — the arm is dead (the variant can never inhabit the value). The message names the excluded variant + the subset. Distinct from E-TYPE-023 (duplicate arm names the SAME variant twice); a dead subset arm names an excluded variant once. (Catalog addition S154 — §53.15 enum-subset refinement, SF-1.) | Error |
 | E-MATCH-ON-REQUIRED | §18.0.1 | (Catalog addition S107 — Phase 2 of match block-form impl arc.) Block-form `<match for=Type>` is missing the `on=expr` attribute AND no `<engine for=Type>` for the same `Type` is in scope (auto-implied `on=` per §18.0.1 line 9578-9580 requires a same-type engine for the most-local-semantics-friendly resolution). Add `on=expr` to the `<match>` opener or declare a compatible `<engine>` in scope. | Error |
-| E-MATCH-ARM-SEPARATOR | §18.2, §19.4.5 | **Meaning changed S469 (dpa-073 F2 — arms are a comma list).** An arm list that does not separate its arms with `,` (PA derivation; the ruling retires the old meaning and names no new one). The BOOTSTRAP enforces it on every missing `,` (dpa-073 F5(4)); only impl#1 keeps reading a wholly newline-separated list. ~~During the dpa-073 F5 migration a wholly newline-separated list is still read;~~ Today the bootstrap still reads a wholly newline-separated list and reports only a list that MIXES `,` and newline boundaries, once, at the first arm with no `,` before it (`compiler/self-host-v2/parse.scrml`, the arm-list parser) — owed, `g-bootstrap-newline-arm-lists-accepted-s469`. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2 = (iii) \"Comma list (Recommended)\"" — *"Comma list (Recommended)"* (*"Supersedes §18.2 \"arms SHALL be juxtaposed … NO comma separator\" (S144) and E-MATCH-ARM-SEPARATOR's meaning."*). impl#1 still emits the OLD meaning (it refuses a `,`) — an owed impl#1 change, `g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469`. ~~A `match` arm is followed by a `,` separator. Match arms are juxtaposed (`match-arm+` per §18.2 grammar); the ONLY arm separator is the arm body's terminating `:>`-introduced arm boundary (the deprecated `=>`/`->` aliases behave identically) — arms are written one per line (newline-separated). A trailing `,` after an arm body is invalid. Resolution: remove the `,` (`.A :> x, .B :> y` → `.A :> x` / `.B :> y` on separate lines). Replaces the generic E-CODEGEN-INVALID-LOGIC that the stray comma would otherwise surface from codegen. (Catalog addition S144 Cluster D — Bug Y; emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.)~~ | Error |
+| E-MATCH-ARM-SEPARATOR | §18.2, §19.4.5 | **Meaning changed S469 (dpa-073 F2 — arms are a comma list).** An arm list that does not separate its arms with `,` (PA derivation; the ruling retires the old meaning and names no new one). The BOOTSTRAP enforces it on every missing `,` (dpa-073 F5(4)); only impl#1 keeps reading a wholly newline-separated list. ~~During the dpa-073 F5 migration a wholly newline-separated list is still read;~~ ~~Today the bootstrap still reads a wholly newline-separated list and reports only a list that MIXES `,` and newline boundaries, once, at the first arm with no `,` before it (`compiler/self-host-v2/parse.scrml`, the arm-list parser) — owed, `g-bootstrap-newline-arm-lists-accepted-s469`.~~ *(Resolved S469, s469-boot-semicolons #1510:)* emitted by the bootstrap once per missing `,`, at the end of the arm before it (`compiler/self-host-v2/parse.scrml`, its `missingArmComma`), including a `!{}` list separated only by leading `\|` (§19.4.5). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2 = (iii) \"Comma list (Recommended)\"" — *"Comma list (Recommended)"* (*"Supersedes §18.2 \"arms SHALL be juxtaposed … NO comma separator\" (S144) and E-MATCH-ARM-SEPARATOR's meaning."*). impl#1 still emits the OLD meaning (it refuses a `,`) — an owed impl#1 change, `g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469`. ~~A `match` arm is followed by a `,` separator. Match arms are juxtaposed (`match-arm+` per §18.2 grammar); the ONLY arm separator is the arm body's terminating `:>`-introduced arm boundary (the deprecated `=>`/`->` aliases behave identically) — arms are written one per line (newline-separated). A trailing `,` after an arm body is invalid. Resolution: remove the `,` (`.A :> x, .B :> y` → `.A :> x` / `.B :> y` on separate lines). Replaces the generic E-CODEGEN-INVALID-LOGIC that the stray comma would otherwise surface from codegen. (Catalog addition S144 Cluster D — Bug Y; emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.)~~ | Error |
 | E-MATCH-BARE-BINDER | §18.2, §19.4.3 | An arm whose WHOLE pattern is a bare identifier — `err :> …` in a `match` or a `!{}` handler (in a `!{}`, also its soft-deprecated `\| err :> …` spelling, §19.4.5). In a `!{}` arm or a `match` on a failable result the fix is `_ err :>`, which binds the WHOLE error (§18.6.1); elsewhere a match arm does not bind the whole matched value (§18.6). Write `_` / `else` for a catch-all that binds nothing, or name the variant (`.V(x)`; in a `!{}` also the soft-deprecated `\| .V x :>`) to bind its payload. Also fires for the whole-error binder out of place: `_ <name>` in a `match` whose subject is not a failable result, and `else <name>` in any arm (§18.6.1). `not` is the absence arm, not a bare name. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(a); amended by ruling:user-voice-scrml.md S451 "a" (the whole-error binder). **Nominal / not yet emitted** by impl#1 — it accepts the `!{}` form, and fails a `match` form closed with E-CODEGEN-INVALID-LOGIC (frozen; `g-impl1-bare-binder-arm-accepted-s451`); lands with the bootstrap. | Error |
 | E-MATCH-SCRUTINEE-ARITY | §18.19 | A multi-scrutinee `match (e1, …, eN)` (§18.19) product-pattern arm's pattern count does NOT equal the head's scrutinee count N — e.g. `(.A) :> …` under a 2-scrutinee head, or `(.A, .B, .C) :> …` under a 2-scrutinee head. Each `product-pattern` MUST supply exactly one §18.2 arm-pattern per head position (multi-scrutinee widens over scrutinees — breadth, NOT pattern depth; the §18.11 nested-pattern exclusion is preserved). A whole-product wildcard arm (`_` / `else`) is exempt — it covers every position at once. *(S452 currency correction, spec: §18.2 / §18.19 grammar — struck "optionally `\| _`"; impl#1 still accepts it, `g-impl1-multi-scrutinee-pipe-wildcard-accepted-s452`.)* Resolution: write exactly N comma-separated patterns per `(…)` arm, matching the head's scrutinee count, or use a whole-product `_` / `else` arm. (Catalog addition S224 — Q-MATCH multi-scrutinee match; NAMED at §18.19 W1, catalogued WITH the W2 impl per Rule 4 — the §60 `<api>` / §61 `<endpoint>` / §26.8 `@apply` precedent; emitted at `compiler/src/type-system.ts:19159` (`checkMatchDiagnostics`).) | Error |
 | E-MATCH-ARM-MARKUP-IN-VALUE | §18.0 | A JS-style value-match arm (`match expr { .V :> ... }`) has an arm body that is a MARKUP element. §18.0 splits the two match forms by output category: the JS-style form emits a VALUE (server logic, derivations, computed expressions); the block-form `<match for=Type [on=expr]>` (§18.0.1) emits MARKUP. The natural reflex `${match err { .V(p) :> <markup with ${p}> }}` sits on the value↔markup boundary the two forms split. Resolution: use a `<match for=Type [on=expr]>` block to render a UI tree per variant, or fire a variant's `renders` display via the render-expression; to compute a VALUE per variant have the arm return that value (`:> "Failed: " + reason`) and interpolate it in markup. The render-expression routes around this without widening value-match to emit markup (limit-primitives-not-godify). This early TYPER-stage steer REPLACES the wrong-altitude failures the reflex otherwise surfaces at a later stage — E-CODEGEN-INVALID-LOGIC (markup body lowered literally) and E-SCOPE-001 (a payload var in a `${...}` inside the markup body, not in scope for value-match codegen); the arm-body visit is skipped once the steer fires so it is the ONLY diagnostic. SCOPED to JS-style match-stmt/match-expr `match-arm-inline` arms; the block-form `<match>` is a distinct `match-block` node, structurally exempt. (Catalog addition S196 — error-handling-holistic DD §1.4 Seams 1+2 / debate §6 prereqs 3+4 (H1); emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
@@ -28132,11 +28257,11 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-META-007 | §22.6 | `?{}` SQL context appears inside a runtime `^{}` meta block. Runtime meta blocks don't have a database driver in scope; declare the query outside the meta block or move it into a compile-time meta. (Catalog addition S78 audit; emitted at `compiler/src/meta-checker.ts`.) | Error |
 | E-META-008 | §22.11 | `reflect()` called outside any `^{}` meta block. `reflect()` is only valid inside a meta block — at runtime there is no compile-time type information to reflect on. (Catalog addition S78 audit; emitted at `compiler/src/meta-checker.ts`.) | Error |
 | E-LIFECYCLE-009 | §28.1 | `<timer>` or `<poll>` element is missing the required `interval` attribute. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Error |
-| E-LIFECYCLE-010 | §28.1 | `<timer>` or `<poll>` `interval` attribute value is zero or negative. The interval must be a positive integer (milliseconds). (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Error |
-| E-LIFECYCLE-012 | §28.2 | `<poll>` has no logic body. A poll that fetches nothing is nonsensical — supply a body that mutates state or performs a request. Distinct from W-LIFECYCLE-002 (`<timer>` body is merely warned about, not erred). (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Error |
-| E-LIFECYCLE-015 | §28.5 | `animationFrame()` called with zero arguments or a non-function argument. The function expects a single callback. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
-| E-LIFECYCLE-017 | §28.5 | `animationFrame()` called outside any element scope. The function attaches per-frame work to an enclosing element's lifecycle; without a host element it has nowhere to attach. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
-| E-LIFECYCLE-018 | §28.3 | `<request>` element has no `id` attribute. The `id` is required so the request can be addressed and cancelled. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Error |
+| E-LIFECYCLE-010 | ~~§28.1~~ §6.7.5, §6.7.6, §6.7.10 *(S469 reference fix — §28 is Compiler Settings)* | `<timer>` or `<poll>` `interval` attribute value is zero or negative. The interval must be a positive integer (milliseconds). (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Error |
+| E-LIFECYCLE-012 | ~~§28.2~~ §6.7.6, §6.7.10 *(S469 reference fix — §28 is Compiler Settings)* | `<poll>` has no logic body. A poll that fetches nothing is nonsensical — supply a body that mutates state or performs a request. Distinct from W-LIFECYCLE-002 (`<timer>` body is merely warned about, not erred). (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Error |
+| E-LIFECYCLE-015 | ~~§28.5~~ §6.7.9, §6.7.10 *(S469 reference fix — §28 is Compiler Settings)* | `animationFrame()` called with zero arguments or a non-function argument. The function expects a single callback. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
+| E-LIFECYCLE-017 | ~~§28.5~~ §6.7.9, §6.7.10 *(S469 reference fix — §28 is Compiler Settings)* | `animationFrame()` called outside any element scope. The function attaches per-frame work to an enclosing element's lifecycle; without a host element it has nowhere to attach. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
+| E-LIFECYCLE-018 | ~~§28.3~~ §6.7.7, §6.7.10 *(S469 reference fix — §28 is Compiler Settings)* | `<request>` element has no `id` attribute. The `id` is required so the request can be addressed and cancelled. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Error |
 | E-LIFECYCLE-022 | §6.7.7 | A `<request>` `deps=` entry is not a bare `@identifier` — a member access (`@u.id`), a call, a literal, or a name without the `@` sigil — or the `deps=` value is not a `[ ]` list (`deps=@n`). Grammar: `deps-list ::= ('@' identifier (',' '@' identifier)*)?`. An explicit `deps=` overrides inference, so an unrecognized entry would otherwise leave the request mount-only with no diagnostic. Resolution: list the cell itself (`deps=[@u]` for `@u.id`), or `deps=[]` for fetch-on-mount-only. The "undeclared `@x`" limb of §6.7.7's statement is refused by `E-STATE-UNDECLARED` at the same entry. (Catalog addition S444; emitted at `compiler/src/codegen/emit-html.ts` via `analyzeRequestDepsAttr` in `compiler/src/codegen/reactive-deps.ts`.) | Error |
 | W-LIFECYCLE-002 | §28.1 | `<timer>` has no body (self-closing form). A bodyless timer has no observable effect; the warning surfaces probable dead code. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Warning |
 | W-LIFECYCLE-007 | §28.1 | `running=false` literal boolean on `<timer>` or `<poll>`. The literal-false form is useless — the element can never become un-paused without a reactive variable. Use `running=@flag` or remove the attribute. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Warning |
@@ -28227,14 +28352,14 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-SERVER-CELL-RESERVED-NAME | §52.6.8 | `error` used as (1) the name of a child field or an attribute of a `<x server>` declaration, or (2) the name of a field of a struct type that is the type of a `<x server>` cell. Either would hide the compiler-synthesized load-failure state `@x.error` (§52.6.8). The message names the field and the property it hides. Not affected: a client-local cell, a top-level declaration named `error`, a struct type never used as a `<x server>` cell's type, an array element type. The §55.5.3 precedent (E-VALIDITY-RESERVED-NAME) applied to the one name §52.6.8 synthesizes. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all five" item 2 (`@x.error`, *"mirroring `<request>.error`"*); the reserved name and this code are the SPEC landing's resolution of the collision (**confirmed S451** — ruling:user-voice-scrml.md S451 "your recs on all of them" item 3: *"`error` reserved on server cells"*). Newly-rejecting; corpus impact measured zero (`docs/changes/s451-spec-open-items/progress.md`). **Nominal / spec-ahead — not yet emitted; lands with the bootstrap.** | Error |
 | E-LIFT-IN-LIFECYCLE-BODY | §6.7.4, §6.7.1a | `lift` in an `<effect>` body or an `<onMount>` body (or their soft-deprecated keyword spellings). Neither body has a render position: an `<effect>` renders nothing, and `lift` writes scrml-owned DOM, which is not the outside world. The message SHALL point to `<each in=@…>`, `if=`, or a derived markup cell (§6.6.17). Newly-rejecting (the keyword `when` form allowed it; pack-measured blast radius zero). **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 7: *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination …"*) — pack item 3 = (a); the `<onMount>` limb follows from item 2, the body having no render position). **Nominal / not yet emitted**; impl#1 frozen (`g-impl1-effect-open-items-s449`); lands with the bootstrap. | Error |
 | E-TRANSITION-WRITE-CYCLE | §6.7.4, §6.8.4, §51.0.H | The **transition-write graph** has a cycle: nodes are the states of every transition-graph cell and every other cell; edges run from a state to every node a transition handler run on entering it (a state-child `effect=`, an `<onTransition>`) may write by its write summary, on any path including after a server call, and from a `reset-on=` entry to the reset target. A self-write is a no-op and adds no edge; time-driven transitions (`<onTimeout>`, `<onIdle>`), `<timer>` / `<timeout>` / `<poll>` bodies, event handlers and the engine opener `effect=` add none. The message SHALL name the nodes and the handler or `reset-on=` on each edge, and name a time edge (`<onTimeout after=… to=…/>`) as the fix. A guarded terminating cycle is a stated false positive. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 7: *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination …"*) — pack item 7 = (b): *"static cycle check. A cycle with no time edge is an error, and the fix is `<onTimeout>`"*). Newly-rejecting. **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-open-items-owed`). | Error |
-| E-LIFECYCLE-011 | §28.1 | The `<timer>` or `<poll>` `running` attribute references an undeclared or non-`@` variable. The `running=@flag` form must point at a declared reactive variable to be meaningful. (Catalog addition S84 Wave 2 #5; full prose at §28.1 line 3639.) | Error |
-| E-LIFECYCLE-013 | §28.5 | `animationFrame()` called inside a `<timer>` or `<poll>` body. The two scheduling primitives compose pathologically — `animationFrame()` runs once per frame while the parent `<timer>`/`<poll>` runs on its own interval; the resulting cadence is undefined. Resolution: move `animationFrame()` out of the `<timer>`/`<poll>` body, or remove the parent if the per-frame work is the intent. (Catalog addition S84 Wave 2 #5; full prose at §28.5 line 4286.) | Error |
-| E-LIFECYCLE-014 | §28.5 | `animationFrame()` called inside a server-escalated function. The function is run per-frame on the client; there is no server-side `animationFrame` analogue. (Catalog addition S84 Wave 2 #5; full prose at §28.5 line 4288.) | Error |
+| E-LIFECYCLE-011 | ~~§28.1~~ §6.7.5, §6.7.6, §6.7.10 | The `<timer>` or `<poll>` `running` attribute references an undeclared or non-`@` variable. The `running=@flag` form must point at a declared reactive variable to be meaningful. (Catalog addition S84 Wave 2 #5; full prose at ~~§28.1 line 3639~~ §6.7.5 "Normative Statements"; S469 reference fix — §28 is Compiler Settings.) **Not yet emitted** by impl#1 or the bootstrap (no emitter found, S469). | Error |
+| E-LIFECYCLE-013 | ~~§28.5~~ §6.7.9, §6.7.10 | `animationFrame()` called inside a `<timer>` or `<poll>` body. The two scheduling primitives compose pathologically — `animationFrame()` runs once per frame while the parent `<timer>`/`<poll>` runs on its own interval; the resulting cadence is undefined. Resolution: move `animationFrame()` out of the `<timer>`/`<poll>` body, or remove the parent if the per-frame work is the intent. (Catalog addition S84 Wave 2 #5; full prose at ~~§28.5 line 4286~~ §6.7.9; S469 reference fix — §28 is Compiler Settings.) **Not yet emitted** by impl#1 or the bootstrap (no emitter found, S469). | Error |
+| E-LIFECYCLE-014 | ~~§28.5~~ §6.7.9, §6.7.10 | `animationFrame()` called inside a server-escalated function. The function is run per-frame on the client; there is no server-side `animationFrame` analogue. (Catalog addition S84 Wave 2 #5; full prose at ~~§28.5 line 4288~~ §6.7.9; S469 reference fix — §28 is Compiler Settings.) **Not yet emitted** by impl#1 or the bootstrap (no emitter found, S469). | Error |
 | E-LIFECYCLE-016 | §6.7.4, §6.7.1a | An `<effect>` — or a soft-deprecated keyword `when … changes { }` — appears inside the body of another reactive effect; or (S449 — ruling:user-voice-scrml.md S449 item 2; Nominal) an `<onMount>` — or a soft-deprecated `on mount { }` — appears inside an effect body or another mount body. An effect body is logic, not a markup position, and an effect inside it would have no defined trigger or lifetime. Resolution: declare the inner effect as a sibling `<effect>` with its own `deps=`. (Catalog addition S84 Wave 2 #5.) **Re-expressed S447** for `<effect>`. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* · supersedes: the pre-S447 "`when` block appears syntactically inside another `when` block body" wording. **Nominal / not yet emitted** — impl#1 fails closed on the keyword shape with `E-CODEGEN-INVALID-LOGIC` instead (`g-impl1-when-effect-divergence-s447`); lands with the bootstrap. | Error |
-| E-LIFECYCLE-019 | §28.4 | A `<request>` element is self-closing (no body). A `<request>` body declares the assignment that captures the fetch result; without a body the element has no observable effect. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3880.) | Error |
-| E-LIFECYCLE-020 | §28.4 | A `<request>` body contains more than one assignment. `<request>` is single-assignment-by-design: the lone `@var = expr` form captures the fetch result; multiple assignments would race. *(S469 PA reading: a `lin` declaration before the assignment is not an assignment for this count — §6.7.7.)* (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3881.) **Not yet emitted** by impl#1 or the bootstrap (no emitter found, S469). | Error |
-| E-LIFECYCLE-021 | §28.4 | A `<request>` body contains logic but no `@var = expr` capture. The fetch result is silently discarded. Resolution: add the assignment (`@var = fetchResult(...)`) or remove the logic. *(S469 PA reading: a body of only `lin` declarations is this code — §6.7.7.)* (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3882.) **Not yet emitted** by impl#1 or the bootstrap (no emitter found, S469). | Error |
-| E-LIFECYCLE-022 | §28.4 | A `<request>` `deps=` entry names an undeclared variable or a non-`@` variable. The `deps=` list participates in re-fetch invalidation; entries must resolve to declared reactive variables. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3883.) | Error |
+| E-LIFECYCLE-019 | ~~§28.4~~ §6.7.7, §6.7.10 | A `<request>` element is self-closing (no body). A `<request>` body declares the assignment that captures the fetch result; without a body the element has no observable effect. (Catalog addition S84 Wave 2 #5; full prose at ~~§28.4 line 3880~~ §6.7.7 "Normative Statements"; S469 reference fix — §28 is Compiler Settings.) **Not yet emitted** by impl#1 or the bootstrap (no emitter found, S469). | Error |
+| E-LIFECYCLE-020 | ~~§28.4~~ §6.7.7, §6.7.10 | A `<request>` body contains more than one assignment. `<request>` is single-assignment-by-design: the lone `@var = expr` form captures the fetch result; multiple assignments would race. *(S469 PA reading: a `lin` declaration before the assignment is not an assignment for this count — §6.7.7.)* (Catalog addition S84 Wave 2 #5; full prose at ~~§28.4 line 3881~~ §6.7.7 "Normative Statements" — §28 is Compiler Settings and has no §28.4; S469 reference fix, no change of meaning.) **Not yet emitted** by impl#1 or the bootstrap (no emitter found, S469). | Error |
+| E-LIFECYCLE-021 | ~~§28.4~~ §6.7.7, §6.7.10 | A `<request>` body contains logic but no `@var = expr` capture. The fetch result is silently discarded. Resolution: add the assignment (`@var = fetchResult(...)`) or remove the logic. *(S469 PA reading: a body of only `lin` declarations is this code — §6.7.7.)* (Catalog addition S84 Wave 2 #5; full prose at ~~§28.4 line 3882~~ §6.7.7 "Normative Statements" — §28 is Compiler Settings and has no §28.4; S469 reference fix, no change of meaning.) **Not yet emitted** by impl#1 or the bootstrap (no emitter found, S469). | Error |
+| E-LIFECYCLE-022 | ~~§28.4~~ §6.7.7, §6.7.10 | A `<request>` `deps=` entry names an undeclared variable or a non-`@` variable. The `deps=` list participates in re-fetch invalidation; entries must resolve to declared reactive variables. (Catalog addition S84 Wave 2 #5; full prose at ~~§28.4 line 3883~~ §6.7.7 "Normative Statements"; S469 reference fix — §28 is Compiler Settings.) (Emitted at `compiler/src/codegen/emit-html.ts` via `analyzeRequestDepsAttr` in `compiler/src/codegen/reactive-deps.ts`.) | Error |
 | E-REQUEST-CACHE-NO-READSET | §6.7.7.2 | The bare `cache` attribute is placed on a `<request>` that has no compiler-derivable read-set — a `url=` or `api=` request. `cache` is legal only where the compiler can derive staleness; there is no author-TTL fallback. Resolution: remove `cache`, or fetch through a server function whose SQL the compiler can see. **Provenance:** ruling:user-voice-scrml.md S444 dpa-060 call 2 (+4) — *"(i) and yes"*. **Nominal / spec-ahead — not yet emitted; lands with the impl** (impl#1 carries the divergence; the bootstrap builds it). | Error |
 | W-LIFECYCLE-003 | §6.7.10, §28.1 | A `<timer>` or `<poll>` is declared inside a `for`/`lift` loop body. N loop iterations produce N independent ticking instances; the resulting count and lifetime are usually unintended. Resolution: hoist the element to outside the loop, or confirm via a comment that N instances is intentional. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4323.) | Warning |
 | W-LIFECYCLE-004 | §28.1 | A `<poll>` body contains no function call. A poll with a body that mutates only local variables has no observable effect; the warning surfaces probable dead code. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4324.) | Warning |
@@ -28452,9 +28577,10 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | Code | Section | Trigger | Severity |
 |---|---|---|---|
 | E-STMT-UNEXPECTED-TOKEN | §4 | Unexpected token — no statement begins here. Core statement-grammar parse error. | Error |
-| E-STMT-MISSING-SEMICOLON | §4, §7.2.2 | Expected `;` or a newline to end the statement. *(S446, dpa-063 — §7.2.2 rule 7 makes this THE code for two statements on one line with no `;` between them (`let a = 1 let b = 2`), in every statement list and every front end.)* Emitted at `compiler/native-parser/parse-stmt.scrml` (native) and `compiler/src/ast-builder.js` (default parser — body-top and statement-run cases). **Spec-ahead for the remaining loci** — the bootstrap accepts the same-line pair silently (`g-bootstrap-two-statements-one-line-accepted`); lands with the §7.2.2 build. **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — *"b, your rec"* · ruling:user-voice-scrml.md S284 (conformant reject). | Error |
-| E-STMT-LEADING-OPERATOR | §7.2.2 | (S446, dpa-063.) At statement level, a line STARTS with a token that can only continue an expression — a binary operator (incl. `+` / `-`; not `/`, which starts a regex, nor `<`, which starts markup), `.`, `?.`, `?`, `:`, `=` / a compound assignment, `,`, `=>`, `:>`. The line is never joined to the one above and never read as a new statement. The message SHALL suggest: *"move the operator to the end of the previous line, or wrap the expression in `( )`"*. **Does NOT fire:** inside an open `(` / `[` / expression-position `{` / template literal / markup-as-value element (newlines are whitespace there, §7.2.2 rule 4); on an arm head (`.Variant :>`, `| ::E`) directly inside a `match` / `!{}` body (arm level, decided by position); on a line-leading `else` after an `if` body's `}`; inside `?{}` / `_{}` / `#{}`. **Nominal / spec-ahead — not yet emitted by any front end**; lands with the §7.2.2 build (`g-dpa063-termination-unbuilt-bootstrap`, `…-impl1-legacy`, `…-impl1-native`). Pins that flip to negatives of this code: `conformance/cases/markup-handler/s437-r4-continuation-leading-plus`, `…-expr-form-leading-plus`, `…-leading-question-colon`; two further positive cases carry leading-operator lines and must be rewritten to the trailing form (or flipped) when this lands: `markup-handler/s437-handler-shape-ternary-continuation-lines` (leading `?` / `:`) and `markup-handler/s437-handler-shape-member-continuation-line` (leading `.concat`). **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — *"b, your rec"* · S446 "dpa-063 Call 4" — *"I do agree with your recs, BUT, every other language that I know allows . chaining to start a line. …"* (4a (i): a leading `.` / `?.` is an error, no named exception) · S446 "dpa-063 Call 5" — *"(i), your rec, and yes on +/-"* (leading `+` / `-` in the set) · dd:`scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md`. | Error |
-| E-STMT-NO-EFFECT | §40.8, §7.2.2 rule 9 | (S445 item 2; **language-wide since S446, dpa-063 Call 5**.) An expression statement in ANY statement list (§7.2.2 "Terms": a function / `fn` body, an inline handler block, a `${ … }` logic block, a `^{ … }` body, a `when` / `on mount` body, a code-default body, an arm or if-as-expression block, a `<program>` / `<page>` / `<channel>` body top) has **no effect** — it contains no call (any call, a pure function's too), no assignment, no `++` / `--`, no `send` (nor S445's listed equivalents: `new`, a tagged template, `delete`, a `?{ … }` block, `reset(…)`) — e.g. bare `@count`, `@a == 1`, `"Total: " + @count`, `x => y`. It is valid code that does nothing, so it is reported as that; the message names the declared forms for showing a value (`<span>${@count}</span>`, `"${@count}"`). **Does NOT fire:** on a statement whose value the NEXT statement reads through `~` (§32.2 — used, not dead; `E-TILDE-002` is suppressed on a statement this code fires on); on a value position, which is not an expression statement — a markup `${expr}` interpolation in a render position (§17.6.10), a §18.5 arm result, a value-form arm, a `:`-shorthand body, a bare handler value, a `lift` / `return` / `fail` operand. A `${ @count }` logic block read as statements is NOT a value position and fires (S445 #2's reach: everywhere). **Body top vs elsewhere:** at a `<program>` / `<page>` / `<channel>` body top a literal-only statement (`404`) and an untargeted label are `E-UNQUOTED-DISPLAY-TEXT` (undeclared display text), not this code; in every other statement list both ARE this code (the label is reported on the label). An effectful orphan after `return` (`return⏎f()`) is not this code and stays OPEN (§7.2.2 rule 8). **Status:** emitted at the body top — `compiler/src/ast-builder.js` via `noEffectError` (default front end) and `compiler/native-parser/parse-markup.js` via `noEffectNativeMessage` (native); the judgment is the shared `compiler/native-parser/body-top-coverage.js` `liveExprHasEffect`. **Spec-ahead in every other statement list** — lands with the §7.2.2 build (`g-stmt-no-effect-language-wide-unbuilt`). **Provenance:** ruling:user-voice-scrml.md S445 item 2 · ruling:user-voice-scrml.md S446 "dpa-063 Call 5 = (i)" — *"(i), your rec, and yes on +/-"* (supersedes the body-top-only scope of S445 #2) · ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (readings 7, 8, 9 — value positions incl. the `${ @count }` reach, literal / label outside the body top, `return⏎f()` OPEN). | Error |
+| E-STMT-MISSING-SEMICOLON | §4, §7.2.2 | ~~Expected `;` or a newline to end the statement.~~ **S469 — THE termination code (dpa-073 F1 (a), F3 (i); F6, confirmed):** *"Expected `;` to end the statement"* — a statement that is not block-like, with no `;` after it (§7.2.2 rule 1), reported at its end, where the `;` goes; this includes two statements on one line (`let a = 1 let b = 2;`, rule 7). The bootstrap also reports the split `return⏎expr` / `lift⏎expr` (rule 8, the INTERIM refusal of a RULED reading) and a statement cut short by a line-sensitive reading (§7.2.2 "Remaining newline-sensitive readings") under this code. Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (`missingSemi`, and the split-`return` / `lift` refusals; s469-boot-semicolons, #1510). impl#1 does not enforce `;` (dpa-073 F5, carried divergence): its emit sites `compiler/native-parser/parse-stmt.js` (native, internal call sites only) and `compiler/src/ast-builder.js` (default parser — body-top and statement-run cases) report only the S284 shape, two bare calls on one line (`go() go();`); impl#1 compiles `let a = n let b = 2;` at exit 0 (probed s469-spec-small). ~~*(S446, dpa-063 — §7.2.2 rule 7 makes this THE code for two statements on one line with no `;` between them (`let a = 1 let b = 2`), in every statement list and every front end.)* … **Spec-ahead for the remaining loci** — the bootstrap accepts the same-line pair silently (`g-bootstrap-two-statements-one-line-accepted`); lands with the §7.2.2 build.~~ Provenance: ruling:user-voice-scrml.md S469 "⚑ PA READING (veto window, S469) — dpa-073 F6 dispositions" — confirmed by ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 1 (*"Confirm all four"*); — *"`E-STMT-MISSING-SEMICOLON` becomes THE termination code ("Expected `;` to end the statement")"*. **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — *"b, your rec"* · ruling:user-voice-scrml.md S284 (conformant reject). | Error |
+| E-STMT-SPLIT-CONTINUATION | §7.2.2 rule 5 | An expression that continues across a line break into a line starting with `(`, `[` or a template literal (`let b = a⏎(a + 1).toString();`) — reported instead of reading the call / index / tagged template. Message: *"add `;` to the line above, or join the lines"*. Keeps S440 JS-WAT #6 as a diagnostic. **Not yet emitted** by impl#1 or the bootstrap (the bootstrap reports E-STMT-MISSING-SEMICOLON, or E-PARSE-TEMPLATE for a template, today — `g-bootstrap-newline-sensitive-rules-remain-s469`); owed to the bootstrap; impl#1 carries it (§34.0). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2(i) / F3(i) / F4(ii), all as recommended" — *"F4 "Error on ( [ ` (Recommended)""* · ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 4 — *"Build both"* (*"Mint E-STMT-SPLIT-CONTINUATION for F4(ii), with the message "add `;` to the line above, or join the lines"."*). | Error |
+| ~~E-STMT-LEADING-OPERATOR~~ | §7.2.2 | **DELETED S469 — never emitted.** Under dpa-073 F1 (a) a newline is whitespace (§7.2.2 rule 4), so a line that starts with an operator continues the expression above and there is nothing for this code to report. It was Nominal (no emitter), so its removal is not a §63 deprecation. Provenance: ruling:user-voice-scrml.md S469 "⚑ PA READING (veto window, S469) — dpa-073 F6 dispositions" — *"`E-STMT-LEADING-OPERATOR` deleted (never emitted)"*, confirmed by ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 1 · ruling:user-voice-scrml.md S469 "⭐⭐⭐ RULED — dpa-073 F1 = (a)". The three S437 round-4 pins it was to flip stay positive. ~~(S446, dpa-063.) At statement level, a line STARTS with a token that can only continue an expression — a binary operator (incl. `+` / `-`; not `/`, which starts a regex, nor `<`, which starts markup), `.`, `?.`, `?`, `:`, `=` / a compound assignment, `,`, `=>`, `:>`. The line is never joined to the one above and never read as a new statement. The message SHALL suggest: *"move the operator to the end of the previous line, or wrap the expression in `( )`"*. **Does NOT fire:** inside an open `(` / `[` / expression-position `{` / template literal / markup-as-value element (newlines are whitespace there, §7.2.2 rule 4); on an arm head (`.Variant :>`, `| ::E`) directly inside a `match` / `!{}` body (arm level, decided by position); on a line-leading `else` after an `if` body's `}`; inside `?{}` / `_{}` / `#{}`. **Nominal / spec-ahead — not yet emitted by any front end**; lands with the §7.2.2 build (`g-dpa063-termination-unbuilt-bootstrap`, `…-impl1-legacy`, `…-impl1-native`). Pins that flip to negatives of this code: `conformance/cases/markup-handler/s437-r4-continuation-leading-plus`, `…-expr-form-leading-plus`, `…-leading-question-colon`; two further positive cases carry leading-operator lines and must be rewritten to the trailing form (or flipped) when this lands: `markup-handler/s437-handler-shape-ternary-continuation-lines` (leading `?` / `:`) and `markup-handler/s437-handler-shape-member-continuation-line` (leading `.concat`). **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — *"b, your rec"* · S446 "dpa-063 Call 4" — *"I do agree with your recs, BUT, every other language that I know allows . chaining to start a line. …"* (4a (i): a leading `.` / `?.` is an error, no named exception) · S446 "dpa-063 Call 5" — *"(i), your rec, and yes on +/-"* (leading `+` / `-` in the set) · dd:`scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md`.~~ | — |
+| E-STMT-NO-EFFECT | §40.8, §7.2.2 rule 9 | (S445 item 2; **language-wide since S446, dpa-063 Call 5**.) An expression statement in ANY statement list (§7.2.2 "Terms": a function / `fn` body, an inline handler block, a `${ … }` logic block, a `^{ … }` body, a `when` / `on mount` body, a code-default body, an arm or if-as-expression block, a `<program>` / `<page>` / `<channel>` body top) has **no effect** — it contains no call (any call, a pure function's too), no assignment, no `++` / `--`, no `send` (nor S445's listed equivalents: `new`, a tagged template, `delete`, a `?{ … }` block, `reset(…)`) — e.g. bare `@count`, `@a == 1`, `"Total: " + @count`, `x => y`. It is valid code that does nothing, so it is reported as that; the message names the declared forms for showing a value (`<span>${@count}</span>`, `"${@count}"`). **Does NOT fire:** on a statement whose value the NEXT statement reads through `~` (§32.2 — used, not dead; `E-TILDE-002` is suppressed on a statement this code fires on); on a value position, which is not an expression statement — a markup `${expr}` interpolation in a render position (§17.6.10), a §18.5 arm result, a value-form arm, a `:`-shorthand body, a bare handler value, a `lift` / `return` / `fail` operand. A `${ @count }` logic block read as statements is NOT a value position and fires (S445 #2's reach: everywhere). **Body top vs elsewhere:** at a `<program>` / `<page>` / `<channel>` body top a literal-only statement (`404`) and an untargeted label are `E-UNQUOTED-DISPLAY-TEXT` (undeclared display text), not this code; in every other statement list both ARE this code (the label is reported on the label). An effectful statement after a `return` (`return; f();`) is not this code; whether it is an error stays OPEN (§7.2.2 rule 8). *(S469: ~~`return⏎f()`~~ is no longer an orphan — it returns `f()`, rule 8.)* **Status:** emitted at the body top — `compiler/src/ast-builder.js` via `noEffectError` (default front end) and `compiler/native-parser/parse-markup.js` via `noEffectNativeMessage` (native); the judgment is the shared `compiler/native-parser/body-top-coverage.js` `liveExprHasEffect`. **Spec-ahead in every other statement list** — lands with the §7.2.2 build (`g-stmt-no-effect-language-wide-unbuilt`). **Provenance:** ruling:user-voice-scrml.md S445 item 2 · ruling:user-voice-scrml.md S446 "dpa-063 Call 5 = (i)" — *"(i), your rec, and yes on +/-"* (supersedes the body-top-only scope of S445 #2) · ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (readings 7, 8, 9 — value positions incl. the `${ @count }` reach, literal / label outside the body top, `return⏎f()` OPEN). **S469 — RULED to be built in the bootstrap** for a pure expression statement on either line, including after a block-like `}` (§7.2.2 rule 9; ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 4, *"Build both"*); not yet emitted there. | Error |
 | E-STMT-UNCLOSED-BLOCK | §4 | Expected `}` to close a block statement. | Error |
 | E-STMT-STRAY-ELSE | §4 | `else` with no matching `if`. | Error |
 | E-STMT-BINDING-NAME | §4 | Expected an identifier in a binding position. | Error |
@@ -28515,6 +28641,45 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 |---|---|---|---|
 | I-NATIVE-BLOCK-DROPPED | §4 | A native block-stream kind with no live `ASTNode` was dropped from `FileAST.nodes`: `Test` (`_{}` test blocks — stripped pre-codegen by the live pipeline) or `ForeignCode` (no live `ASTNode` kind). The drop is logged so the disposition is observable, never silent. | Info |
 | I-NATIVE-BLOCK-UNMAPPED | §4 | A native block-stream kind not present in the `nativeParseFile` BlockKind→`ASTNode` map was encountered and dropped — a forward-compatibility guard for a block kind introduced after C1. | Info |
+
+### 34.2 Bootstrap Parse Diagnostics (`E-PARSE-*`)
+
+*The 32 codes in this sub-section are **parse diagnostics of the bootstrap compiler** (`compiler/self-host-v2/`), emitted by its parser (`parse.scrml`) and, for the §55.1 validator-argument forms of `E-PARSE-ATTR`, by its analyzer (`analyze.scrml`). Like §34.1's codes they are **informative for other implementations**: §34.1 provides that *"an implementation's own parse-error codes get their own rows when it lands them"*, and these are those rows. No other implementation is required to emit them; impl#1 reports the same mistakes under its own codes (often `E-PARSE-001`). Each family names a construct, and its message names the rule broken and the fix; one code may cover several messages of one construct. All are Error, the fail-closed severity the bootstrap already gave them when they had no row (`compiler/self-host-v2/severity.scrml`). The code list is the set of `"E-PARSE-…"` literals in the bootstrap's sources on main (`bun scripts/gen-bootstrap-severity.ts` lists every bootstrap code with no row). `E-PARSE-001`, which both compilers name, keeps its row in the main catalog. **Added S469** (registered, not aliased to `E-PARSE-001` — a PA decision on the stray-arm-comma question, s469-spec-small, not an owner ruling; direction of change: inert — no program's acceptance changes).*
+
+| Code | Section | Trigger | Severity |
+|---|---|---|---|
+| E-PARSE-ARM | §18.2, §19.4.5 | A malformed arm in a `match` or `!{}` arm list: a `,` with no arm before it (`{ , .A :> 1 }`, `.A :> 1,, .B …` — dpa-073 F2), a leading `\|` on a `match` arm (only a `!{}` arm takes the legacy `\|`), a missing arm pattern or `:>`, a bad binder inside a pattern's `(…)`, or an unexpected token in an arm body. Also refuses `\|` alternation between patterns, which the bootstrap does not yet support. (Emitted at `compiler/self-host-v2/parse.scrml`, the arm-list and arm-pattern parsers.) | Error |
+| E-PARSE-AT | §6.2 | `@` not followed by a name (`@count`) or `.` (`@.field`). (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-ATTR | §5, §55.1, §66.4 | A malformed attribute: no value after `=`, an unterminated attribute string, `export` on an attribute, or a malformed §55.1 validator argument (`req` with an argument, a comparison outside `length(…)`, a regex outside `pattern(…)`, a validator missing its argument). (Emitted at `compiler/self-host-v2/parse.scrml` and `compiler/self-host-v2/analyze.scrml`.) | Error |
+| E-PARSE-CLOSER | §4 | A malformed closer: no `>` to end it, a closer that names a different element than the one open, or a closer with nothing open. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-COMMENT | §4 | An unterminated `<!--` comment. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-DECL-BODY | §66.4 | A declaration body holding something other than child declarations and state-children (§66.4 rule 4, O52). (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-EFFECT | §6.7.4 | A malformed `<effect>`: an attribute other than `deps=[…]`, a `deps=` that is not a bracketed list of cells, an `<effect>` that declares something, or a body that is not exactly one `${ … }`. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-EXPECTED | §17, §18, §49 | An expected delimiter missing: the `{` that opens `match` arms, the `)` that ends a `for` head or condition, a `for` body that is not a block, and similar. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-EXPORT | §21, §66.4 | `export` on something that is not a declaration (markup, an `<effect>`). (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-EXPR | §7 | An expression expected and not found. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-FN | §7.3, §19.4.1 | A malformed function declaration: no function name, or a failable function with no success-type annotation (§19.4.1). (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-FOR-HEAD | §49.2 | A malformed `for` head: `for ()` with no head (write `for { … }`, §49.2.4), a head with neither zero nor two `;`, or counted-head counters not declared with `let` (§49.2.1). (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-GIVEN | §42.2.3 | A malformed `given` guard: no name after `given`, or no `:>` after its subject. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-IMPORT | §21 | A malformed `import`: no imported name, no `from` after the import list, or no source string. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-ITEM | §7, §40.8 | An item where none is allowed: something other than `import` / `type` / `function` / `fn` where a logic block takes only those, `server` not modifying a function declaration, or unexpected text at program level. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-LET | §66.4 | `let` on something that is not a declaration. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-LOCAL | §7, §49.2 | No name after `let` / `const`, including in the `let` of a `for` head. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-NO-NULL | §42 | `null` / `undefined` written in scrml: absence is `not` (§42). (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-OBJECT | §14 | An object literal with no field name where one is expected. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-OPENER-EQ-SPACED | §66.2.2 | A space between a name (or `name:Type`) and the `=` of its own value or default in an opener: `=` must follow immediately. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-PROGRAM | §40 | A `<program>` inside markup. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-RENDERS | §66.5.1 | `renders` not followed by one markup element. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-SHORTHAND | §4.14, §66.5 | A malformed `:`-shorthand body: no expression before the `>`, no `>` ending the opener after it, or a `:`-shorthand body on a declaration (a declaration's markup is its `renders`). (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-SHORTHAND-GT | §4.14, §66.2.4 | A `>` inside a `:`-shorthand body that ends the opener, so the body reads as a comparison: parenthesize it, `: (a > b)`. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-SQL-CHAIN | §8.3 | A malformed `?{}` method chain: a `.all()` / `.get()` / `.run()` that takes arguments, or one of them following another (a `?{}` takes ONE). (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-STRICT-EQ | §45 | `===` / `!==` written in scrml: `==` is already strict and structural (§45). (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-TAG | §4, §66 | A malformed tag: no tag name after `<`, an unterminated tag, an unexpected token in a tag, a markup element inside a declaration opener, or a `<*name>` reference that declares typed attributes. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-TEMPLATE | §8.1.2, §14.13.3 | A malformed or ambiguous template: an unclosed template, an empty slot or a slot holding more than one expression, a slot (or a `?{}` bound parameter, §8.1.2) whose extent cannot be read one way, an escape that is not a JavaScript template escape, or a template starting the line after an expression (read two ways: JavaScript's tagged template, or scrml's new statement). (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-TRAILING | §7, §7.2.2 | An unexpected token after a complete expression — including a token that continues a statement-position `match` on the same line after its `}` (`match k { … } + 2`): a statement `match` is block-like and ends at its `}` (§7.2.2 rule 2, dpa-073 F3 (i); s469-boot-semicolons r3). To use the value, write the `match` in a value position. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-TYPE | §14, §53 | A malformed type or type declaration: no type where one is expected, no field or variant name, a type kind other than `:enum` / `:struct`, or an unterminated `[` in a type. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-UNCLOSED | §4 | An element that is never closed (`<tag>` with no closer). (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
+| E-PARSE-WHEN | §6.7.4 | A malformed legacy `when … changes { }`: an empty dep-list, a dep-list entry that is not `@name`, no `changes` after the dep-list, or the retired `reads` clause. (Emitted at `compiler/self-host-v2/parse.scrml`.) | Error |
 
 ---
 
@@ -31452,7 +31617,7 @@ The nested `<program>` carries `title="InnerOops"`. The compiler emits `W-PROGRA
 - *(**SUBSUMED S441** for the mechanism, as the S439 #2 bullet above; the S441 rule covers a `<channel>` body — see the S441 bullet.)* **S440 ruling (#8) — the same holds at the body-top of a `<channel>`.** A statement whose grammar head is the `when` keyword, written directly at the body-top of a `<channel>` (a §40.8 default-logic body, like `<program>` / `<page>`) — in any position among the body's direct children — SHALL be lifted into the logic context by that grammar head, exactly as the S439 #2 bullet above states for `<program>` / `<page>`. It SHALL NOT ship as page text. This closes the #1120 OPEN item "`when` lift at `<channel>` body-top"; every other shape outside the lift set keeps the S378 note's status at a `<channel>` body-top too.
   > **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 8) — *"bare `when` at `<channel>` body top → lift by grammar head, as #2 (S439)"*.
 - **S441 ruling — a `<program>` / `<page>` / `<channel>` body carries no loose prose; displayed text is DECLARED.** A `<program>`, `<page>` or `<channel>` body is a **code-default body** (§4.18.1). A bare run — a run of non-whitespace source characters written directly among the body's children, not inside a markup element and not a `"..."` display-text literal — is **code**. It SHALL be parsed and checked as logic at its position, exactly as the content of the declaration auto-lift above is, and it SHALL NOT ship as page text. Every diagnostic the same statements raise inside an explicit `${ … }` at that position SHALL fire there (e.g. the §7.2.1 `E-*-NOT-IN-SCRML` codes for `class` / `try` / `throw` / `async`, and `E-SCOPE-001` for an undeclared name). Displayed text in these bodies SHALL be declared, in one of two forms: **(a)** a markup element — `<p>…</p>`, `<h1>…</h1>`, any HTML or component element — whose own body stays a free-text body (§4.18.1: body modes nest, and plain-markup bodies are unchanged); or **(b)** a `"..."` display-text literal (§4.18.3 — `${…}` interpolation inside it per §4.18.4, verbatim whitespace per §4.18.5, auto-escaped per §4.18.6), which renders as a text node at its position — the `"` delimiters are not rendered, and a `${…}` inside it renders its value. A bare run that is not valid code is `E-UNQUOTED-DISPLAY-TEXT` (§4.18.7). Whitespace between children is source formatting and is not a run (§4.18.5).
-  - A `"..."` is a display-text literal here only when it stands as its OWN statement: it opens a line (or directly follows a markup element), is not the operand of a preceding operator (`const s =⏎ "x"` is code), and nothing but whitespace, `;` or a `//` comment follows its closing `"` on that line (`"a" + b` and `"x".length` are code). Any other `"` is an ordinary code string.
+  - A `"..."` is a display-text literal here only when it stands as its OWN statement: it opens a line (or directly follows a markup element), is not the operand of a preceding operator (`const s =⏎ "x"` is code), and nothing but whitespace, `;` or a `//` comment follows its closing `"` on that line (`"a" + b` and `"x".length` are code). Any other `"` is an ordinary code string. *(S469 — INTERIM: this test reads the line, which §7.2.2 rule 4 no longer lets the grammar do. A newline-free test is dpa-073 route-to-PA R7, not ruled — ⚑ OPEN; listed in §7.2.2 "Remaining newline-sensitive readings".)*
   - A comma **sequence** (`Hello, world`) is not a scrml expression — §4.18.2 lists what a bare run may be, and scrml has no comma operator — so a body-top run of that shape is `E-UNQUOTED-DISPLAY-TEXT`, not a statement. *(S441 review #6.)*
   - **The one comma list (S468).** A C-style `for` header's init — a declarator list (`let i = 0, j = n`) or a list of assignments (`i = 0, j = n`) — and its update — a list of steps whose values are discarded (`i++, j--`) — admit comma-separated lists, on the client and the server alike, each element read as its own expression; every value position still refuses the comma operator, including the header's condition (`for (; i < j, j > 0; i++)`), a declarator's own initializer, and a parenthesized sequence inside the update list.
     > **Provenance:** ruling:user-voice-scrml.md S464 "b" — *"comma lists are legal in a C-style `for` header's init and update parts, on both client and server; the comma operator stays refused in every value position"* · **Direction of change:** newly-accepting for header init / update lists (impl#1 already lowered the update list on both sides since S465 r6; a declarator list's second and later names were E-SCOPE-001 in the loop body until S468); newly-rejecting for a comma in the condition of a header with an empty clause, which impl#1 emitted as raw text at exit 0 (measured corpus impact: see `docs/changes/s468-cfor-comma-lists/progress.md`).
@@ -31470,7 +31635,7 @@ The nested `<program>` carries `title="InnerOops"`. The compiler emits `W-PROGRA
       > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 7, ACCEPTED: *"value positions are not expression statements (so `${ @count }` as a logic-block STATEMENT is E-STMT-NO-EFFECT — settles the S445 #2 reach question: yes, everywhere)"*).
     - **Outside this body top**, the body-top-only shapes in the bullets above do not apply: a literal-only statement (`404`, `[]`) is `E-STMT-NO-EFFECT` (there is no undeclared-display-text reading outside a code-default body's display positions), and a label that no `break` / `continue` targets is `E-STMT-NO-EFFECT` on the label. In a code-default body the §4.18 display-literal rule still decides first what is a display item.
       > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 8, ACCEPTED: *"literal / untargeted label outside the body top = E-STMT-NO-EFFECT"*; at the body top both stay `E-UNQUOTED-DISPLAY-TEXT`, and the `E-TILDE-002` suppression in the "Used through `~`" bullet above is part of the same accepted reading).
-    - **A mis-split line is loud through this rule.** Under §7.2.2 a line never joins the line above unless that line ends in a continuation token, so an orphan — `return⏎    @total * 2`, or `f(x)⏎(y)` — is a statement of its own, and a no-effect orphan is this error. An orphan that HAS an effect (`return⏎f()`) is an unreachable statement after `return`; no code catches it today (OPEN — kept open by ruling, S447 "your recs on all of them" item 1, reading 9; see §7.2.2 rule 8; the dd measured 0 real `return⏎expr` sites in 2,489 files).
+    - **A mis-split line is loud through this rule.** ~~Under §7.2.2 a line never joins the line above unless that line ends in a continuation token, so an orphan — `return⏎    @total * 2`, or `f(x)⏎(y)` — is a statement of its own, and a no-effect orphan is this error.~~ *(S469, dpa-073 F1 (a): a newline is whitespace, so `return⏎    @total * 2;` returns the value (§7.2.2 rule 8) and `f(x)⏎(y)` is the F4 (ii) error (§7.2.2 rule 5); an orphan is now one a `;` ends — `f(x);⏎(y);` — and a no-effect orphan is this error.)* An orphan that HAS an effect (`return; f();` — S469: ~~`return⏎f()`~~ now returns `f()`, §7.2.2 rule 8) is an unreachable statement after `return`; no code catches it today (OPEN — kept open by ruling, S447 "your recs on all of them" item 1, reading 9; see §7.2.2 rule 8; the dd measured 0 real `return⏎expr` sites in 2,489 files).
     - **Status: spec-ahead outside the body top.** The body-top limb is emitted (the §34 row); every other statement list lands with the §7.2.2 build (`g-stmt-no-effect-language-wide-unbuilt`).
   > **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 5 = (i)" — *"(i), your rec, and yes on +/-"* (*"A bare expression statement with no effect … is an error in EVERY logic body (function / `fn` / handler block / `${}` / `^{}` / code-default bodies / body top), not only the §40.8 body top — removes the body-mode-specific scope S445 #2 had. PA refinement ruled with it: an expression statement whose value is read by the next statement through `~` (§32.2) is USED, not dead"*) · dd:`scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md` (Call 5, R7) · **supersedes:** the body-top-only scope of S445 #2 (*"At this body-top a bare expression statement SHALL contain an effect"* — the SHALL now holds in every statement list) · direction-of-change: **newly-rejecting** (a no-effect statement in a function / handler / `${}` body that compiles today).
   - This removes the per-shape question the S378 note (above) left open. Nothing outside the lift set is text at this body-top, so the S439 #2 / S440 #8 grammar-head lifts become special cases of this rule, and the shapes that defeated a text-level recognizer (S383: a braceless statement, `try` with its `{` on the next line, `throw`, `await`, dynamic `import()`) do not arise — the run is parsed, not pattern-matched.
@@ -39248,7 +39413,7 @@ and `break` / `continue` are **E-LOOP-001** / **E-LOOP-002**: legality is by con
 
 Payload binding follows §18.7 / §51.0.B.1; the arm-body block shape `{ statement* expression? }`
 matches §18.2. The message arms are the leading items of the state-child body (before any render
-content), ~~one per line~~ separated by `,` as every arm list is (S469, dpa-073 F2 — §18.2 amendment); at that position a line whose first token is an arm pattern is an arm head
+content), ~~one per line~~ separated by `,` as every arm list is (S469, dpa-073 F2 — §18.2 amendment); at that position ~~a line whose first token is an arm pattern~~ the token after the list's `{` or after an arm's `,` is an arm head (S469, §7.2.2 "Arms and arm heads")
 (§7.2.2 "arm heads" — by position, not by a `:>` lookahead). The pre-S452 `|`-led spelling
 (`| .Variant(binding) :> body`) is SOFT-DEPRECATED under §19.4.5's rule — it parses identically and
 surfaces `W-ARM-PIPE-LEGACY`; reserved `E-ARM-PIPE-LEGACY`; `scrml fix` deletes the `|`. Element arms
