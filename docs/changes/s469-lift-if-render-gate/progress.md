@@ -40,3 +40,9 @@ the one mechanism `<each>` rows use) instead of a `style.display` toggle. Primar
 - [x] F3: SPEC §17.1 states the lifecycle divergence; gap g-row-and-lift-if-gate-not-memoryless-s469.
 - [x] (a) top-level bare `<b if>` -> E-CG-003 (resolved); (b) component `@ok` in lift -> cell (resolved);
       (c) timer under a gated element keeps ticking (filed, open); (d) lifted show= -> display toggle (resolved).
+- [x] merged origin/main twice (fb741076a, 7b2f7cac8); power loss between them lost nothing committed.
+- [x] corpus diff round 2, base = main 0a2d747d3 vs head 7b2f7cac8 (2860 sources): 0 compile-outcome / diagnostic
+      changes (the top-level bare-if E-CG-003 rejects nothing in the corpus); 194 artifacts differ — 171 path-only
+      server.js, 12 trucking shared-module renumbering, 4 conformance for-lift row-gate self-dispose, 7 lift if=
+      (display toggle / token subs -> swap + tracking effect + row self-dispose + bind guard: todomvc, invoices,
+      load-detail, odin-filebrowser, 12-snippets-slots, rust-orders), 1 bind guard only (go-contacts).
