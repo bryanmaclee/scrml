@@ -2,13 +2,13 @@ ${
     <trace> = ""
 
     function D(s: string) {
-        @trace = @trace + s
+        @trace = @trace + s;
     }
 
     function f() {
-        defer ["a;", "b;"].forEach((s) => D(s))
-        let defer = [7]
-        D("v" + defer[0] + ";")
+        defer ["a;", "b;"].forEach((s) => D(s));
+        let defer = [7];
+        D("v" + defer[0] + ";");
     }
 }
 <program>

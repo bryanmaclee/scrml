@@ -2,8 +2,8 @@
 <program>
     function g() { }
     function pick() -> int {
-        if (g() is given) { return 1 }
-        return 0
+        if (g() is given) { return 1; }
+        return 0;
     }
     <main><p>x</p></main>
 </program>

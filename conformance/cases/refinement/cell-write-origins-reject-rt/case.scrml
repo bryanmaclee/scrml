@@ -5,12 +5,12 @@ ${
     <l>: L = { u: "a", n: 1 }
     <ls>: number(>0)[] = [1, 2]
     <items> = [{ id: 1, v: -5 }]
-    function fieldWrite() { @l.n = @m }
-    function pushBad() { @ls.push(@m) }
+    function fieldWrite() { @l.n = @m; }
+    function pushBad() { @ls.push(@m); }
     function dec() { @n-- }
-    function assignBad() { Object.assign(@l, { n: @m }) }
+    function assignBad() { Object.assign(@l, { n: @m }); }
     function viaArrow() {
-        const f = () => { @n = @m }
+        const f = () => { @n = @m; }
         f()
     }
 }

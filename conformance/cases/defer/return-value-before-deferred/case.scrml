@@ -4,13 +4,13 @@ ${
     <trace> = ""
 
     function take() {
-        defer @count = 99
-        defer @trace = @trace + "d"
-        return @count
+        defer @count = 99;
+        defer @trace = @trace + "d";
+        return @count;
     }
 
     function go() {
-        @got = take()
+        @got = take();
     }
 }
 <program>

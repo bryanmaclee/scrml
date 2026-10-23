@@ -11,10 +11,10 @@
     // Triggers, cascades and views over non-tenant tables are untouched by the rule.
     ${
         function mine() {
-            return ?{`SELECT id, name FROM assets`}.all()
+            return ?{`SELECT id, name FROM assets`}.all();
         }
         function settings() {
-            return ?{`SELECT k, v FROM cfg_view`}.all()
+            return ?{`SELECT k, v FROM cfg_view`}.all();
         }
     }
     <button onclick=${ mine() }>mine</button>

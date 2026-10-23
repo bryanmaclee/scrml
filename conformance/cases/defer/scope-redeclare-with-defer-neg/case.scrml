@@ -2,13 +2,13 @@ ${
     <trace> = ""
 
     function D(s: string) {
-        @trace = @trace + s
+        @trace = @trace + s;
     }
 
     function f(x: string) {
-        defer D("x=" + x + ";")
-        let x = "inner"
-        return x
+        defer D("x=" + x + ";");
+        let x = "inner";
+        return x;
     }
 }
 <program>

@@ -2,20 +2,20 @@ ${
     <trace> = ""
 
     server function ping(n: number) {
-        return n + 1
+        return n + 1;
     }
 
     function work() {
         defer {
-            let r = ping(1)
-            @trace = @trace + "n" + r + ";"
+            let r = ping(1);
+            @trace = @trace + "n" + r + ";";
         }
-        @trace = @trace + "a;"
+        @trace = @trace + "a;";
     }
 
     function go() {
-        work()
-        @trace = @trace + "after;"
+        work();
+        @trace = @trace + "after;";
     }
 }
 <program>

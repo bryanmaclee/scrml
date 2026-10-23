@@ -1,0 +1,1 @@
+{ "exclude": "impl#1-only newline-shape guard (S469 PA call, dpa-073 F5): this case pins how impl#1 splits a braceless if / else written on one line with NO `;` — a newline-terminated shape the bootstrap refuses by construction (E-STMT-MISSING-SEMICOLON). Kept unmigrated so impl#1's newline splitting stays guarded; not a bootstrap input." }

@@ -1,6 +1,6 @@
 ${
-    function mintToken() { return "t" }
-    function submitOne(t: string) { return t }
+    function mintToken() { return "t"; }
+    function submitOne(t: string) { return t; }
     let items = [1, 2]
     lin token = mintToken()
     for (const item of items) {

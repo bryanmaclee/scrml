@@ -4,5 +4,5 @@
 <r2> = 0
 <items> = [1]
 ${ function h() { @r2 = 9 } }
-<ul><each in=@items as it><li><button onclick={ () => @r = 1; @r2 = 2 }>x</button></li></each></ul>
+<ul><each in=@items as it><li><button onclick={ () => @r = 1; @r2 = 2; }>x</button></li></each></ul>
 </program>

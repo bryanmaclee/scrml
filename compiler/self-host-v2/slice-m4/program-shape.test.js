@@ -188,7 +188,7 @@ describe("(B) markup at a file's top level, outside any `<program>`", () => {
     expect(d[0].message).toContain("`<engine>`");
   });
   test("an `<effect>` at file top → refused", () => {
-    expect(codes(`<effect deps=[@n]>\${ f() }</>\n<program>\n let <n:int=0/>\n <p>x</p>\n</program>\n`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(`<effect deps=[@n]>\${ f(); }</>\n<program>\n let <n:int=0/>\n <p>x</p>\n</program>\n`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("`<channel>` outside `<program>` in a file with a `<program>` → E-CHANNEL-OUTSIDE-PROGRAM (§38.1)", () => {
     expect(codes(`<channel name="c"></>\n<program><p>x</p></program>\n`)).toEqual(["E-CHANNEL-OUTSIDE-PROGRAM"]);
@@ -200,13 +200,13 @@ describe("(B) markup at a file's top level, outside any `<program>`", () => {
     expect(codes(`<foreign lang="ts" />\n<program lang="ts">\n  <p>hi</p>\n</program>\n`)).toEqual(["E-FOREIGN-LANG-IN-PROGRAM", "E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("in a library file (no `<program>`) a `<channel>` is not E-CHANNEL-OUTSIDE-PROGRAM — it is refused; other markup is refused too", () => {
-    const lib = { path: "lib.scrml", src: `export fn one() -> int { return 1 }\n<channel name="c"></>\n<p>stray</p>\n` };
-    const app = { path: "app.scrml", src: `\${ import { one } from "./lib.scrml" }\n<program>\n <p>\${one()}</p>\n</program>\n` };
+    const lib = { path: "lib.scrml", src: `export fn one() -> int { return 1; }\n<channel name="c"></>\n<p>stray</p>\n` };
+    const app = { path: "app.scrml", src: `\${ import { one } from "./lib.scrml"; }\n<program>\n <p>\${one()}</p>\n</program>\n` };
     const d = frontEnd(mods, [lib, app]).diags;
     expect(d.map((x) => `${x.code}@${x.file}`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED@lib.scrml", "E-BOOTSTRAP-UNSUPPORTED@lib.scrml"]);
   });
   test("twin: types, functions and imports at file top beside the program are clean", () => {
-    expect(codes(`type T:enum = { A, B }\nfn f() -> int { return 1 }\n<program><p>\${f()}</p></program>\n`)).toEqual([]);
+    expect(codes(`type T:enum = { A, B }\nfn f() -> int { return 1; }\n<program><p>\${f()}</p></program>\n`)).toEqual([]);
   });
 });
 
@@ -240,12 +240,12 @@ describe("(A) a `<program>` opener carries plain attributes only", () => {
 // not pulled into the namespace, so they cannot mask an unresolved name in the first.
 describe("(B) a second top-level program contributes no names", () => {
   test("a function only the SECOND program declares does not resolve in the first", () => {
-    const c = codes(`<program>\n<p>\${g()}</p>\n</program>\n<program>\nfn g() -> int { return 1 }\n<p>y</p>\n</program>\n`);
+    const c = codes(`<program>\n<p>\${g()}</p>\n</program>\n<program>\nfn g() -> int { return 1; }\n<p>y</p>\n</program>\n`);
     expect(c).toContain("E-PROGRAM-002");
     expect(c.filter((x) => x !== "E-PROGRAM-002").length).toBeGreaterThan(0);
   });
   test("bite: the same function declared in the FIRST program resolves", () => {
-    expect(codes(`<program>\nfn g() -> int { return 1 }\n<p>\${g()}</p>\n</program>\n`)).toEqual([]);
+    expect(codes(`<program>\nfn g() -> int { return 1; }\n<p>\${g()}</p>\n</program>\n`)).toEqual([]);
   });
 });
 

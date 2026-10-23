@@ -1,5 +1,5 @@
 ${
-  import { schemaFor } from 'scrml:data'
+  import { schemaFor } from 'scrml:data';
 
   type JobResult:enum = { Ok(integer), Err(string) }
 

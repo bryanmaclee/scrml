@@ -2,7 +2,7 @@ ${
     <count> = 0
     const <doubled> = @count * 2
     function increment() {
-        @count = @count + 1
+        @count = @count + 1;
     }
 }
 <button id="inc" onclick=increment()>+</>

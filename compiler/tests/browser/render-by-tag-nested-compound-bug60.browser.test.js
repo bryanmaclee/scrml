@@ -32,10 +32,13 @@ beforeEach(async () => {
 });
 
 // The Bug 60 reproducer — top-level compound decl + nested render-by-tag wrapper.
+// S469: `email` is not a validator predicate (§55.1 vocabulary closed at fourteen — d894e1a04 made an
+// unknown predicate E-TYPE-031); this fixture still used it, so every case failed at compile. Same
+// migration d894e1a04 applied to the unit twin (compiler/tests/unit/render-by-tag-nested-compound-bug60.test.js).
 const SRC =
   `<signupForm>\n` +
   `    <userName req length(>=2)> = <input type="text"/>\n` +
-  `    <email req email>          = <input type="email"/>\n` +
+  `    <email req pattern(/^[^@]+@[^@]+$/)> = <input type="email"/>\n` +
   `</>\n\n` +
   `<div>\n` +
   `  <signupForm>\n` +
@@ -94,6 +97,8 @@ describe("Bug 60 — nested compound render-by-tag drives at runtime (happy-dom)
     expect(textInput.getAttribute("minlength")).toBe("2");
     const emailInput = document.querySelector('input[type="email"]');
     expect(emailInput.hasAttribute("required")).toBe(true);
+    // pattern(/re/) lowers to the native `pattern` attribute (the regex source).
+    expect(emailInput.getAttribute("pattern")).toBe("^[^@]+@[^@]+$");
   });
 
   test("bind:value round-trips — typing the text input writes signupForm.userName", () => {

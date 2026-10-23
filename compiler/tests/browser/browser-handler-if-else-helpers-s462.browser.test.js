@@ -21,16 +21,25 @@
  * The same shapes were driven in Chromium during the fix (reported in progress.md).
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { tmpdir } from "os";
+import { createMountIsolation } from "../helpers/mount-isolation.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
 const tmpRoot = resolve(tmpdir(), "scrml-handler-if-else-helpers-s462");
+
+// One program per mount: tear the previous program's document/window listeners down first, so a
+// stale delegated listener cannot run its own handler for a later program's colliding handler id.
+const iso = createMountIsolation();
+afterAll(async () => {
+  iso.teardown();
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+});
 
 function compileAndMount(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -47,10 +56,13 @@ function compileAndMount(source, baseName) {
   const runtimeJs = readFileSync(resolve(outDir, result.runtimeFilename ?? "scrml-runtime.js"), "utf8");
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
   const bodyHtml = (bodyMatch ? bodyMatch[1] : html).replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
+  iso.teardown();
   document.body.innerHTML = bodyHtml;
   const exec = new Function("window", "document", `${runtimeJs}\n${clientJs}`);
-  exec(window, document);
-  document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+  iso.track(() => {
+    exec(window, document);
+    document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+  });
   return { errors };
 }
 

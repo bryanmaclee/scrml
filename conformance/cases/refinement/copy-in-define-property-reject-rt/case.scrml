@@ -4,10 +4,10 @@ ${
     <l>: L = { u: "a", n: 1 }
     <ls>: number(>0)[] = [1, 2]
     function defField() {
-        Object.defineProperty(@l, "n", { value: @m, writable: true, enumerable: true, configurable: true })
+        Object.defineProperty(@l, "n", { value: @m, writable: true, enumerable: true, configurable: true });
     }
     function defElement() {
-        Object.defineProperty(@ls, "0", { value: @m, writable: true, enumerable: true, configurable: true })
+        Object.defineProperty(@ls, "0", { value: @m, writable: true, enumerable: true, configurable: true });
     }
 }
 <program>

@@ -6,9 +6,9 @@
 <mode> = "a"
 
 <main>
-    <button id="inc" onclick={ @n = @n + 1 }>inc</button>
-    <button id="toB" onclick={ @mode = "b" }>b</button>
-    <button id="toC" onclick={ @mode = "c" }>c</button>
+    <button id="inc" onclick={ @n = @n + 1; }>inc</button>
+    <button id="toB" onclick={ @mode = "b"; }>b</button>
+    <button id="toC" onclick={ @mode = "c"; }>c</button>
     <div id="host">${ if (@shown) { lift <p id="n">${@n}</p> } }</div>
     <div id="chain">${
         if (@mode == "a") {

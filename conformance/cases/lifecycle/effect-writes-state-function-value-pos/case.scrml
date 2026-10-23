@@ -3,10 +3,10 @@
   <n> = 0
   <hits> = 0
   function bump() {
-    @hits = @hits + 1
+    @hits = @hits + 1;
   }
   <effect deps=[@n]>${
-    const handler = bump
+    const handler = bump;
   }</>
   <p>${@n}</p>
 </program>

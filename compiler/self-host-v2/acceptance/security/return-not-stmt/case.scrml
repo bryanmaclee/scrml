@@ -4,21 +4,21 @@
     let <right:string=""/>
     type User:struct = { name: string }
     function find(pw: string) -> User | not {
-        const u: User = { name: "bryan" }
-        if (pw == "hunter2") return u
-        return not
+        const u: User = { name: "bryan" };
+        if (pw == "hunter2") return u;
+        return not;
     }
     function attempt(pw: string) -> string {
-        let m: string = "denied"
+        let m: string = "denied";
         match find(pw) {
-            not :> m = "denied"
+            not :> m = "denied",
             _ :> m = "welcome"
         }
-        return m
+        return m;
     }
     function login() {
-        @wrong = attempt("hunter3")
-        @right = attempt("hunter2")
+        @wrong = attempt("hunter3");
+        @right = attempt("hunter2");
     }
     <main>
         <button id="go" onclick=login()>go</button>

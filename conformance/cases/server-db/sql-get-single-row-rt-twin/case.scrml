@@ -5,13 +5,13 @@
     let <uid:int=0/>
     let <name:string=""/>
     function loadOne()! LoadError {
-        const u: User = ?{`SELECT id, name FROM users`}.get() !{ _ :> { fail .Db } }
-        return u
+        const u: User = ?{`SELECT id, name FROM users`}.get() !{ _ :> { fail .Db; } };
+        return u;
     }
     function load() {
-        const u: User = loadOne() !{ _ :> { return } }
-        @uid = u.id
-        @name = u.name
+        const u: User = loadOne() !{ _ :> { return; } };
+        @uid = u.id;
+        @name = u.name;
     }
     <main>
         <button id="load" onclick=load()>Load</button>

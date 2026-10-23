@@ -1,6 +1,6 @@
 <program>
 ${
-    import { registerMessages } from 'scrml:data'
+    import { registerMessages } from 'scrml:data';
     registerMessages({
         .LengthFailed: "{field} is too short (length {predicate})",
         .Required:     "{field} is absolutely required",

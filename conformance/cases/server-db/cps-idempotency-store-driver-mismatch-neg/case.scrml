@@ -5,7 +5,7 @@
 </>
 ${
     function bump() {
-        @status = "loading"
+        @status = "loading";
         ?{ update counters set n = n + 1 where id = 1 }
         @status = "done"
     }

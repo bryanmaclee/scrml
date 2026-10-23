@@ -60,7 +60,7 @@ function clockCalls(fn) {
 // One program per key prefix: every program a test loads stays alive (its `storage` listener too),
 // so each test uses its OWN keys — an event for one key is ignored by every other program's cells.
 const COUNTER = (k) => P(
-  `    let <count:int=0 persist="local" key="${k}.count"/>\n    <dbl:int=(@count * 2)/>\n    let <copy:int=(@count)/>\n    function ping() {\n        const t = Date.now()\n    }\n    <effect deps=[@count]>\${ ping() }</>`,
+  `    let <count:int=0 persist="local" key="${k}.count"/>\n    <dbl:int=(@count * 2)/>\n    let <copy:int=(@count)/>\n    function ping() {\n        const t = Date.now();\n    }\n    <effect deps=[@count]>\${ ping(); }</>`,
   `        <p class="out">\${@count}|\${@dbl}|\${@copy}</p>\n        <button onclick=(@count = @count + 1)>inc</button>\n        <button onclick=(reset(@count))>reset</button>`);
 
 describe("§6.14.2 — restore, codec, write on change, reset, cross-tab sync", () => {
@@ -202,7 +202,7 @@ describe("§6.14.2 — restore, codec, write on change, reset, cross-tab sync", 
   });
 
   test("rule 2: an enum, a struct and a sequence round-trip through the §57 codec; a shape the type lacks → the default", async () => {
-    const src = P(`    type Mode:enum = { Light, Dark }\n    type Pt:struct = { x: int, y: int }\n    let <mode:Mode=.Light persist="local" key="c12.mode"/>\n    let <pt:Pt=({ x: 0, y: 0 }) persist="local" key="c12.pt"/>\n    <tags:string[free, replace]=([]) persist="local" key="c12.tags"/>\n    function dark() {\n        @mode = .Dark\n    }\n    function move() {\n        @pt = { x: 3, y: 4 }\n    }\n    function tag() {\n        @tags = ["a", "b"]\n    }`,
+    const src = P(`    type Mode:enum = { Light, Dark }\n    type Pt:struct = { x: int, y: int }\n    let <mode:Mode=.Light persist="local" key="c12.mode"/>\n    let <pt:Pt=({ x: 0, y: 0 }) persist="local" key="c12.pt"/>\n    <tags:string[free, replace]=([]) persist="local" key="c12.tags"/>\n    function dark() {\n        @mode = .Dark;\n    }\n    function move() {\n        @pt = { x: 3, y: 4 };\n    }\n    function tag() {\n        @tags = ["a", "b"];\n    }`,
       `        <p class="out">\${@pt.x},\${@pt.y}</p>\n        <button onclick=dark()>dark</button>\n        <button onclick=move()>move</button>\n        <button onclick=tag()>tag</button>`);
     const core = coreOf(src);
     await loadProgram(core, "persist-types");
@@ -229,7 +229,7 @@ describe("§6.14.2 — restore, codec, write on change, reset, cross-tab sync", 
   });
 
   test("s454 rule 2: a PAYLOAD enum round-trips through the §57.8 codec (keyed `data` on the wire, positional at run time); a malformed stored value → the default", async () => {
-    const src = P(`    type Shape:enum = { Dot, Box(w: int, label: string | not) }\n    let <s:Shape=.Dot persist="local" key="c12p.s"/>\n    function mk()! Shape {\n        fail .Box(3, not)\n    }\n    function grow() {\n        mk() !{ _ e :> @s = e }\n    }`,
+    const src = P(`    type Shape:enum = { Dot, Box(w: int, label: string | not) }\n    let <s:Shape=.Dot persist="local" key="c12p.s"/>\n    function mk()! Shape {\n        fail .Box(3, not);\n    }\n    function grow() {\n        mk() !{ _ e :> @s = e };\n    }`,
       `        <button onclick=grow()>grow</button>`);
     const core = coreOf(src);
     await loadProgram(core, "persist-payload");
@@ -289,7 +289,7 @@ describe("§6.14.2 — restore, codec, write on change, reset, cross-tab sync", 
   });
 
   test("rule 4 + rule 9 in ONE batch: a write then a reset leaves no key; a reset then a write stores the write", async () => {
-    const src = P(`    let <n:int=0 persist="local" key="c16.n"/>\n    function writeThenReset() {\n        @n = 9\n        reset(@n)\n    }\n    function resetThenWrite() {\n        reset(@n)\n        @n = 3\n    }`,
+    const src = P(`    let <n:int=0 persist="local" key="c16.n"/>\n    function writeThenReset() {\n        @n = 9;\n        reset(@n);\n    }\n    function resetThenWrite() {\n        reset(@n);\n        @n = 3;\n    }`,
       `        <p class="out">\${@n}</p>\n        <button onclick=writeThenReset()>wr</button>\n        <button onclick=resetThenWrite()>rw</button>`);
     await loadProgram(coreOf(src), "persist-batch");
     click(btn("wr"));

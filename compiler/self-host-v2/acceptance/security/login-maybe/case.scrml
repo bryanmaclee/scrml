@@ -4,21 +4,21 @@
     let <wrong:string=""/>
     let <right:string=""/>
     function find(pw: string) -> User | not {
-        const u: User = { name: "bryan" }
-        if (pw == "hunter2") return u
-        return not
+        const u: User = { name: "bryan" };
+        if (pw == "hunter2") return u;
+        return not;
     }
     function attempt(pw: string) {
-        let msg: string = ""
+        let msg: string = "";
         match find(pw) {
-            not :> msg = "denied"
+            not :> msg = "denied",
             else :> msg = "welcome"
         }
-        return msg
+        return msg;
     }
     function login() {
-        @wrong = attempt("")
-        @right = attempt("hunter2")
+        @wrong = attempt("");
+        @right = attempt("hunter2");
     }
     <main>
         <button id="go" onclick=login()>go</button>

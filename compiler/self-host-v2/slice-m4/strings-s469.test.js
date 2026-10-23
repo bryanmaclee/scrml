@@ -61,7 +61,7 @@ describe("B — string methods are typed member calls", () => {
     expect(codes(prog(S, `        <p>\${@s.toUpperCase(1)}</p>`))).toEqual(["E-CALL-ARITY"]);
   });
   test("an argument of unknown type is refused, fail closed (never handed to the host unchecked)", () => {
-    const src = prog(S + `\n    function f() { return 1 }`, `        <p>\${@s.charAt(f())}</p>`);
+    const src = prog(S + `\n    function f() { return 1; }`, `        <p>\${@s.charAt(f())}</p>`);
     const d = diag(src, "E-BOOTSTRAP-UNSUPPORTED");
     expect(d?.message).toContain("cannot resolve");
   });
@@ -72,7 +72,7 @@ describe("B — string methods are typed member calls", () => {
     expect(codes(prog(S, `        <p>\${@s.substring(1)}</p>`))).toEqual(["E-STRING-METHOD-UNKNOWN"]);
     expect(codes(prog(`    let <n:int=1/>`, `        <p>\${@n.trim()}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(prog(`    let <m:string | not=not/>`, `        <p>\${@m.trim()}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(prog(S + `\n    function f() { return "a" }`, `        <p>\${f().trim()}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(prog(S + `\n    function f() { return "a"; }`, `        <p>\${f().trim()}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("code points (runtime): charAt / slice / split(\"\") never cut an astral character in half", async () => {
     await load(prog(`    let <e:string="😀é😀"/>`,
@@ -167,7 +167,7 @@ describe("B — string methods are typed member calls", () => {
     expect(() => rt.strCharAt("abc", "1")).toThrow("not an int");
   });
   test("reactive: a method result re-renders when its receiver changes", async () => {
-    await load(prog(S, `        <button onclick={ @s = "  yo  " }>set</button>\n        <p id="u">[\${@s.trim().toUpperCase()}]</p>`));
+    await load(prog(S, `        <button onclick={ @s = "  yo  "; }>set</button>\n        <p id="u">[\${@s.trim().toUpperCase()}]</p>`));
     expect($("#u").textContent).toBe("[HI]");
     click(btn("set"));
     expect($("#u").textContent).toBe("[YO]");
@@ -179,24 +179,24 @@ describe("B — string methods are typed member calls", () => {
 describe("strings × loops — a range over `s.length`, `for (ch of s)` and `charAt` agree (code points)", () => {
   const FNS = `    let <s:string="a😀b"/>
     function viaRange(t: string) -> string {
-        let out: string = ""
-        for (i of 0..t.length) { out = out + "[" + t.charAt(i) + "]" }
-        return out
+        let out: string = "";
+        for (i of 0..t.length) { out = out + "[" + t.charAt(i) + "]"; }
+        return out;
     }
     function viaOf(t: string) -> string {
-        let out: string = ""
-        for (ch of t) { out = out + "[" + ch + "]" }
-        return out
+        let out: string = "";
+        for (ch of t) { out = out + "[" + ch + "]"; }
+        return out;
     }
     function countRange(t: string) -> int {
-        let n: int = 0
-        for (i of 0..t.length) { n = n + 1 }
-        return n
+        let n: int = 0;
+        for (i of 0..t.length) { n = n + 1; }
+        return n;
     }
     function countOf(t: string) -> int {
-        let n: int = 0
-        for (ch of t) { n = n + 1 }
-        return n
+        let n: int = 0;
+        for (ch of t) { n = n + 1; }
+        return n;
     }`;
   test("on \"a😀b\": `0..s.length` runs 3 times, as `for (ch of s)` does, and `charAt(i)` is each code point (runtime)", async () => {
     await load(prog(FNS, `        <p id="r">\${viaRange(@s)}</p>\n        <p id="o">\${viaOf(@s)}</p>\n        <p id="cr">\${countRange(@s)}</p>\n        <p id="co">\${countOf(@s)}</p>`));
@@ -239,7 +239,7 @@ describe("C — tape functions return a NEW tape; JavaScript's names are refused
     expect(diag(prog(`    <xs:int[free, append]=([1])/>\n    function go() {\n        @xs = @xs.reverse();\n    }`, `        <button onclick=go()>go</button>`), "E-WRITE-NOT-GRANTED")?.message).toContain("position-write");
   });
   test("sort / reverse do not mutate; writing the result back is a position write (runtime)", async () => {
-    await load(prog(T, `        <button onclick={ @xs = @xs.sort() }>s</button>\n        <p id="v"><each in=@xs.reverse() as x><b>\${x}</b></each></p>\n        <p id="o"><each in=@xs as x><b>\${x}</b></each></p>`));
+    await load(prog(T, `        <button onclick={ @xs = @xs.sort(); }>s</button>\n        <p id="v"><each in=@xs.reverse() as x><b>\${x}</b></each></p>\n        <p id="o"><each in=@xs as x><b>\${x}</b></each></p>`));
     expect($("#v").textContent).toBe("213");
     expect($("#o").textContent).toBe("312");
     click(btn("s"));
@@ -322,7 +322,7 @@ describe("C — tape functions return a NEW tape; JavaScript's names are refused
 // ---------------------------------------------------------------------------
 describe("D — W-STRING-INTERP-LITERAL (PROVISIONAL): `${` in a logic string", () => {
   test("a Warning (the program still lowers), once per literal, in a function body and in markup logic", () => {
-    const r = run(prog(S + `\n    function f() -> string { return "n=\${x}" }`, `        <p>\${f()}</p>\n        <p>\${"a \${b} c"}</p>`));
+    const r = run(prog(S + `\n    function f() -> string { return "n=\${x}"; }`, `        <p>\${f()}</p>\n        <p>\${"a \${b} c"}</p>`));
     expect(r.diags.map((d) => [d.code, d.severity])).toEqual([["W-STRING-INTERP-LITERAL", "Warning"], ["W-STRING-INTERP-LITERAL", "Warning"]]);
     expect(r.core == null).toBe(false);
     expect(r.diags[0].message).toContain("Interpolate in markup");

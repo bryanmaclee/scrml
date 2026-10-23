@@ -47,7 +47,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
-import { captureInsideChunkScope, foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { captureInsideChunkScope, foldChunkNamespacing, chunkNamespaceToken } from "../helpers/chunk-scope.js";
 import { tmpdir } from "os";
 
 // repro-1: pre-populated @todos; button transitions Loading -> Browsing. Exercises
@@ -170,6 +170,11 @@ describe("engine-gated-each §2 — list populates on arm entry (real module-ini
   function mount(source, baseName) {
     const { html, clientJs, runtimeJs } = compileToOutputs(source, baseName);
     document.documentElement.innerHTML = html;
+    // S469: N4 chunk namespacing emits the engine's top-level consts as
+    // `__scrml_engine_<token>_phase_transitions` and the mount attribute as
+    // `data-scrml-engine-mount="<token>_phase"`; the bare names named nothing.
+    const tok = chunkNamespaceToken(clientJs);
+    const engPrefix = tok ? `${tok}_` : "";
     // Load the emitted client.js AS-IS — DO NOT hand-order. The real module-init
     // statement sequence is exercised exactly as shipped.
     const exec = new Function(
@@ -178,7 +183,7 @@ describe("engine-gated-each §2 — list populates on arm entry (real module-ini
       `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
         `globalThis.__scrml_get__ = _scrml_reactive_get;\n` +
         `globalThis.__scrml_engine_direct_set__ = _scrml_engine_direct_set;\n` +
-        `globalThis.__scrml_phase_transitions__ = __scrml_engine_phase_transitions;\n`),
+        `globalThis.__scrml_phase_transitions__ = __scrml_engine_${engPrefix}phase_transitions;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
@@ -188,7 +193,7 @@ describe("engine-gated-each §2 — list populates on arm entry (real module-ini
       // Drive an engine transition the same way the runtime direct-write hook does.
       directSet: (tag) =>
         globalThis.__scrml_engine_direct_set__("phase", tag, globalThis.__scrml_phase_transitions__),
-      engineMount: () => document.querySelector('[data-scrml-engine-mount="phase"]'),
+      engineMount: () => document.querySelector(`[data-scrml-engine-mount="${engPrefix}phase"]`),
       rows: () => (function(){var w=document.createTreeWalker(document.body,NodeFilter.SHOW_COMMENT),n;while((n=w.nextNode())){if(String(n.data||'').trim().indexOf('scrml-each:')===0)return n.parentNode.querySelectorAll('li');}return [];})(),
     };
   }

@@ -1,7 +1,7 @@
 <program>
 <verdict> = "unset"
 <flag> = false
-server function isOk(n: int) { return n > 100 }
+server function isOk(n: int) { return n > 100; }
 <p id="out">${@verdict}</p>
 <form id="f" onsubmit=${(event) => { @verdict = isOk(1) ? "accepted" : "rejected"; event["preventDefault"]() }}><button>s</button></form>
 </program>

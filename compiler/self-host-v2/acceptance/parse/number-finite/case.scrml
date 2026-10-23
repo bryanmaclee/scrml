@@ -4,9 +4,9 @@
     let <b:number | not=(number.parse(".5"))/>
     function show(x: number | not) -> string {
         return match x {
-            not :> "not"
+            not :> "not",
             else :> "num"
-        }
+        };
     }
     <main>
         <p id="a">${@a}</p>

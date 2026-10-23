@@ -9,17 +9,17 @@ ${
     <p>: P = { a: [6, 7], b: [8] }
     <mm>: number(>0)[][] = [[1], [2]]
     function sharedPush() {
-        @x = @y
-        @y.push(@t)
+        @x = @y;
+        @y.push(@t);
     }
-    function sharedPushViaX() { @x.push(@m) }
-    function pathField() { @rows[1].n = @m }
-    function pathRow() { @rows[0] = { u: "q", n: @m } }
+    function sharedPushViaX() { @x.push(@m); }
+    function pathField() { @rows[1].n = @m; }
+    function pathRow() { @rows[0] = { u: "q", n: @m }; }
     function twoPositions() {
-        @p.b = @p.a
-        @p.b.push(@t)
+        @p.b = @p.a;
+        @p.b.push(@t);
     }
-    function nestedPush() { @mm[1].push(@m) }
+    function nestedPush() { @mm[1].push(@m); }
 }
 <program>
 <button id="shared" onclick=sharedPush()>a</button>

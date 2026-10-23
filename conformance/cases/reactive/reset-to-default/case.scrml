@@ -1,10 +1,10 @@
 ${
     <query default="reset-val"> = "init-val"
     function change() {
-        @query = "typed"
+        @query = "typed";
     }
     function doReset() {
-        reset(@query)
+        reset(@query);
     }
 }
 <button id="ch" onclick=change()>change</>

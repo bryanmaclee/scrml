@@ -2,15 +2,15 @@ ${
     <trace> = ""
 
     function D(s: string) {
-        @trace = @trace + s
+        @trace = @trace + s;
     }
 
     function go2() {
-        D("g2;")
+        D("g2;");
     }
 
     function f() {
-        defer go2()
+        defer go2();
         function g() {
             return 1
         }

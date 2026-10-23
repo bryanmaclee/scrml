@@ -1,8 +1,8 @@
 <program>
 
   ${
-    function fmt(e) { return 1 }
-    server function boot() { return fmt(1) }
+    function fmt(e) { return 1; }
+    server function boot() { return fmt(1); }
   }
 
   <channel name="lobby" onclient:open=fmt(e)>

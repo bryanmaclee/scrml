@@ -216,7 +216,7 @@ describe("standalone only — a `\"…\"` inside an expression is an ordinary st
     expect(await html(state('@n == 5 ? "a\\tb" : "c"'))).toBe(W("<p>a\tb<!--if--></p>"));
   });
   test("twin: a call argument `f(\"a\\\"b\\tc\")` is an ordinary string", async () => {
-    expect(await html(P('<p : f("a\\"b\\tc")>', "    fn f(s: string) -> string { return s }"))).toBe(W('<p>a"b\tc</p>'));
+    expect(await html(P('<p : f("a\\"b\\tc")>', "    fn f(s: string) -> string { return s; }"))).toBe(W('<p>a"b\tc</p>'));
   });
   test("twin: a concatenation operand `\"a\\tb\" + @s` is an ordinary string", async () => {
     expect(await html(P('<p : "a\\tb" + @s>', '    let <s:string="Z"/>'))).toBe(W("<p>a\tbZ</p>"));

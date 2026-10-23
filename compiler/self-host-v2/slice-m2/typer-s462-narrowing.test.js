@@ -23,7 +23,7 @@ afterEach(() => expectNoPageErrors());
 const LIB = () => ({ path: "lib/dropdown.scrml", src: readSlice("src/lib/dropdown.scrml") });
 const app = (decls, markup) => ({
   path: "app.scrml",
-  src: `\${ import { dropdown, Openness } from "./lib/dropdown.scrml" }\n<program>\n${decls}\n    <main>\n${markup}\n    </main>\n</program>\n`,
+  src: `\${ import { dropdown, Openness } from "./lib/dropdown.scrml"; }\n<program>\n${decls}\n    <main>\n${markup}\n    </main>\n</program>\n`,
 });
 const inApp = (decls, markup = "<p>x</p>") => frontEnd(mods, [LIB(), app(decls, markup)]).diags.map((d) => d.code);
 const O = "    type O:struct = { let v: string | not, let n: int | not, let f: bool | not }\n    let <o:O=({ v: \"\", n: 0, f: false })/>\n    let <m:int=0/>\n";
@@ -43,42 +43,42 @@ describe("S462 — the unresolvable-call limb (`callKeys`)", () => {
 });
 
 describe("S462 — the known-write limbs are unchanged", () => {
-  const CLEAR = "    function clear() { @o = { v: not, n: not, f: not } }\n";
+  const CLEAR = "    function clear() { @o = { v: not, n: not, f: not }; }\n";
   test("a callee that writes the place ends the narrowing", () => {
-    expect(inApp(O + CLEAR + "    function f() { if (@o.n is given) { clear()\n @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CLEAR + "    function f() { if (@o.n is given) { clear();\n @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("a callee that writes other places keeps it", () => {
-    expect(inApp(O + "    function h() { @m = 2 }\n    function f() { if (@o.n is given) { h()\n @m = @o.n + 1 } }")).toEqual([]);
+    expect(inApp(O + "    function h() { @m = 2; }\n    function f() { if (@o.n is given) { h();\n @m = @o.n + 1; } }")).toEqual([]);
   });
   test("a host call (`Date.now()`) keeps it", () => {
-    expect(inApp(O + "    function f() { if (@o.n is given) { const t = Date.now()\n @m = @o.n + 1 } }")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.n is given) { const t = Date.now();\n @m = @o.n + 1; } }")).toEqual([]);
   });
 });
 
 // S462 Q11 / Q12 ("a", user-voice §S462). The fixture's `?{}` has no database scope (E-SQL-004,
 // beside the point here), so only the narrowing code is asserted.
 const SQ = "?" + "{";
-const WC = "    function wc(id: string) -> int {\n        const row = " + SQ + "`SELECT body FROM notes WHERE id = ${id}`}.get() !{ _ :> not }\n        return 0\n    }\n";
+const WC = "    function wc(id: string) -> int {\n        const row = " + SQ + "`SELECT body FROM notes WHERE id = ${id}`}.get() !{ _ :> not };\n        return 0;\n    }\n";
 const narrowing = (decls, markup) => inApp(decls, markup).filter((c) => c === "E-OPERAND-NOT-NARROWED");
 
 describe("S462 Q11 — a server call (a suspension point) ends every cell narrowing", () => {
   test("a call of a server function (its own `?{}` places it on the server)", () => {
-    expect(narrowing(O + WC + "    function f() { if (@o.n is given) { @m = wc(\"n1\") !{ .Transport(t) :> 0 }\n @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(narrowing(O + WC + "    function f() { if (@o.n is given) { @m = wc(\"n1\") !{ .Transport(t) :> 0 };\n @m = @o.n + 1; } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("a re-test after it narrows again", () => {
-    expect(narrowing(O + WC + "    function f() { if (@o.n is given) { @m = wc(\"n1\") !{ .Transport(t) :> 0 }\n if (@o.n is given) { @m = @o.n + 1 } } }")).toEqual([]);
+    expect(narrowing(O + WC + "    function f() { if (@o.n is given) { @m = wc(\"n1\") !{ .Transport(t) :> 0 };\n if (@o.n is given) { @m = @o.n + 1; } } }")).toEqual([]);
   });
 });
 
 describe("S462 Q12 — an event handler re-tests reactive cells", () => {
   test("a handler OUTSIDE the `if=` gate does not inherit the cell narrowing", () => {
-    expect(narrowing(O, "<p if=(@o.n is given)>x</p><button onclick={ @m = @o.n + 1 }>b</button>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(narrowing(O, "<p if=(@o.n is given)>x</p><button onclick={ @m = @o.n + 1; }>b</button>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("`show=` does not gate a handler (it hides, it does not remove)", () => {
-    expect(narrowing(O, "<p show=(@o.n is given)><button onclick={ @m = @o.n + 1 }>b</button></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(narrowing(O, "<p show=(@o.n is given)><button onclick={ @m = @o.n + 1; }>b</button></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("a re-test inside the handler narrows; the element's children keep the narrowing", () => {
-    expect(narrowing(O, "<p if=(@o.n is given)><button onclick={ if (@o.n is given) { @m = @o.n + 1 } }>b</button></p>")).toEqual([]);
+    expect(narrowing(O, "<p if=(@o.n is given)><button onclick={ if (@o.n is given) { @m = @o.n + 1; } }>b</button></p>")).toEqual([]);
     expect(narrowing(O, "<p if=(@o.n is given)>${@o.n + 1}</p>")).toEqual([]);
   });
 });
@@ -88,16 +88,16 @@ describe("S462 Q12 — an event handler re-tests reactive cells", () => {
 // the condition. Other places, `show=`, handlers outside the gate stay as Q12; a write inside still ends.
 describe("S462 Q18 — a handler inside an `if=` gate keeps that gate's narrowing", () => {
   test("a handler under `if=` keeps the gated place", () => {
-    expect(narrowing(O, "<p if=(@o.n is given)><button onclick={ @m = @o.n + 1 }>b</button></p>")).toEqual([]);
+    expect(narrowing(O, "<p if=(@o.n is given)><button onclick={ @m = @o.n + 1; }>b</button></p>")).toEqual([]);
   });
   test("a descendant of the gated element", () => {
-    expect(narrowing(O, "<div if=(@o.n is given)><section><button onclick={ @m = @o.n + 1 }>b</button></section></div>")).toEqual([]);
+    expect(narrowing(O, "<div if=(@o.n is given)><section><button onclick={ @m = @o.n + 1; }>b</button></section></div>")).toEqual([]);
   });
   test("a different place stays un-narrowed in the handler", () => {
-    expect(narrowing(O, "<p if=(@o.f is given)><button onclick={ @m = @o.n + 1 }>b</button></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(narrowing(O, "<p if=(@o.f is given)><button onclick={ @m = @o.n + 1; }>b</button></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("a write inside the handler still ends it", () => {
-    expect(narrowing(O, "<p if=(@o.n is given)><button onclick={ @o = { v: not, n: not, f: not }\n @m = @o.n + 1 }>b</button></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(narrowing(O, "<p if=(@o.n is given)><button onclick={ @o = { v: not, n: not, f: not };\n @m = @o.n + 1; }>b</button></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
 });
 
@@ -105,13 +105,13 @@ describe("S462 Q18 — a handler inside an `if=` gate keeps that gate's narrowin
 // narrowing — the browser fires `blur` / `focusout` while the gated subtree is being removed.
 describe("S462 round 6 — focus-family handlers are not exempt", () => {
   test("onblur under `if=` re-tests", () => {
-    expect(narrowing(O, "<p if=(@o.n is given)><input onblur={ @m = @o.n + 1 }/></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(narrowing(O, "<p if=(@o.n is given)><input onblur={ @m = @o.n + 1; }/></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("onfocusout under `if=` re-tests", () => {
-    expect(narrowing(O, "<p if=(@o.n is given)><input onfocusout={ @m = @o.n + 1 }/></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(narrowing(O, "<p if=(@o.n is given)><input onfocusout={ @m = @o.n + 1; }/></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("oninput under `if=` keeps it", () => {
-    expect(narrowing(O, "<p if=(@o.n is given)><input oninput={ @m = @o.n + 1 }/></p>")).toEqual([]);
+    expect(narrowing(O, "<p if=(@o.n is given)><input oninput={ @m = @o.n + 1; }/></p>")).toEqual([]);
   });
 });
 
@@ -119,12 +119,12 @@ describe("S462 round 6 — focus-family handlers are not exempt", () => {
 describe("S462 round 6 — only user-input events keep the gate narrowing", () => {
   for (const ev of ["onclick", "onkeydown", "onpointerup", "ondrop", "onClick"]) {
     test(`${ev} under \`if=\` keeps it`, () => {
-      expect(narrowing(O, `<p if=(@o.n is given)><input ${ev}={ @m = @o.n + 1 }/></p>`)).toEqual([]);
+      expect(narrowing(O, `<p if=(@o.n is given)><input ${ev}={ @m = @o.n + 1; }/></p>`)).toEqual([]);
     });
   }
   for (const ev of ["onchange", "onmouseleave", "onanimationend", "onpointercancel", "onscroll"]) {
     test(`${ev} under \`if=\` re-tests`, () => {
-      expect(narrowing(O, `<p if=(@o.n is given)><input ${ev}={ @m = @o.n + 1 }/></p>`)).toEqual(["E-OPERAND-NOT-NARROWED"]);
+      expect(narrowing(O, `<p if=(@o.n is given)><input ${ev}={ @m = @o.n + 1; }/></p>`)).toEqual(["E-OPERAND-NOT-NARROWED"]);
     });
   }
 });
@@ -145,10 +145,10 @@ describe("S462 round 6 — markup else branches are checked", () => {
 // S462 round 7 (twin): `on:` / `onclient:` / `onserver:` prefixes normalise like impl#1.
 describe("S462 round 7 — event-name prefixes", () => {
   test("on:click under `if=` keeps it", () => {
-    expect(narrowing(O, "<p if=(@o.n is given)><button on:click={ @m = @o.n + 1 }>b</button></p>")).toEqual([]);
+    expect(narrowing(O, "<p if=(@o.n is given)><button on:click={ @m = @o.n + 1; }>b</button></p>")).toEqual([]);
   });
   test("twin: on:click OUTSIDE a gate re-tests (the attribute is a handler)", () => {
-    expect(narrowing(O, "<p if=(@o.n is given)>x</p><button on:click={ @m = @o.n + 1 }>b</button>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(narrowing(O, "<p if=(@o.n is given)>x</p><button on:click={ @m = @o.n + 1; }>b</button>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   // `onclient:` / `onserver:` are stripped by `userInputEvent` too, but the slice does not type an
   // `onclient:click` value as a handler at all (a twin outside any gate reports nothing), so the

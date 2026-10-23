@@ -48,8 +48,8 @@
         for (const it of items) {
             if (it.on) {
                 if (it.id > 0) {
-                    const row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get() !{ _ :> not }
-                    out.push(row is not ? "none" : row.body)
+                    const row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get() !{ _ :> not };
+                    out.push(row is not ? "none" : row.body);
                 }
             }
         }
@@ -59,7 +59,7 @@
         let out = []
         for (const it of items) {
             if (it.on) {
-                const rows = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.all() !{ _ :> [] }
+                const rows = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.all() !{ _ :> [] };
                 out.push(rows.length == 0 ? "none" : "hello")
             }
         }
@@ -69,7 +69,7 @@
         let out = []
         for (const it of items) {
             if (it.on) {
-                const row = ?{`SELECT id, body FROM gone WHERE id = ${it.id}`}.get() !{ _ :> not }
+                const row = ?{`SELECT id, body FROM gone WHERE id = ${it.id}`}.get() !{ _ :> not };
                 out.push(row is not ? "none" : row.body)
             } else {
                 out.push("skip")
@@ -81,20 +81,20 @@
         let out = []
         for (const it of items) {
             if (it.on) {
-                const rows = ?{`SELECT id, body FROM gone WHERE id = ${it.id}`}.all() !{ _ :> [] }
+                const rows = ?{`SELECT id, body FROM gone WHERE id = ${it.id}`}.all() !{ _ :> [] };
                 out.push(rows.length == 0 ? "none" : "hello")
             }
         }
         return out.join(",")
     }
     function go() {
-        const items = [{ id: 7, on: true, off: false }, { id: 8, on: true, off: false }, { id: 9, on: false, off: true }]
-        @inIf = inIf(items) !{ _ :> "err" }
-        @inElse = inElse(items) !{ _ :> "err" }
-        @nestedIf = nestedIf(items) !{ _ :> "err" }
-        @allInIf = allInIf(items) !{ _ :> "err" }
-        @inIfFailed = inIfGone(items) !{ _ :> "err" }
-        @allInIfFailed = allInIfGone(items) !{ _ :> "err" }
+        const items = [{ id: 7, on: true, off: false }, { id: 8, on: true, off: false }, { id: 9, on: false, off: true }];
+        @inIf = inIf(items) !{ _ :> "err" };
+        @inElse = inElse(items) !{ _ :> "err" };
+        @nestedIf = nestedIf(items) !{ _ :> "err" };
+        @allInIf = allInIf(items) !{ _ :> "err" };
+        @inIfFailed = inIfGone(items) !{ _ :> "err" };
+        @allInIfFailed = allInIfGone(items) !{ _ :> "err" };
     }
     <button id="go" onclick=go()>go</button>
     <p id="inIf">${@inIf}</p>

@@ -26,13 +26,13 @@ const P = (decls, main) => `<program>\n    type Phase:enum = { Idle, Loading, Do
 // ---------------------------------------------------------------------------
 describe("F1 — a sequence shape / edit call on a LOCAL is never deleted", () => {
   test("`s = [...s, e]` on a `let` local: refused (Core has no spread value), never compiled to nothing", () => {
-    expect(codes(withFn(`function lp() -> int {\n let s = @audit\n s = [...s, ${E}]\n return s.length\n }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(withFn(`function lp() -> int {\n let s = @audit;\n s = [...s, ${E}];\n return s.length;\n }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("the same on a `const` local keeps E-ASSIGN-CONST", () => {
-    expect(codes(withFn(`function lp() -> int {\n const s = @audit\n s = [...s, ${E}]\n return s.length\n }`))).toContain("E-ASSIGN-CONST");
+    expect(codes(withFn(`function lp() -> int {\n const s = @audit;\n s = [...s, ${E}];\n return s.length;\n }`))).toContain("E-ASSIGN-CONST");
   });
   test("`s = s.filter(…)` on a `let` local is a local REBINDING to a new value (s444: `.filter` is a Core value) — kept, never deleted", async () => {
-    const r = run(withFn(`function lp() -> int {\n let s = @audit\n s = s.filter(e => e.action != "b")\n return s.length\n }`));
+    const r = run(withFn(`function lp() -> int {\n let s = @audit;\n s = s.filter(e => e.action != "b");\n return s.length;\n }`));
     expect(r.diags).toEqual([]);
     expect(mods.check.checkCore(r.core)).toEqual([]);
     const { program } = await loadProgram(r.core, "r1-f1-local-filter", ["lp", "record"]);
@@ -42,14 +42,14 @@ describe("F1 — a sequence shape / edit call on a LOCAL is never deleted", () =
     expect(rows().length).toBe(2);                              // the cell is untouched: the local holds the new value
   });
   test("a spread on a parameter: refused", () => {
-    expect(codes(withFn(`function lp(s: Entry[free, append]) -> int {\n s = [...s, ${E}]\n return s.length\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(withFn(`function lp(s: Entry[free, append]) -> int {\n s = [...s, ${E}];\n return s.length;\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
   test("`s.push(e)` / `s.shift()` / `s[0].f = v` on a local: refused (a diagnostic each), not dropped", () => {
     // s469-boot-strings-1: JavaScript's `push` is refused by NAME before anything else (§66.12.6 rule 3)
-    expect(codes(withFn(`function lp() {\n let s = @audit\n s.push(${E})\n }`))).toEqual(["E-TAPE-JS-METHOD"]);
-    expect(codes(withFn(`function lp() {\n let s = @audit\n s.append(${E})\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
-    expect(codes(withFn(`function lp() {\n let s = @audit\n s.shift()\n }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(withFn(`function lp() {\n let s = @audit\n s[0].action = "x"\n }`)).length).toBeGreaterThan(0);
+    expect(codes(withFn(`function lp() {\n let s = @audit;\n s.push(${E});\n }`))).toEqual(["E-TAPE-JS-METHOD"]);
+    expect(codes(withFn(`function lp() {\n let s = @audit;\n s.append(${E});\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(withFn(`function lp() {\n let s = @audit;\n s.shift();\n }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(withFn(`function lp() {\n let s = @audit;\n s[0].action = "x";\n }`)).length).toBeGreaterThan(0);
   });
 });
 
@@ -127,12 +127,12 @@ describe("F4 — a state-child body is CODE-DEFAULT (§4.18.1)", () => {
 // ---------------------------------------------------------------------------
 describe("F5 / F6 — a sequence shape is ONE value: its elements are evaluated left to right before any write", () => {
   const fns = `function mk(s: string) -> Entry {
-        @actor = s
-        const e: Entry = { at: 0, actor: @actor, action: s }
-        return e
+        @actor = s;
+        const e: Entry = { at: 0, actor: @actor, action: s };
+        return e;
     }
-    function app() { @audit = [...@audit, { at: @audit.length, actor: "p", action: "one" }, { at: @audit.length, actor: "q", action: "two" }] }
-    function pre() { @audit = [mk("a"), mk("b"), ...@audit] }`;
+    function app() { @audit = [...@audit, { at: @audit.length, actor: "p", action: "one" }, { at: @audit.length, actor: "q", action: "two" }]; }
+    function pre() { @audit = [mk("a"), mk("b"), ...@audit]; }`;
   let program;
   beforeAll(async () => {
     const src = withFn(fns, "<audit:Entry[free, append, prepend]=[]/>").replace("<li>${e.actor}: ${e.action}</li>", "<li>${e.actor}: ${e.action} @${e.at}</li>");
@@ -155,7 +155,7 @@ describe("F5 / F6 — a sequence shape is ONE value: its elements are evaluated 
 // ---------------------------------------------------------------------------
 describe("nits — type error on a non-sequence, `<*field/>` out of scope", () => {
   test("`@phase = [...@phase, .Done]` on an enum cell → E-TYPE-031", () => {
-    const src = P(`    let <ph:Phase=.Idle/>\n    function x() { @ph = [...@ph, .Done] }`, `        <p>x</p>`);
+    const src = P(`    let <ph:Phase=.Idle/>\n    function x() { @ph = [...@ph, .Done]; }`, `        <p>x</p>`);
     expect(codes(src)).toEqual(["E-TYPE-031"]);
   });
   test("`<*status/>` at program level names the declaration that owns `status` (E-SCOPE-001), not an HTML element", () => {
@@ -224,11 +224,11 @@ describe("F7 — growing a FIXED-length sequence is provably an invariant break 
     const fixed = "<audit:Entry[append]=[]/>";
     // the fixture's own record() (push) and recordBySpread() (the spread shape) grow it too: 3 sites each time
     const inv = (src) => codes(src).filter((c) => c === "E-WRITE-INVARIANT").length;
-    expect(inv(withFn(`function g() { @audit.append(${E}) }`, fixed))).toBe(3);
-    expect(inv(withFn(`function g() { @audit = [...@audit, ${E}] }`, fixed))).toBe(3);
-    expect(codes(withFn(`function g() { @audit.prepend(${E}) }`, "<audit:Entry[prepend]=[]/>"))).toContain("E-WRITE-INVARIANT");
+    expect(inv(withFn(`function g() { @audit.append(${E}); }`, fixed))).toBe(3);
+    expect(inv(withFn(`function g() { @audit = [...@audit, ${E}]; }`, fixed))).toBe(3);
+    expect(codes(withFn(`function g() { @audit.prepend(${E}); }`, "<audit:Entry[prepend]=[]/>"))).toContain("E-WRITE-INVARIANT");
   });
   test("the same writes on `Entry[free, append]` are fine", () => {
-    expect(codes(withFn(`function g() { @audit.append(${E})\n @audit = [...@audit, ${E}] }`))).toEqual([]);
+    expect(codes(withFn(`function g() { @audit.append(${E});\n @audit = [...@audit, ${E}]; }`))).toEqual([]);
   });
 });

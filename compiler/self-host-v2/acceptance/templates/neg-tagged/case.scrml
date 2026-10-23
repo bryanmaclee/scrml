@@ -1,7 +1,7 @@
 // a tagged template is refused by name.
 <program>
     fn tag(s: string) -> string {
-        return s
+        return s;
     }
     fn show(n: int) -> string {
         return tag`v=${n}`

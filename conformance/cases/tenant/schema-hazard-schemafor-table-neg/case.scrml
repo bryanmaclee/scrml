@@ -1,4 +1,4 @@
-${ import { schemaFor } from 'scrml:data'
+${ import { schemaFor } from 'scrml:data';
    type Assets:struct = { id: number, name: string, tenant_id: string } }
 <program db="./app.db">
     <schema>
@@ -10,8 +10,8 @@ ${ import { schemaFor } from 'scrml:data'
     // The tenant table comes from schemaFor, expanded at compile time.
     ${
         function go() {
-            ?{`INSERT INTO config (k, v) VALUES ('a', 'b')`}.run()
-            return "ok"
+            ?{`INSERT INTO config (k, v) VALUES ('a', 'b')`}.run();
+            return "ok";
         }
     }
     <button onclick=${ go() }>go</button>

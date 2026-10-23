@@ -1,11 +1,11 @@
 ${
     <n>: int = 5
 
-    function step1(v: int) { return v + 1 }
-    function record(v: int) { return v }
+    function step1(v: int) { return v + 1; }
+    function record(v: int) { return v; }
 
     function tildeReadInArm() {
-        step1(2)
+        step1(2);
         const label = if (@n > 0) {
             record(~)
             lift "ok"
@@ -16,7 +16,7 @@ ${
     }
 
     function tildeReadInElseArm() {
-        step1(6)
+        step1(6);
         const label = if (@n < 0) {
             lift "pos"
         } else {
@@ -27,7 +27,7 @@ ${
     }
 
     function liftReadsTildeInArm() {
-        step1(40)
+        step1(40);
         const label = if (@n > 0) {
             lift ~
         } else {

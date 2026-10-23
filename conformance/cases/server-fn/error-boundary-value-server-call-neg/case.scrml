@@ -1,8 +1,8 @@
 ${
     type LoadError:enum = { Timeout, NotFound }
     function loadName(id: string)! LoadError {
-        rows = ?{`SELECT name FROM users LIMIT 1`}
-        return rows[0].name
+        rows = ?{`SELECT name FROM users LIMIT 1`};
+        return rows[0].name;
     }
 }
 <page>

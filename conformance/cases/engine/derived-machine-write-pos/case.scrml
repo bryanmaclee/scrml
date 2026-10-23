@@ -10,7 +10,7 @@ ${ type Lamp:enum  = { Off, On } }
   .Red => .Off
   .Green => .On
 </>
-${ function touch() { @proj = .On } }
+${ function touch() { @proj = .On; } }
 <p id="s">${@sig}</p>
 <button id="b" onclick=touch()>touch</button>
 </program>

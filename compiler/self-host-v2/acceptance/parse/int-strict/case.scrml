@@ -4,9 +4,9 @@
     let <b:int | not=(int.parse("-007"))/>
     function show(x: int | not) -> string {
         return match x {
-            not :> "not"
+            not :> "not",
             else :> "int"
-        }
+        };
     }
     <main>
         <p id="a">${@a}</p>

@@ -2,15 +2,15 @@ ${
     <trace> = ""
 
     function boom(o: asIs) {
-        @trace = @trace + "boom;"
-        return o.missing.deeper
+        @trace = @trace + "boom;";
+        return o.missing.deeper;
     }
 
     function work() {
-        defer @trace = @trace + "first-registered;"
-        defer boom({})
-        defer @trace = @trace + "last-registered;"
-        @trace = @trace + "work;"
+        defer @trace = @trace + "first-registered;";
+        defer boom({});
+        defer @trace = @trace + "last-registered;";
+        @trace = @trace + "work;";
     }
 }
 <program>

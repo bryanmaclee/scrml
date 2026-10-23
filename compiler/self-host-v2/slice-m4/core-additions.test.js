@@ -42,7 +42,7 @@ const walkCore = (core, pred) => {
 
 // ===========================================================================
 describe("1 — bind (Attr.Bind)", () => {
-  const src = P(`    let <name:string="ann"/>\n    let <ok:bool=false/>\n    function shout() { @name = "BOB" }`,
+  const src = P(`    let <name:string="ann"/>\n    let <ok:bool=false/>\n    function shout() { @name = "BOB"; }`,
     `        <input bind:value=@name/>\n        <input type="checkbox" bind:checked=@ok/>\n        <p>\${@name}|\${@ok}</p>\n        <button onclick=shout()>shout</button>`);
 
   test("Core: one Bind per bound element — it reads the place and writes `Local(sink)` back through the place's capability", () => {
@@ -89,7 +89,7 @@ describe("1 — bind (Attr.Bind)", () => {
   });
 
   test("§5.4: the right side must be an `@` place (E-ATTR-010)", () => {
-    expect(codes(P(`    let <s:string=""/>\n    function f() { let t = "x" }`, `        <input bind:value="s"/>`))).toEqual(["E-ATTR-010"]);
+    expect(codes(P(`    let <s:string=""/>\n    function f() { let t = "x"; }`, `        <input bind:value="s"/>`))).toEqual(["E-ATTR-010"]);
     expect(codes(P(`    let <s:string=""/>`, `        <input bind:value=(1 + 2)/>`))).toEqual(["E-ATTR-010"]);
   });
 
@@ -123,7 +123,7 @@ describe("1 — bind (Attr.Bind)", () => {
 describe("2 — the host call (Expr.Host: `Date.now()` only)", () => {
   const realNow = Date.now;
   afterAll(() => { Date.now = realNow; });
-  const stamp = P(`    let <t:number=0/>\n    function mark() { @t = Date.now() }`, `        <p>\${@t}</p>\n        <button onclick=mark()>mark</button>\n        <button onclick=(@t = Date.now() + 1)>inline</button>`);
+  const stamp = P(`    let <t:number=0/>\n    function mark() { @t = Date.now(); }`, `        <p>\${@t}</p>\n        <button onclick=mark()>mark</button>\n        <button onclick=(@t = Date.now() + 1)>inline</button>`);
 
   test("in a `function` body and in an event handler: Core Host(DateNow); printed as the host spells it", async () => {
     const core = coreOf(stamp);
@@ -139,7 +139,7 @@ describe("2 — the host call (Expr.Host: `Date.now()` only)", () => {
   });
 
   test("in a pure `fn` body → E-FN-004 (§33.3 item 7, §41.19)", () => {
-    const d = run(P(`    fn stamp() -> number { return Date.now() }`, `        <p>x</p>`)).diags;
+    const d = run(P(`    fn stamp() -> number { return Date.now(); }`, `        <p>x</p>`)).diags;
     expect(d.map((x) => x.code)).toEqual(["E-FN-004"]);
   });
 
@@ -149,13 +149,13 @@ describe("2 — the host call (Expr.Host: `Date.now()` only)", () => {
   });
 
   test("it is a `number`: into an `int` cell is E-TYPE-031; with an argument, refused", () => {
-    expect(codes(P(`    let <n:int=0/>\n    function f() { @n = Date.now() }`, `        <p>x</p>`))).toEqual(["E-TYPE-031"]);
-    expect(codes(P(`    let <t:number=0/>\n    function f() { @t = Date.now(1) }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`    let <n:int=0/>\n    function f() { @n = Date.now(); }`, `        <p>x</p>`))).toEqual(["E-TYPE-031"]);
+    expect(codes(P(`    let <t:number=0/>\n    function f() { @t = Date.now(1); }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 
   test("`Date` is a reserved emitted name: a user function called `Date` never shadows the host's", async () => {
     Date.now = () => 5;
-    const src = P(`    let <t:number=0/>\n    function Date() -> int { return 1 }\n    function mark() { @t = Date.now() }`, `        <p>\${@t}</p>\n        <button onclick=mark()>m</button>`);
+    const src = P(`    let <t:number=0/>\n    function Date() -> int { return 1; }\n    function mark() { @t = Date.now(); }`, `        <p>\${@t}</p>\n        <button onclick=mark()>m</button>`);
     const { out } = await loadProgram(coreOf(src), "host-date-name");
     expect(out.js).not.toContain("function Date(");
     click($("main > button"));
@@ -163,24 +163,24 @@ describe("2 — the host call (Expr.Host: `Date.now()` only)", () => {
   });
 
   // r2 F4 (S239 review): the restriction holds through a helper.
-  const h = `    function h() -> number { return Date.now() + 1 }`;
+  const h = `    function h() -> number { return Date.now() + 1; }`;
   test("a `fn` calling a `function` → E-FN-003 (§48.6.2) — so a `fn` never reaches the clock through a helper", () => {
-    const d = run(P(`${h}\n    fn f() -> number { return h() }`, `        <p>x</p>`)).diags;
+    const d = run(P(`${h}\n    fn f() -> number { return h(); }`, `        <p>x</p>`)).diags;
     expect(d.map((x) => x.code)).toEqual(["E-FN-003"]);
     expect(d[0].message).toContain("§48.6.2");
     expect(d[0].message).toContain("reads the clock");
     // two levels: the `fn` calls a `function` that calls the clock helper
-    expect(codes(P(`${h}\n    function g() -> number { return h() }\n    fn f() -> number { return g() }`, `        <p>x</p>`))).toEqual(["E-FN-003"]);
+    expect(codes(P(`${h}\n    function g() -> number { return h(); }\n    fn f() -> number { return g(); }`, `        <p>x</p>`))).toEqual(["E-FN-003"]);
     // a `function` with no clock is still not callable from a `fn` (§48.6.2: no purity guarantee)
-    const d2 = run(P(`    function k() -> int { return 1 }\n    fn f() -> int { return k() }`, `        <p>x</p>`)).diags;
+    const d2 = run(P(`    function k() -> int { return 1; }\n    fn f() -> int { return k(); }`, `        <p>x</p>`)).diags;
     expect(d2.map((x) => x.code)).toEqual(["E-FN-003"]);
     expect(d2[0].message).not.toContain("reads the clock");
     // inside a lambda in a `fn` body too
-    expect(codes(P(`    <xs:int[]=([1])/>\n    function k(x: int) -> bool { return true }\n    fn f() -> int { return @xs.filter(x => k(x)).length }`, `        <p>x</p>`))).toEqual(["E-FN-003"]);
+    expect(codes(P(`    <xs:int[]=([1])/>\n    function k(x: int) -> bool { return true; }\n    fn f() -> int { return @xs.filter(x => k(x)).length; }`, `        <p>x</p>`))).toEqual(["E-FN-003"]);
   });
   test("twin: a `fn` calling a `fn` (§48.6.1), and a `function` calling the clock helper, are clean", () => {
-    expect(codes(P(`    fn k() -> int { return 1 }\n    fn f() -> int { return k() }`, `        <p>x</p>`))).toEqual([]);
-    expect(codes(P(`${h}\n    let <t:number=0/>\n    function mark() { @t = h() }`, `        <button onclick=mark()>m</button>\n        <button onclick=(@t = h())>n</button>`))).toEqual([]);
+    expect(codes(P(`    fn k() -> int { return 1; }\n    fn f() -> int { return k(); }`, `        <p>x</p>`))).toEqual([]);
+    expect(codes(P(`${h}\n    let <t:number=0/>\n    function mark() { @t = h(); }`, `        <button onclick=mark()>m</button>\n        <button onclick=(@t = h())>n</button>`))).toEqual([]);
   });
   test("a clock helper in an initializer, markup, an attribute value, a lambda in markup → E-BOOTSTRAP-UNSUPPORTED, as `Date.now()` there is", () => {
     for (const [decls, main] of [
@@ -188,7 +188,7 @@ describe("2 — the host call (Expr.Host: `Date.now()` only)", () => {
       [h, `        <p>\${h()}</p>`],
       [h, `        <p title=h()>x</p>`],
       [`${h}\n    <xs:int[]=([1])/>`, `        <p>\${@xs.filter(x => h() > 0).length}</p>`],
-      [`${h}\n    function g() -> number { return h() }`, `        <p>\${g()}</p>`],
+      [`${h}\n    function g() -> number { return h(); }`, `        <p>\${g()}</p>`],
     ]) {
       const d = run(P(decls, main)).diags;
       expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
@@ -196,13 +196,13 @@ describe("2 — the host call (Expr.Host: `Date.now()` only)", () => {
     }
   });
   test("the clock set is closed over mutual recursion; a helper with no clock in markup stays clean", () => {
-    const rec = `    function a(n: int) -> number { if (n > 0) { return b(n - 1) }\n return 0 }\n    function b(n: int) -> number { if (n > 5) { return Date.now() }\n return a(n) }`;
+    const rec = `    function a(n: int) -> number { if (n > 0) { return b(n - 1); }\n return 0; }\n    function b(n: int) -> number { if (n > 5) { return Date.now(); }\n return a(n); }`;
     expect(codes(P(rec, `        <p>\${a(1)}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(P(`    function k() -> int { return 1 }`, `        <p>\${k()}</p>`))).toEqual([]);
+    expect(codes(P(`    function k() -> int { return 1; }`, `        <p>\${k()}</p>`))).toEqual([]);
   });
 
   test("no other host member call is admitted", () => {
-    expect(codes(P(`    let <t:number=0/>\n    function f() { @t = Math.random() }`, `        <p>x</p>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(P(`    let <t:number=0/>\n    function f() { @t = Math.random(); }`, `        <p>x</p>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
 });
 
@@ -271,7 +271,7 @@ describe("4a — removal edits (RemoveEnd / RemoveFront / RemoveAnywhere)", () =
   const items = () => texts("main li");
 
   test("`pop()` on `[free, append, pop]`: removes the last element; on an empty sequence nothing happens", async () => {
-    const core = coreOf(seq("free, append, pop", `    function p() { @xs.pop() }`));
+    const core = coreOf(seq("free, append, pop", `    function p() { @xs.pop(); }`));
     const w = walkCore(core, (n) => n.variant === "Write")[0].data;
     expect([w.edit, w.value]).toEqual(["RemoveEnd", { variant: "Lit", data: { lit: { variant: "Int", data: { v: 1 } } } }]);
     const { program } = await loadProgram(core, "rm-pop", ["p"]);
@@ -282,13 +282,13 @@ describe("4a — removal edits (RemoveEnd / RemoveFront / RemoveAnywhere)", () =
   });
 
   test("`shift()` on `[free, shift]`: removes the first", async () => {
-    const { program } = await loadProgram(coreOf(seq("free, shift", `    function s() { @xs.shift() }`)), "rm-shift", ["s"]);
+    const { program } = await loadProgram(coreOf(seq("free, shift", `    function s() { @xs.shift(); }`)), "rm-shift", ["s"]);
     program.s();
     expect(items()).toEqual(["b", "c"]);
   });
 
   test("`@xs = @xs.filter(λ)` on `[free, remove]`: a RemoveAnywhere of the filtered value (C9: a filter of the field itself)", async () => {
-    const core = coreOf(seq("free, remove", `    function f(k: string) { @xs = @xs.filter(x => x != k) }`));
+    const core = coreOf(seq("free, remove", `    function f(k: string) { @xs = @xs.filter(x => x != k); }`));
     const w = walkCore(core, (n) => n.variant === "Write")[0].data;
     expect(w.edit).toBe("RemoveAnywhere");
     expect(w.value.variant).toBe("SeqCall");
@@ -301,35 +301,35 @@ describe("4a — removal edits (RemoveEnd / RemoveFront / RemoveAnywhere)", () =
   // r2 F6 (S239 review): the field is not "locked" — it grants `remove`; the
   // write needs `replace`, and the message says so.
   test("`@xs = @ys.filter(λ)` on `[free, remove]` (another sequence's filter) → E-WRITE-NOT-GRANTED naming `replace`, not \"locked\"", () => {
-    const src = P(`    <xs:string[free, remove]=(["a"])/>\n    <ys:string[]=(["b"])/>\n    function p() { @xs = @ys.filter(x => x != "a") }`, `        <p>x</p>`);
+    const src = P(`    <xs:string[free, remove]=(["a"])/>\n    <ys:string[]=(["b"])/>\n    function p() { @xs = @ys.filter(x => x != "a"); }`, `        <p>x</p>`);
     const d = run(src).diags;
     expect(d.map((x) => x.code)).toEqual(["E-WRITE-NOT-GRANTED"]);
     expect(d[0].message).not.toContain("locked");
     expect(d[0].message).toContain("does not grant `replace`");
     expect(d[0].message).toContain("of its OWN value");
     // twin: a field with no grant at all is still "locked"
-    expect(run(P(`    <n:string="x"/>\n    function p() { @n = "y" }`, `        <p>x</p>`)).diags[0].message).toContain("is locked");
+    expect(run(P(`    <n:string="x"/>\n    function p() { @n = "y"; }`, `        <p>x</p>`)).diags[0].message).toContain("is locked");
   });
 
   test("`@xs = @xs.map(λ)` on `[write]`: a PositionWrite of the mapped value", async () => {
-    const { program } = await loadProgram(coreOf(seq("write", `    function m() { @xs = @xs.map(x => x + "!") }`)), "rm-map", ["m"]);
+    const { program } = await loadProgram(coreOf(seq("write", `    function m() { @xs = @xs.map(x => x + "!"); }`)), "rm-map", ["m"]);
     program.m();
     expect(items()).toEqual(["a!", "b!", "c!"]);
   });
 
   test("`remove` covers end and front (RULED S442): pop and shift on `[free, remove]` are granted, lowered, and C3-clean", async () => {
-    const { program } = await loadProgram(coreOf(seq("free, remove", `    function p() { @xs.pop() }\n    function s() { @xs.shift() }`)), "rm-remove-covers", ["p", "s"]);
+    const { program } = await loadProgram(coreOf(seq("free, remove", `    function p() { @xs.pop(); }\n    function s() { @xs.shift(); }`)), "rm-remove-covers", ["p", "s"]);
     program.p();
     program.s();
     expect(items()).toEqual(["b"]);
   });
 
   test("a removal takes no argument", () => {
-    expect(codes(seq("free, pop", `    function p() { @xs.pop(1) }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(seq("free, pop", `    function p() { @xs.pop(1); }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 
   test("C3: a removal the field does not grant is refused in Core; C9: a count other than an int ≥ 1, a shrink that is not a filter of the field", () => {
-    const core = coreOf(seq("free, append, pop", `    function p() { @xs.pop() }\n    function q() { @xs.append("z") }`));
+    const core = coreOf(seq("free, append, pop", `    function p() { @xs.pop(); }\n    function q() { @xs.append("z"); }`));
     const [pop, push] = walkCore(core, (n) => n.variant === "Write").map((n) => n.data);
     push.edit = "RemoveFront";
     push.value = { variant: "Lit", data: { lit: { variant: "Int", data: { v: 1 } } } };
@@ -339,7 +339,7 @@ describe("4a — removal edits (RemoveEnd / RemoveFront / RemoveAnywhere)", () =
     expect(msgs.some((m) => m.startsWith("C9:") && m.includes("int >= 1"))).toBe(true);
   });
   test("C9: a RemoveAnywhere whose value is not `filter` of its own field", () => {
-    const core = coreOf(seq("free, remove", `    function f() { @xs = @xs.filter(x => true) }`));
+    const core = coreOf(seq("free, remove", `    function f() { @xs = @xs.filter(x => true); }`));
     const w = walkCore(core, (n) => n.variant === "Write")[0].data;
     w.value = { variant: "ArrayOf", data: { elems: [] } };
     expect(mods.check.checkCore(core).some((m) => m.startsWith("C9:") && m.includes("not a filter"))).toBe(true);
@@ -349,7 +349,7 @@ describe("4a — removal edits (RemoveEnd / RemoveFront / RemoveAnywhere)", () =
 // ===========================================================================
 describe("4b — index places (`@xs[i].f = v`, Core ElemAt)", () => {
   // `Row[]` grants nothing itself: the write capability comes from the ELEMENT field's own `let` (Core: a FieldAt grant over the element struct)
-  const rows = (fdecl) => P(`    type Row:struct = { ${fdecl}, id: int }\n    <rows:Row[]=([{ qty: 1, id: 1 }, { qty: 2, id: 2 }])/>\n    function setQ(i: int, q: int) { @rows[i].qty = q }`,
+  const rows = (fdecl) => P(`    type Row:struct = { ${fdecl}, id: int }\n    <rows:Row[]=([{ qty: 1, id: 1 }, { qty: 2, id: 2 }])/>\n    function setQ(i: int, q: int) { @rows[i].qty = q; }`,
     `        <ul><each in=@rows as r><li>\${r.id}:\${r.qty}</li></each></ul>`);
 
   test("an element field with its own `let`: granted, lowered to ElemAt, run", async () => {
@@ -387,7 +387,7 @@ describe("4b — index places (`@xs[i].f = v`, Core ElemAt)", () => {
   // `int` (`int` enforced, RULED S440 JS-WAT 7(a)). A negative int is not a
   // type error — the SPEC says nothing about it — and stays the runtime refusal.
   test("an index that is not an `int` → E-TYPE-031 (a string param, a string literal, a non-integer, a `number`, an `int | not`)", () => {
-    const at = (params, ix) => P(`    type Row:struct = { let qty: int }\n    <rows:Row[]=([{ qty: 1 }])/>\n    function p(${params}) { @rows[${ix}].qty = 2 }`, `        <p>x</p>`);
+    const at = (params, ix) => P(`    type Row:struct = { let qty: int }\n    <rows:Row[]=([{ qty: 1 }])/>\n    function p(${params}) { @rows[${ix}].qty = 2; }`, `        <p>x</p>`);
     for (const [params, ix] of [["i: string", "i"], ["", '"0"'], ["", "0.5"], ["n: number", "n"], ["m: int | not", "m"], ["", "true"]]) {
       const d = run(at(params, ix)).diags;
       expect(d.map((x) => x.code)).toEqual(["E-TYPE-031"]);
@@ -405,7 +405,7 @@ describe("4b — index places (`@xs[i].f = v`, Core ElemAt)", () => {
   });
 
   test("an element field whose contract grants edits but no `replace`: `= v` is refused (a replace)", () => {
-    const src = P(`    type Row:struct = { tags: string[free, append], id: int }\n    <rows:Row[]=([{ tags: [], id: 1 }])/>\n    function f() { @rows[0].tags = ["x"] }`, `        <p>x</p>`);
+    const src = P(`    type Row:struct = { tags: string[free, append], id: int }\n    <rows:Row[]=([{ tags: [], id: 1 }])/>\n    function f() { @rows[0].tags = ["x"]; }`, `        <p>x</p>`);
     const d = run(src).diags;
     expect(d.map((x) => x.code)).toEqual(["E-WRITE-NOT-GRANTED"]);
     expect(d[0].message).toContain("no `replace`");
@@ -422,7 +422,7 @@ describe("4b — index places (`@xs[i].f = v`, Core ElemAt)", () => {
 // ===========================================================================
 describe("4c — lambdas as the argument of `.filter` / `.map` (Expr.Lambda, Expr.SeqCall)", () => {
   test("as a value in markup: reactive", async () => {
-    const src = P(`    <xs:string[free, append]=(["a", "bb", "c"])/>\n    function add() { @xs.append("dd") }`,
+    const src = P(`    <xs:string[free, append]=(["a", "bb", "c"])/>\n    function add() { @xs.append("dd"); }`,
       `        <p>\${@xs.filter(x => x.length > 1).length}</p>\n        <button onclick=add()>add</button>`);
     await loadProgram(coreOf(src), "lam-markup");
     expect($("main > p").textContent).toBe("1");
@@ -431,20 +431,20 @@ describe("4c — lambdas as the argument of `.filter` / `.map` (Expr.Lambda, Exp
   });
 
   test("into a local, in a function", async () => {
-    const src = P(`    <xs:string[]=(["a", "b"])/>\n    function marks() -> int {\n        let ys = @xs.map(x => x + "!")\n        return ys.filter(y => y != "a!").length\n    }`, `        <p>x</p>`);
+    const src = P(`    <xs:string[]=(["a", "b"])/>\n    function marks() -> int {\n        let ys = @xs.map(x => x + "!");\n        return ys.filter(y => y != "a!").length;\n    }`, `        <p>x</p>`);
     const { program, out } = await loadProgram(coreOf(src), "lam-local", ["marks"]);
     expect(out.js).not.toContain("unminted$");                 // every lambda parameter is a NameSupply name (walk binds it)
     expect(program.marks()).toBe(1);
   });
 
   test("the parameter is typed as the element: a string compared to an int is a type error", () => {
-    expect(codes(P(`    <xs:string[]=(["a"])/>\n    function f() -> int { return @xs.filter(x => x > 1).length }`, `        <p>x</p>`))).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
+    expect(codes(P(`    <xs:string[]=(["a"])/>\n    function f() -> int { return @xs.filter(x => x > 1).length; }`, `        <p>x</p>`))).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
   });
 
   test("refused: a lambda outside `.filter` / `.map`, two parameters, a non-sequence receiver", () => {
-    expect(codes(P(`    let <n:int=0/>\n    function f() { let g = x => x }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(P(`    <xs:string[]=(["a"])/>\n    function f() -> int { return @xs.filter((a, b) => true).length }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(P(`    let <n:int=0/>\n    function f() -> int { return @n.filter(x => true).length }`, `        <p>x</p>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(P(`    let <n:int=0/>\n    function f() { let g = x => x; }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`    <xs:string[]=(["a"])/>\n    function f() -> int { return @xs.filter((a, b) => true).length; }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`    let <n:int=0/>\n    function f() -> int { return @n.filter(x => true).length; }`, `        <p>x</p>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
 });
 

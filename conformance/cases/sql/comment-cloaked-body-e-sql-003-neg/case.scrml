@@ -1,8 +1,8 @@
 ${
     function loadRows(q: string) {
-        return ?{`/* dynamic */${q}`}.all()
+        return ?{`/* dynamic */${q}`}.all();
     }
 }
 <program db="./app.db">
-    <button id="load" onclick={ loadRows("SELECT id FROM tasks") !{ .Transport(_) :> return } }>Load</>
+    <button id="load" onclick={ loadRows("SELECT id FROM tasks") !{ .Transport(_) :> return }; }>Load</>
 </program>

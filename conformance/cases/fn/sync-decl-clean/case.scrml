@@ -1,7 +1,7 @@
 <program>
 ${
     fn loadProfile(id: int) {
-        return id
+        return id;
     }
 }
 <p>${loadProfile(1)}</>

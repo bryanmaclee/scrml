@@ -1,4 +1,4 @@
 ${
-    import { fromA } from './a.scrml'
+    import { fromA } from './a.scrml';
 }
 <p>${fromA}</>

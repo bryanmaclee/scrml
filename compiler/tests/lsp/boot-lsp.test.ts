@@ -183,7 +183,7 @@ describe("diagnostic mapping", () => {
   });
 
   test("a diagnostic in an imported file lands on the import line, with relatedInformation", () => {
-    const text = `\${\n    import { C } from "./b.scrml"\n}\n<program></program>\n`;
+    const text = `\${\n    import { C } from "./b.scrml";\n}\n<program></program>\n`;
     const [d] = toLspDiagnostics([{ severity: "error", code: "E-SCOPE-001", message: "nope", file: "/p/b.scrml", line: 3, col: 5, endLine: 3, endCol: 9 }], "/p/a.scrml", text);
     expect(d.range.start.line).toBe(1);
     expect(d.message).toBe("in b.scrml:3:5: nope");
@@ -245,9 +245,9 @@ describe("lsp-boot over stdio", () => {
     const a = join(dir, "never-saved-a.scrml");
     const b = join(dir, "never-saved-b.scrml");
     const aUri = pathToFileURL(a).href, bUri = pathToFileURL(b).href;
-    const A = `\${\n    import { Color } from "./never-saved-b.scrml"\n}\n<program>\n    let <c:Color=.Red/>\n    <main><p>hi</p></main>\n</program>\n`;
+    const A = `\${\n    import { Color } from "./never-saved-b.scrml";\n}\n<program>\n    let <c:Color=.Red/>\n    <main><p>hi</p></main>\n</program>\n`;
     const B_OK = `\${\n    export type Color:enum = { Red, Blue }\n}\n`;
-    const B_BAD = `\${\n    export type Color:enum = { Red, Blue }\n    export fn f() -> int { return nope }\n}\n`;
+    const B_BAD = `\${\n    export type Color:enum = { Red, Blue }\n    export fn f() -> int { return nope; }\n}\n`;
     const c = client();
     await c.init(dir);
     let pb = c.nextDiagnostics(bUri, 60_000);

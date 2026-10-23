@@ -2,10 +2,10 @@
 <program>
     let <n:int=3/>
     fn label(k: int) -> string {
-        return `typed ${k} chars`
+        return `typed ${k} chars`;
     }
     <main>
-        <button id="inc" onclick={ @n = @n + 1 }>+</button>
+        <button id="inc" onclick={ @n = @n + 1; }>+</button>
         <p id="a">${label(@n)}</p>
         <p id="neg">${label(0 - 42)}</p>
         <p id="big">${label(9007199254740991)}</p>

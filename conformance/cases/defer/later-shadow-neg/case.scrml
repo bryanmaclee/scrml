@@ -3,34 +3,34 @@ ${
     const x = "outer"
 
     function D(s: string) {
-        @trace = @trace + s
+        @trace = @trace + s;
     }
 
     function shadow() {
-        defer D("x=" + x + ";")
-        const x = "inner"
-        return x
+        defer D("x=" + x + ";");
+        const x = "inner";
+        return x;
     }
 
     function tdz(c: boolean) {
-        defer D(x)
+        defer D(x);
         if (c) {
-            return "early"
+            return "early";
         }
-        const x = "inner"
-        return x
+        const x = "inner";
+        return x;
     }
 
     function outerChain(c: boolean) {
         if (c) {
-            defer D(y)
+            defer D(y);
         }
-        let y = "later"
-        return y
+        let y = "later";
+        return y;
     }
 
     function destructured() {
-        defer D(a)
+        defer D(a);
         const { a } = { a: "A" }
         return a
     }

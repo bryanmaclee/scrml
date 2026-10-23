@@ -5,21 +5,21 @@ ${
     <seen> : string = "none"
     <after> : string = "not-run"
     function risky(n: number)! E {
-        if (n < 0) { fail E.Boom("neg") }
-        return n
+        if (n < 0) { fail E.Boom("neg"); }
+        return n;
     }
     function outer(n: number)! E2 {
         match risky(n) {
             .Ok(x) :> @seen = "ok"
-            .Boom(m) :> { fail .Wrapped(m) }
+            .Boom(m) :> { fail .Wrapped(m); }
             .Other :> @seen = "other"
         }
-        @after = "ran"
+        @after = "ran";
     }
     function go() {
         outer(-1) !{
             .Wrapped(m) :> @seen = "wrapped:" + m
-        }
+        };
     }
 }
 <button id="go" onclick=go()>go</>

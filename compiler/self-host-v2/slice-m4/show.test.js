@@ -44,8 +44,8 @@ const visible = (sel) => $(sel) !== null && $(sel).style.display !== "none";
 const prog = (body, extra = "") => `<program>
     let <step:number=1/>
     let <label:string="alpha"/>
-    function go(n: number) { @step = n }
-    function relabel(s: string) { @label = s }
+    function go(n: number) { @step = n; }
+    function relabel(s: string) { @label = s; }
 ${extra}
     <main>
 ${body}

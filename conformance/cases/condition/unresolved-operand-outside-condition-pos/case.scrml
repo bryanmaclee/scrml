@@ -2,11 +2,11 @@
 // provable-or-silent (S440 Q2), and the explicit fix inside one is admitted.
 <program>
     function g() { }
-    function keep(x: bool) -> bool { return x }
+    function keep(x: bool) -> bool { return x; }
     function pick() -> bool {
-        const v = !g()
-        if (!(g() is given)) { return v }
-        return keep(!g())
+        const v = !g();
+        if (!(g() is given)) { return v; }
+        return keep(!g());
     }
     <main><p>x</p></main>
 </program>

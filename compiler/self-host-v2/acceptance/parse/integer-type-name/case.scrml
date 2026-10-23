@@ -2,7 +2,7 @@
 <program>
     let <n:integer=41/>
     let <b:boolean=true/>
-    function inc(x: integer) -> int { return x + 1 }
+    function inc(x: integer) -> int { return x + 1; }
     <main>
         <p id="n">${inc(@n)}</p>
         <p id="b">${@b}</p>

@@ -2,18 +2,18 @@ ${
     <out> = ""
 
     function p4(w: int) {
-        let v = "v"
+        let v = "v";
         if (w > 0) {
-            let w = "shadow-w;"
-            let v = "shadow-v;"
-            @out = @out + w + v
+            let w = "shadow-w;";
+            let v = "shadow-v;";
+            @out = @out + w + v;
         }
-        @out = @out + v + ";"
-        return w
+        @out = @out + v + ";";
+        return w;
     }
 
     function go() {
-        p4(1)
+        p4(1);
     }
 }
 <program>
