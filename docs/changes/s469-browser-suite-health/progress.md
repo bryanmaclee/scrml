@@ -34,3 +34,12 @@ the leak (the previous case's program's on()/off() also ran and its spy counted 
 global). Mounted alone (`-t "nested gated subtree"`, nothing to leak) the count is 6 — 2 per gated
 interpolation, same rate as the flat case's 4. Expectation corrected to `[6, 0, 6]` (a correct value,
 not a relaxed one: still exact equality).
+
+## Step 2 — TodoMVC dist (FIXED, class a)
+
+`benchmarks/todomvc/dist/` is gitignored and no tier setup built it. It passed only when CI's
+gauntlet step had built it, or when `todomvc-e2e.test.js` (which compiles into the same dist in its
+beforeAll) happened to run first — in the baseline run the dist appeared at 12:16, mid-suite, after
+browser-todomvc had already read `distExists=false`. `scripts/compile-test-samples.sh` (the
+`pretest` step CI also runs) now builds it with the gauntlet's flags. browser-todomvc: 39 pass /
+8 skip (pre-existing, documented harness skips) / 0 fail from a deleted dist.
