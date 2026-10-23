@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 263 | 4 |
-| MED | 678 | 8 |
-| LOW | 467 | 0 |
+| HIGH | 265 | 4 |
+| MED | 680 | 8 |
+| LOW | 469 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -119,6 +119,60 @@ Found by the public-docs lane (PR #1485). Reproduced S469 (s469-spec-catchup): `
 RESOLVED S469 (s469-impl1-arm-commas): impl#1 ACCEPTS `,` between arms, the trailing one optional, in every arm list it reads — a `match` (statement, value, `return`, `const`, markup `${…}`, call argument, derived cell, engine `derived=`; expression position via the expression parser's arm split), a `!{}` handler (`parseErrorTokens`) and an engine message-arm list (`parseMessageArms`) — for every arm form (variant, binder, literal, alternation, `else` / `_`, `not`, `given`, product, block, leaving arms). It keeps reading newline-separated arms (the carried divergence; it never enforces commas) and a mixed list. A depth-0 `,` ends an arm body (scrml has no comma operator); a `,` inside a call, object, string, template or product pattern is the body's own. Fail closed: a leading `,`, a `,,`, or a comma sequence left in an arm body is E-PARSE-001. The S144 typer check that refused the `,` (E-MATCH-ARM-SEPARATOR, old meaning) is retired; impl#1 no longer emits that code. Measured: the corpus emit differential (2860 sources, 8609 artifacts) shows zero differences for existing input. Pinned by `compiler/tests/unit/match-arm-commas-s469.test.js` (49 tests) and the rewritten §1–§3 of `match-arm-separator-and-value-unused-s144.test.js`. Original entry:
 
 Found by the public-docs lane (PR #1485). Reproduced S469 (s469-spec-catchup): `match @k { "a" :> 1, else :> 2 }` → `E-MATCH-ARM-SEPARATOR` ("Match arms are separated by newlines, not commas (§18.2)"). This is NOT a stays-a-gap bug: it is an owed impl#1 change, ruled under the S435 exception because the migration route needs it — impl#1 must accept arm commas (match, `!{}` and engine message arms, trailing comma optional) so the `scrml fix` codemod can insert them and verify by emit diff (dpa-073 F5 steps 1–2). impl#1 does not ENFORCE commas (newline-separated arms stay accepted, a carried divergence). SPEC §18.2 / §19.4.5 state the comma list (s469-spec-catchup).
+
+### g-impl1-expr-match-literal-alternation-first-alternate-dropped-s469 — in an expression-position `match` (`@cell = match …`) written as a NEWLINE list, a literal alternation arm followed by another literal arm loses its first alternate (`1 | 2 :> "low"` matches only `2`), silently — `NEW S469; HIGH; open (silent miscompile)`
+
+<!-- @gap id=g-impl1-expr-match-literal-alternation-first-alternate-dropped-s469 sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts(splitMultiArmString — a number / string arm head preceded by `|` is registered as an arm start, and the text before the first registered start is dropped) prov=dispatch:s469-impl1-arm-commas(r2, review of 2f9176de0 F3 — repro sent);review:s469-impl1-arm-commas(F3) -->
+
+Reproduced S469 (s469-impl1-arm-commas r2) on the batch-5 base `aa341cda0` and on this branch, exit 0, no diagnostic:
+
+```scrml
+<k> = 1
+<n> = ""
+${
+  function go() {
+    @n = match @k {
+      1 | 2 :> "low"
+      3 :> "mid"
+      _ :> "hi"
+    }
+  }
+}
+<button onclick=go()>go</>
+<p>${@n}</>
+```
+
+emits `if (_scrml_match_4 === 2) return "low";` — the `1` alternate is gone, so `@k = 1` reads `"hi"`. Mechanism (number heads): the expression parser's line split (`splitMatchArms`) does not start an arm at a literal head, so the first two lines arrive as ONE raw arm `1 | 2 :> "low" 3 :> "mid"`; `splitMultiArmString` registers `2 :>` (a standalone number before an arrow) as an arm start and slices from there, dropping `1 |`. Variant alternations are guarded (`isAlternate`), literal ones are not. A STRING alternation is worse: `"a" | "b" :> "low"` (then `"c" :> "mid"`, `_ :> "hi"`) emits `=== "b"` only in BOTH the newline and the comma spelling, on base and on this branch — the first alternate is dropped even when the arm arrives alone. Measured: the number case as a comma list is correct (each arm arrives as its own raw arm); `const v = match …` with the number arms lowers `=== 1 || === 2` correctly. The reviewer of 2f9176de0 probed other positions and did not reproduce it; `@cell = match …` (a reactive assignment, the raw-arm path) is the position. Not fixed (S435: impl#1 non-security bugs stay gaps unless ruled).
+
+### g-impl1-nested-inline-value-match-in-raw-arm-invalid-logic-s469 — an expression-position `match` whose arm body is another multi-line value `match` (`@n = match @a { .X :> match @b {⏎ .X :> 1⏎ .Y :> 2⏎ }⏎ .Y :> 3 }`) fails as E-CODEGEN-INVALID-LOGIC (a compiler-defect code), in both arm spellings and on base — `NEW S469; MED; open (fails closed)`
+
+<!-- @gap id=g-impl1-nested-inline-value-match-in-raw-arm-invalid-logic-s469 sev=MED status=open locus=compiler/src/expression-parser.ts(preprocessMatchExprs — a nested `match … { … }` in a raw arm is masked inner-first but the outer arm text keeps the inner match source) prov=dispatch:s469-impl1-arm-commas(round 1 probe);review:s469-impl1-arm-commas(review of 2f9176de0) -->
+
+Found S469 (s469-impl1-arm-commas): the emitted JS holds `return match _…` — the inner `match` reaches the output as text. Fails closed (the build fails), but under E-CODEGEN-INVALID-LOGIC, which names a compiler defect rather than the construct. The same nesting as a statement `match` with block arms compiles. Owed: lower the inner match as a nested match-expr, or refuse it with a construct-naming code.
+
+### g-engine-msg-arm-target-template-interp-split-as-markup-s469 — a `${…}` inside a template literal in an engine message-arm target is split as a markup interpolation instead of staying part of the template — `NEW S469; MED; open (reported by review; repro owed)`
+
+<!-- @gap id=g-engine-msg-arm-target-template-interp-split-as-markup-s469 sev=MED status=open locus=searched:compiler/src(engine state-child body: the block splitter / parseMessageArms read of a template literal in a message-arm target)—not-traced prov=review:s469-impl1-arm-commas(review of 2f9176de0, filed at the PA's request) -->
+
+Reported by the review of 2f9176de0 (s469-impl1-arm-commas). The lane's probe of the BLOCK form (`.Inc :> { @total = \`n=${@total}x\`; .Counting }`) compiles correctly in both arm spellings, so the reviewer's shape (a template in the arm TARGET) is the one to record here; the exact repro is owed from the reviewer.
+
+### g-impl1-expr-match-arm-after-else-generic-invalid-logic-s469 — an arm after the `else` arm of an expression-position `match` (`@n = match @k { "a" :> 1⏎ else :> 2⏎ "b" :> 3 }`) fails as a generic E-CODEGEN-INVALID-LOGIC, while the statement form gets the dedicated E-SYNTAX-010 (§18.6) — `NEW S469; LOW; open (fails closed, wrong code)`
+
+<!-- @gap id=g-impl1-expr-match-arm-after-else-generic-invalid-logic-s469 sev=LOW status=open locus=compiler/src/codegen/emit-control-flow.ts(emitMatchExpr — the raw-arm path lowers arms after the wildcard into an `else … else if` chain) prov=review:s469-impl1-arm-commas(review of 2f9176de0);dispatch:s469-impl1-arm-commas(r2 probe);spec:§18.6 -->
+
+Reproduced S469 on base and on this branch, both arm spellings: the emitted `else return 2; else if (…)` does not parse, so validate-emit reports E-CODEGEN-INVALID-LOGIC ("a compiler defect"). The statement form (`match @a { .X :> {…}⏎ else :> {…}⏎ .Y :> {…} }`) reports E-SYNTAX-010 "`else` arm must be the last arm". Owed: the same E-SYNTAX-010 for the expression-position raw-arm path.
+
+### g-spec-stray-arm-comma-code-bootstrap-e-parse-arm-vs-impl1-e-parse-001-s469 — a `,` in an arm list that separates nothing (a leading `,`, `,,`) is `E-PARSE-ARM` in the bootstrap (a code not in the §34 catalog) and `E-PARSE-001` in impl#1 — `NEW S469; LOW; open (for the SPEC lane)`
+
+<!-- @gap id=g-spec-stray-arm-comma-code-bootstrap-e-parse-arm-vs-impl1-e-parse-001-s469 sev=LOW status=open locus=compiler/self-host-v2/parse.scrml(parseArms — `E-PARSE-ARM` "a `,` with no arm before it");compiler/SPEC.md(§34 — E-PARSE-001 row, S469 stray-`,` limb; no E-PARSE-ARM row) prov=dispatch:s469-impl1-arm-commas(round 1 report, deferred item 4);review:s469-impl1-arm-commas(review of 2f9176de0) -->
+
+The two implementations refuse the same input under different codes. §34 catalogs E-PARSE-001 (its S469 limb names the impl#1 stray-`,` sites) and has no E-PARSE-ARM row. Owed (SPEC lane): pick one code for the stray arm separator — catalog E-PARSE-ARM (and move impl#1 to it), or move the bootstrap to E-PARSE-001.
+
+### g-impl1-regex-after-binary-operator-lexed-as-division-s469 — impl#1's lexer reads a `/` right after a binary `+` / `-` / `*` / `%` as DIVISION, so a regular expression written there is re-spelled space-padded — a different regex (`"x" + /a,b/.source` emits `/ a , b /`) — silently, in any position — `NEW S469; HIGH; open (silent miscompile)`
+
+<!-- @gap id=g-impl1-regex-after-binary-operator-lexed-as-division-s469 sev=HIGH status=open locus=compiler/src/tokenizer.ts(isRegexContext — PUNCT `+` `-` `*` `%` are not in REGEX_PUNCT, so the next `/` is division) prov=dispatch:s469-impl1-arm-commas(r2, review of 2f9176de0 F1 case 3) -->
+
+Found S469 (s469-impl1-arm-commas r2) while fixing review F1. `@s = "x" + /a,b/.source` in a function emits `"x" + / a , b /.source` (exit 0, no diagnostic): the regex now matches `" a , b "`. The same holds for a `match` arm body (`"a" :> "x" + /a.b/.source` emits `/ a . b /`). The lexer comment says `+ - * %` were left out "to avoid false positives like `x * /foo/.test()`", but after a binary operator a `/` cannot be division. In an expression-position match arm the lane's stray-`,` guard now REFUSES the shape when the regex holds a `,` (E-PARSE-001, naming this gap and the parenthesized spelling `(/a,b/)`, which compiles correctly); every other position still miscompiles. Owed: put `+ - * %` (and the other binary operators) in regex context — a lexer-wide change, measured by the corpus emit differential.
 
 ### g-spec-class-attr-string-coercion-vs-s469-s469 — SPEC §5.5.4 still says a `class=(expression)` result "SHALL be coerced with `String()`" and writes `[]` as its `String()` form (an array joins as `"a,b"`), which contradicts the S469 conversions rule that a non-primitive never reaches a text sink implicitly (`E-TEXT-NON-PRIMITIVE`, §14.13.2) — `NEW S469; LOW; RESOLVED S469 (s469-spec-catchup r2 — ruled "string or tape of strings")`
 
