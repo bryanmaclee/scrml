@@ -1,0 +1,24 @@
+// audit-log.scrml — README "What changed", item 4: a tape carries its permissions.
+// SPEC §66.19.5. The older dialect wrote `<audit>: Entry[] = []`, which took any write.
+<program>
+
+type Entry:struct = { at: number, actor: string, action: string }
+
+<audit:Entry[free, append]=[]/>
+let <actor:string="ops"/>
+
+function record(action: string) {
+    @audit.append({ at: Date.now(), actor: @actor, action: action });
+}
+
+<main>
+    <input bind:value=@actor/>
+    <button onclick=record("login")>Log in</button>
+    <ul>
+        <each in=@audit as e>
+            <li>${e.actor}: ${e.action}</li>
+        </each>
+    </ul>
+</main>
+
+</program>
