@@ -140,3 +140,14 @@ and harnesses that reached the store through the bare runtime accessors silently
 cells. Recording them in the baseline made the gate blind to the soft-nav/outlet/transition
 behavior they were meant to cover — and hid one real product bug behind them.
 The S462 leak passed in CI only by file order (CI's sorted list puts other files between the two).
+
+## Review round (PA: LAND-W-F/U)
+
+- Env exclusions REMOVED: `scripts/browser-baseline.ts` `ENV_EXCLUDED = []` (the `--check` comparison
+  reads the script constant, not the JSON) and `FAILURE-BASELINE.json` `envExcluded: []`; ci.yml
+  comment updated. `--check`: PASS, 8 asserted, 0 of 0 env-excluded.
+- browser-transitions "enter class is removed after animationend" now asserts the class IS present
+  before dispatching animationend (was vacuous if never added).
+- Bug 60 browser twin also asserts `pattern="^[^@]+@[^@]+$"` on the email input.
+- Filed `g-soft-nav-cross-build-handler-id-collision-s469` (HIGH, SECURITY) with the reviewer's repro;
+  fix is the PA's to dispatch under the S435 security limb.

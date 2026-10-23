@@ -30,11 +30,17 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 263 | 4 |
+| HIGH | 264 | 4 |
 | MED | 680 | 8 |
 | LOW | 468 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-soft-nav-cross-build-handler-id-collision-s469 — ⚠ SECURITY: a soft navigation can swap in content from a DIFFERENT build whose delegated handler ids collide with the live shell's, so clicking the route's harmless button runs the SHELL's handler of the same id (repro: "Add row" fires `dangerDelete()`) — `NEW S469; HIGH; open (security limb, S435)`
+
+<!-- @gap id=g-soft-nav-cross-build-handler-id-collision-s469 sev=HIGH status=open locus=compiler/src/runtime-template.js(_scrml_nav_apply_html ~3284–3345 — no same-build / same-runtime-identity check before swap+rehydrate; _scrml_nav_same_chunk ~3115 matches by chunk BASENAME, and client chunk filenames are unhashed in dev) prov=review:s469-browser-suite-health(final review, PA-relayed repro) -->
+
+Found by the final review of S469 browser-suite-health (it generalises the fixture-only collision that caused the `browser-gated-handler-narrowing-s462` leak). Delegated event wiring resolves `data-scrml-bind-onclick="_scrml_attr_onclick_N"` against the handler table of whatever program installed the document listener, and handler ids restart per compile. **Repro (reviewer, executed in happy-dom):** build A's shell has three `dangerDelete()` buttons with ids `_scrml_attr_onclick_2/3/4`; an independently compiled build B has a route `reports` whose "Add row" button is `_scrml_attr_onclick_3`. Mount A, soft-navigate to B's `reports.html` + `reports.client.js`, click "Add row": `@deleted` goes **0 → 1** — A's destructive handler ran on a click on B's unrelated button. **Root causes:** (1) chunk filenames are unhashed (`name.client.js`), so the same-chunk / missing-chunk test by basename cannot tell builds apart; (2) `_scrml_nav_apply_html` performs no same-build or same-runtime identity check before swapping and rehydrating. **Who pays:** the end user — an action they did not choose (delete, submit, payment-adjacent handler) runs on a click, with no diagnostic; reachable whenever a deploy changes ids under a live tab (stale shell + new route) or two builds share an origin. **Fix shape (not taken here — impl#1 runtime is frozen outside the S435 security limb; the PA dispatches it under that limb):** stamp a build/runtime identity into each emitted page and chunk, and have the soft-nav pipeline HARD-navigate when the fetched document's identity differs from the live one (same fallback path as W-NAV-CHUNK-LOAD-FAILED). Gate: the reviewer's repro as a browser test that is RED on main and green with the fix.
 
 ### g-soft-nav-rehydrate-seed-apply-unscoped — on a soft navigation the fetched route's SSR seed is applied UN-namespaced: `_scrml_rehydrate_region` calls the bare `_scrml_ssr_seed_apply(true)`, so every non-shell seed key lands in a phantom cell `name` while the program's real cell is `<token>$name` — route cells are never re-seeded on soft nav, and the shell-cell skip (navigate-wave1b #5) is vacuous — `NEW S469; MED; open (pre-existing on main since BUG-6 chunk namespacing)`
 

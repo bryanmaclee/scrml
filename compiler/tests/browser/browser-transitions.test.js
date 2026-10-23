@@ -152,6 +152,9 @@ describe("Transition directives (transition-001-basic)", () => {
       el.dispatchEvent(new Event("animationend", { bubbles: true }));
       api.set("visible", true);
       const fresh = ifEl(0);
+      // Precondition — the class must be ON before animationend, or "removed" is vacuous.
+      expect(fresh).toBeDefined();
+      expect(fresh.classList.contains("scrml-enter-fade")).toBe(true);
       fresh.dispatchEvent(new Event("animationend", { bubbles: true }));
       expect(fresh.classList.contains("scrml-enter-fade")).toBe(false);
       expect(fresh.isConnected).toBe(true);

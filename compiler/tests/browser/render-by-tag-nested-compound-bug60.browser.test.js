@@ -97,6 +97,8 @@ describe("Bug 60 — nested compound render-by-tag drives at runtime (happy-dom)
     expect(textInput.getAttribute("minlength")).toBe("2");
     const emailInput = document.querySelector('input[type="email"]');
     expect(emailInput.hasAttribute("required")).toBe(true);
+    // pattern(/re/) lowers to the native `pattern` attribute (the regex source).
+    expect(emailInput.getAttribute("pattern")).toBe("^[^@]+@[^@]+$");
   });
 
   test("bind:value round-trips — typing the text input writes signupForm.userName", () => {
