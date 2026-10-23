@@ -45,6 +45,21 @@
  *   LEGACY: a block whose first non-blank line is `// gate: skip` (the S101 marker) is
  *   still honoured in IMPL1 documents, so unmigrated docs keep their state. In a RULED
  *   document it is an error — migrate it to the HTML marker with a reason.
+ *
+ *   PINNED CODES (round 2): `<!-- gate: spec-ahead [E-PARSE-ARM, E-SCOPE-001] — <reason> -->`
+ *   pins the bootstrap's expected Error codes. A pinned spec-ahead block whose distinct
+ *   error codes are not exactly the pinned set FAILS, so a typo or a new kind of error is
+ *   not hidden behind "expected to fail". Pins are only allowed on spec-ahead.
+ *
+ * ── FENCES ─────────────────────────────────────────────────────────────────────
+ *   A fence opens with a run of 3+ backticks or 3+ tildes and closes only on a run of the
+ *   SAME character at least as long (CommonMark), so a ````-fenced example that contains
+ *   ```scrml text does not open a gated block, and a 3-backtick line cannot close a
+ *   4-backtick fence. A block is GATED when its info string's first word is `scrml`
+ *   (case-insensitive; extra words such as `title=…` are allowed), with either fence
+ *   character. An info string that STARTS with `scrml` but whose first word is something
+ *   else (`scrml-old`, `scrmlx`) is an ERROR, and so is a scrml fence inside a blockquote
+ *   (`> ```scrml`) — the gates cannot check either, and must not skip them silently.
  */
 
 export const DIALECTS = /** @type {const} */ (["ruled", "impl1"]);
@@ -52,20 +67,23 @@ export const DIALECTS = /** @type {const} */ (["ruled", "impl1"]);
 const DIALECT_COMMENT_RE = /^\s*<!--\s*dialect\s*:\s*([^\s>]*)\s*-->\s*$/;
 const FRONT_MATTER_DIALECT_RE = /^\s*dialect\s*:\s*["']?([^"'\s#]*)["']?\s*(?:#.*)?$/;
 const GATE_ANY_RE = /^\s*<!--\s*gate\s*:(.*?)-->\s*$/;
-const GATE_RE = /^\s*(skip|spec-ahead)\b\s*(?:(?:—|–|--|-|:)\s*)?([\s\S]*?)\s*$/;
+// kind, not followed by a word character or `-` (so `skip-me` / `spec-ahead-ish` are unknown kinds);
+// an optional `[CODE, …]` pin list; an optional separator; the reason.
+const GATE_RE = /^\s*(skip|spec-ahead)(?![\w-])\s*(?:\[([^\]]*)\])?\s*(?:(?:—|–|--|-|:)\s*)?([\s\S]*?)\s*$/;
+const CODE_RE = /^[EWI]-[A-Z0-9]+(?:-[A-Z0-9]+)*$|^BOOTSTRAP-CRASH$/;
 const SNIPPET_RE = /^\s*<!--\s*snippet:\s*(\S+?)(?:#L(\d+)-L(\d+))?\s*-->\s*$/;
-const FENCE_OPEN_SCRML_RE = /^\s*```scrml\s*$/;
-const FENCE_ANY_RE = /^\s*```/;
-const FENCE_CLOSE_RE = /^\s*```\s*$/;
+const FENCE_OPEN_RE = /^(\s*)(`{3,}|~{3,})(.*)$/;
+const BLOCKQUOTE_FENCE_RE = /^\s*(?:>\s*)+(`{3,}|~{3,})\s*(\S*)/;
 const LEGACY_SKIP_RE = /^\s*\/\/\s*gate:\s*skip\b\s*(?:(?:—|–|--|-|:)\s*)?(.*)$/;
 
 /**
- * @typedef {{ kind: "skip" | "spec-ahead", reason: string, line: number }} GateMarker
- * @typedef {{ path: string, from: number|null, to: number|null, line: number }} SnippetMarker
+ * @typedef {{ kind: "skip" | "spec-ahead", reason: string, line: number, codes: string[] | null }} GateMarker
+ * @typedef {{ path: string, from: number|null, to: number|null, line: number, raw: string }} SnippetMarker
  * @typedef {{
  *   fenceLine: number,       // 1-based line of the ```scrml opener
  *   startLine: number,       // 1-based line of the first content line
  *   body: string,
+ *   bodyLines: string[],
  *   gate: GateMarker | null,
  *   snippet: SnippetMarker | null,
  *   legacySkip: { reason: string } | null,
@@ -74,10 +92,24 @@ const LEGACY_SKIP_RE = /^\s*\/\/\s*gate:\s*skip\b\s*(?:(?:—|–|--|-|:)\s*)?(.
  */
 
 /**
- * Parse a markdown document into its dialect, its ```scrml blocks with their markers,
- * and every marker ERROR (each one fails the gate that reads it).
+ * Classify a fence opener's info string: "scrml" (gated), "bad" (looks like scrml but is not
+ * gateable — an error), or "other".
+ */
+function fenceKind(info) {
+  const t = info.trim();
+  if (t === "") return "other";
+  const first = t.split(/\s+/)[0].toLowerCase();
+  if (first === "scrml") return "scrml";
+  if (t.toLowerCase().startsWith("scrml")) return "bad";
+  return "other";
+}
+
+/**
+ * Parse a markdown document into its dialect, its scrml blocks with their markers,
+ * and every marker ERROR (each one fails the gate that reads it). `danglingSnippets`
+ * lists `<!-- snippet: … -->` markers that no scrml fence follows (snippet-drift's check).
  * @param {string} text
- * @returns {{ dialect: "ruled" | "impl1", dialectLine: number | null, blocks: DocBlock[], errors: MarkerError[] }}
+ * @returns {{ dialect: "ruled" | "impl1", dialectLine: number | null, blocks: DocBlock[], errors: MarkerError[], danglingSnippets: Array<{ line: number, raw: string }> }}
  */
 export function parseDocMarkers(text) {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
@@ -87,29 +119,36 @@ export function parseDocMarkers(text) {
   const blocks = [];
   /** @type {Array<{ value: string, line: number }>} */
   const dialects = [];
+  /** @type {Array<{ line: number, raw: string }>} */
+  const danglingSnippets = [];
 
   // Front matter: a `---` block starting at line 1.
   let i = 0;
   if (lines[0] !== undefined && lines[0].trim() === "---") {
     let j = 1;
+    const found = [];
     while (j < lines.length && lines[j].trim() !== "---") {
       const m = FRONT_MATTER_DIALECT_RE.exec(lines[j]);
-      if (m) dialects.push({ value: m[1], line: j + 1 });
+      if (m) found.push({ value: m[1], line: j + 1 });
       j++;
     }
-    if (j < lines.length) i = j + 1; // an unclosed `---` is not front matter
-    else dialects.length = 0;
+    if (j < lines.length) {
+      i = j + 1; // an unclosed `---` is not front matter
+      dialects.push(...found);
+    }
   }
 
   /** @type {GateMarker[]} */
   let pendingGates = [];
   /** @type {SnippetMarker | null} */
   let pendingSnippet = null;
-  const danglingGates = () => {
+  const dangle = () => {
     for (const g of pendingGates) {
       errors.push({ line: g.line, message: `\`gate: ${g.kind}\` marker is not followed by a \`\`\`scrml fence — it gates nothing` });
     }
     pendingGates = [];
+    if (pendingSnippet) danglingSnippets.push({ line: pendingSnippet.line, raw: pendingSnippet.raw });
+    pendingSnippet = null;
   };
 
   for (; i < lines.length; i++) {
@@ -123,43 +162,76 @@ export function parseDocMarkers(text) {
 
     const gm = GATE_ANY_RE.exec(line);
     if (gm) {
-      const inner = gm[1];
-      const m = GATE_RE.exec(inner);
+      const m = GATE_RE.exec(gm[1]);
       if (!m) {
         errors.push({
           line: i + 1,
-          message: `unknown gate marker \`${line.trim()}\` — the kinds are \`gate: skip — <reason>\` and \`gate: spec-ahead — <reason>\``,
+          message: `unknown gate marker \`${line.trim()}\` — the kinds are \`gate: skip — <reason>\` and \`gate: spec-ahead [CODES] — <reason>\``,
         });
         continue;
       }
-      const reason = m[2].trim();
+      const kind = /** @type {"skip"|"spec-ahead"} */ (m[1]);
+      let codes = null;
+      if (m[2] !== undefined) {
+        codes = m[2].split(",").map((c) => c.trim()).filter(Boolean);
+        const bad = codes.filter((c) => !CODE_RE.test(c));
+        if (kind !== "spec-ahead") {
+          errors.push({ line: i + 1, message: "a `[CODES]` pin is only allowed on `gate: spec-ahead`" });
+          continue;
+        }
+        if (codes.length === 0 || bad.length > 0) {
+          errors.push({ line: i + 1, message: `bad pinned code list \`[${m[2]}]\` — write diagnostic codes, e.g. \`[E-PARSE-TAG, E-BOOTSTRAP-UNSUPPORTED]\`` });
+          continue;
+        }
+      }
+      const reason = m[3].trim();
       if (reason === "") {
         errors.push({
           line: i + 1,
-          message: `\`gate: ${m[1]}\` marker has no reason — write \`<!-- gate: ${m[1]} — <why> -->\`; the reason is mandatory`,
+          message: `\`gate: ${kind}\` marker has no reason — write \`<!-- gate: ${kind} — <why> -->\`; the reason is mandatory`,
         });
         continue;
       }
-      pendingGates.push({ kind: /** @type {"skip"|"spec-ahead"} */ (m[1]), reason, line: i + 1 });
+      pendingGates.push({ kind, reason, line: i + 1, codes });
       continue;
     }
 
     const sm = SNIPPET_RE.exec(line);
     if (sm) {
-      pendingSnippet = { path: sm[1], from: sm[2] ? Number(sm[2]) : null, to: sm[3] ? Number(sm[3]) : null, line: i + 1 };
+      if (pendingSnippet) danglingSnippets.push({ line: pendingSnippet.line, raw: pendingSnippet.raw });
+      pendingSnippet = { path: sm[1], from: sm[2] ? Number(sm[2]) : null, to: sm[3] ? Number(sm[3]) : null, line: i + 1, raw: line.trim() };
       continue;
     }
 
-    if (FENCE_ANY_RE.test(line)) {
-      const isScrml = FENCE_OPEN_SCRML_RE.test(line);
+    const bq = BLOCKQUOTE_FENCE_RE.exec(line);
+    if (bq) {
+      if (fenceKind(bq[2]) !== "other") {
+        errors.push({ line: i + 1, message: "a scrml fence inside a blockquote is not gated — move it out of the `>` quote (or make it a plain fence)" });
+      }
+      dangle();
+      continue;
+    }
+
+    const fm = FENCE_OPEN_RE.exec(line);
+    if (fm && !(fm[2][0] === "`" && fm[3].includes("`"))) {
+      const ch = fm[2][0];
+      const len = fm[2].length;
+      const kind = fenceKind(fm[3]);
+      const closeRe = new RegExp(`^\\s*${ch === "`" ? "`" : "~"}{${len},}\\s*$`);
       const fenceLine = i + 1;
       const body = [];
       i++;
-      while (i < lines.length && !FENCE_CLOSE_RE.test(lines[i])) {
+      while (i < lines.length && !closeRe.test(lines[i])) {
         body.push(lines[i]);
         i++;
       }
-      if (isScrml) {
+      if (i >= lines.length && kind === "scrml") {
+        errors.push({ line: fenceLine, message: "unclosed scrml fence — it runs to the end of the document" });
+      }
+      if (kind === "bad") {
+        errors.push({ line: fenceLine, message: `fence info string \`${fm[3].trim()}\` starts with \`scrml\` but is not \`scrml\` — the gates cannot check it; write \`scrml\` (or a different language)` });
+      }
+      if (kind === "scrml") {
         if (pendingGates.length > 1) {
           errors.push({ line: pendingGates[1].line, message: `two gate markers on one block (lines ${pendingGates.map((g) => g.line).join(", ")}) — keep one` });
         }
@@ -169,24 +241,22 @@ export function parseDocMarkers(text) {
           fenceLine,
           startLine: fenceLine + 1,
           body: body.join("\n"),
+          bodyLines: body,
           gate: pendingGates[0] ?? null,
           snippet: pendingSnippet,
           legacySkip: lm ? { reason: lm[1].trim() } : null,
         });
         pendingGates = [];
+        pendingSnippet = null;
       } else {
-        danglingGates();
+        dangle();
       }
-      pendingSnippet = null;
       continue;
     }
 
-    if (line.trim() !== "") {
-      danglingGates();
-      pendingSnippet = null;
-    }
+    if (line.trim() !== "") dangle();
   }
-  danglingGates();
+  dangle();
 
   // Resolve the dialect.
   let dialect = /** @type {"ruled"|"impl1"} */ ("impl1");
@@ -220,7 +290,7 @@ export function parseDocMarkers(text) {
     }
   }
 
-  return { dialect, dialectLine, blocks, errors };
+  return { dialect, dialectLine, blocks, errors, danglingSnippets };
 }
 
 /** True when a line is a gate marker (any kind, valid or not) — snippet-drift lets these sit between its marker and the fence. */
@@ -281,7 +351,7 @@ export function collectSnippetDialects(readDoc, docs) {
         });
       }
       if (b.gate?.kind === "spec-ahead" && parsed.dialect === "ruled" && entry.specAhead === null) {
-        entry.specAhead = { reason: b.gate.reason, doc, line: b.gate.line };
+        entry.specAhead = { reason: b.gate.reason, doc, line: b.gate.line, codes: b.gate.codes };
       }
     }
   }

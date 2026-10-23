@@ -50,11 +50,32 @@
 
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { join, relative, sep } from "path";
-import { isGateMarkerLine } from "./doc-gate-markers.js";
+import { parseDocMarkers } from "./doc-gate-markers.js";
 
 /** Documents scanned for markers. `docs/changes/` is the internal change archive, not public. */
-export const DRIFT_DOC_ROOTS = ["README.md", "docs"];
-const DRIFT_DOC_EXCLUDE = ["docs/changes"];
+// Round 2 (S469): every claim-gate surface document is drift-scanned, so a snippet marker
+// claim-gate delegates is always checked here (NERDME.md / DESIGN.md / marketing were not).
+export const DRIFT_DOC_ROOTS = ["README.md", "NERDME.md", "DESIGN.md", "docs", "marketing"];
+// docs/articles/archive: superseded drafts, outside both gates by design (docs/DIALECT.md).
+const DRIFT_DOC_EXCLUDE = ["docs/changes", "docs/articles/archive"];
+
+/**
+ * The PUBLIC SNIPPET CORPUS — every `.scrml` under these roots is compiled by
+ * scripts/snippet-gate.js (which imports this list). Defined here so claim-gate can
+ * ask "is this marker's target really compiled?" without running the gate.
+ */
+export const SNIPPET_CORPUS = ["docs/tutorial-snippets", "docs/readme-snippets", "docs/website"];
+
+/** Is the repo-relative document `rel` scanned by the drift check? */
+export function isDriftScanned(rel) {
+  if (DRIFT_DOC_EXCLUDE.some((x) => rel === x || rel.startsWith(x + "/"))) return false;
+  return DRIFT_DOC_ROOTS.some((r) => rel === r || rel.startsWith(r + "/")) && rel.endsWith(".md");
+}
+
+/** Is the repo-relative path `rel` inside the compiled snippet corpus? */
+export function inSnippetCorpus(rel, roots = SNIPPET_CORPUS) {
+  return roots.some((r) => rel === r || rel.startsWith(r.replace(/\/$/, "") + "/"));
+}
 
 /**
  * Documents that MUST carry markers. Without this floor, deleting every marker
@@ -64,9 +85,6 @@ const DRIFT_DOC_EXCLUDE = ["docs/changes"];
  */
 export const DRIFT_REQUIRED_DOCS = ["docs/tutorial.md", "README.md"];
 
-const MARKER_RE = /^\s*<!--\s*snippet:\s*(\S+?)(?:#L(\d+)-L(\d+))?\s*-->\s*$/;
-const FENCE_OPEN_RE = /^\s*```scrml\s*$/;
-const FENCE_ANY_RE = /^\s*```/;
 
 /** Discover the markdown documents to scan, repo-relative with `/` separators. */
 export function discoverDocs(repoRoot, roots = DRIFT_DOC_ROOTS) {
@@ -93,51 +111,16 @@ export function discoverDocs(repoRoot, roots = DRIFT_DOC_ROOTS) {
  * @returns {{ blocks: Array<{line:number, body:string[], marker: null | {path:string, from:number|null, to:number|null, line:number}}>, dangling: Array<{line:number, raw:string}> }}
  */
 export function parseDoc(text) {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
-  const blocks = [];
-  const dangling = [];
-  let pending = null; // marker waiting for its fence
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const m = MARKER_RE.exec(line);
-    if (m) {
-      if (pending) dangling.push({ line: pending.line, raw: pending.raw });
-      pending = {
-        path: m[1],
-        from: m[2] ? Number(m[2]) : null,
-        to: m[3] ? Number(m[3]) : null,
-        line: i + 1,
-        raw: line.trim(),
-      };
-      continue;
-    }
-    if (FENCE_ANY_RE.test(line)) {
-      const isScrml = FENCE_OPEN_RE.test(line);
-      const start = i;
-      const body = [];
-      i++;
-      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) {
-        body.push(lines[i]);
-        i++;
-      }
-      if (isScrml) {
-        blocks.push({ line: start + 1, body, marker: pending });
-      } else if (pending) {
-        dangling.push({ line: pending.line, raw: pending.raw });
-      }
-      pending = null;
-      continue;
-    }
-    // A `<!-- gate: … -->` marker (scripts/doc-gate-markers.js) may sit between the
-    // snippet marker and its fence; it does not detach them.
-    if (isGateMarkerLine(line)) continue;
-    if (pending && line.trim() !== "") {
-      dangling.push({ line: pending.line, raw: pending.raw });
-      pending = null;
-    }
-  }
-  if (pending) dangling.push({ line: pending.line, raw: pending.raw });
-  return { blocks, dangling };
+  // One fence/marker parser for every docs gate (scripts/doc-gate-markers.js): CommonMark
+  // fence lengths (a ````-fenced example cannot swallow later blocks), `scrml` info strings
+  // with extra words, tilde fences; gate markers may sit between this marker and its fence.
+  const parsed = parseDocMarkers(text);
+  const blocks = parsed.blocks.map((b) => ({
+    line: b.fenceLine,
+    body: b.bodyLines,
+    marker: b.snippet,
+  }));
+  return { blocks, dangling: parsed.danglingSnippets };
 }
 
 /** Normalize for comparison: CRLF, trailing whitespace, outer blank lines; optional dedent. */

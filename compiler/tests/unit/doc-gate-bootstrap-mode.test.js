@@ -58,7 +58,7 @@ describe("parseDocMarkers — gate markers", () => {
     for (const sep of ["—", "-", "--", ":"]) {
       const d = parseDocMarkers([`<!-- gate: skip ${sep} a fragment -->`, "", ...fence("x")].join("\n"));
       expect(d.errors).toEqual([]);
-      expect(d.blocks[0].gate).toEqual({ kind: "skip", reason: "a fragment", line: 1 });
+      expect(d.blocks[0].gate).toEqual({ kind: "skip", reason: "a fragment", line: 1, codes: null });
     }
   });
   test("a marker with no reason is an error and does not skip", () => {
@@ -158,7 +158,7 @@ const claim = (...args) => spawnSync("bun", ["scripts/claim-gate.js", ...args], 
 const snippet = (...args) => spawnSync("bun", ["scripts/snippet-gate.js", ...args], { cwd: ROOT, encoding: "utf8" });
 
 describe("claim-gate — bootstrap mode", () => {
-  test("ruled doc: good block passes on the bootstrap, spec-ahead counted, snippet delegated, exit 0", () => {
+  test("ruled doc: good block passes on the bootstrap, spec-ahead counted, skip skipped, exit 0", () => {
     const md = write("ruled-ok.md", [
       "# t", "<!-- dialect: ruled -->",
       ...fence(...GOOD),
@@ -166,14 +166,12 @@ describe("claim-gate — bootstrap mode", () => {
       ...fence(...AHEAD),
       "<!-- gate: skip — a fragment -->",
       ...fence("not code"),
-      "<!-- snippet: docs/tutorial-snippets/01-hello.scrml -->",
-      ...fence("anything"),
     ]);
     const r = claim(md);
     expect(r.stdout).toContain("[ruled]");
-    expect(r.stdout).toContain("claim-gate: 1 passed, 1 skipped, 1 snippet-gated, 1 spec-ahead, 0 failed (4 total).");
+    expect(r.stdout).toContain("claim-gate: 1 passed, 1 skipped, 0 snippet-gated, 1 spec-ahead, 0 failed (3 total).");
     expect(r.stdout).toContain("— #{} styles are not in the bootstrap  [bootstrap: E-BOOTSTRAP-UNSUPPORTED");
-    expect(r.stdout).toMatch(/bootstrap \(ruled\) — 1 file\(s\), 1 pass, 1 skip, 1 snippet, 1 spec-ahead, 0 stale, 0 fail/);
+    expect(r.stdout).toMatch(/bootstrap \(ruled\) — 1 file\(s\), 1 pass, 1 skip, 0 snippet, 1 spec-ahead, 0 stale, 0 fail/);
     expect(r.status).toBe(0);
   }, 120_000);
 

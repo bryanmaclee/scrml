@@ -38,7 +38,20 @@ These go on the line(s) directly above the fence. They are HTML comments, so rea
 
 - **`gate: skip — <reason>`** means the block is not compiled at all. Use it for a fragment that is not a whole program. It works in either dialect. You cannot use it on a snippet-marked block, because that file is compiled whole anyway.
 - **`gate: spec-ahead — <what's missing>`** is for ruled documents only. It marks ruled scrml that the bootstrap cannot compile yet. The block (or the cited file) is **still compiled**. A failure is expected: it is counted as `spec-ahead` and listed with your reason and the bootstrap's error codes. Once it **compiles cleanly**, the gate prints `STALE … remove the marker`, and `--strict` turns that into a failure. Name the missing feature, not the symptom, e.g. "no `<match>` block element", not "parse error". On a snippet-marked block the marker covers the whole file, so excerpts of that file need not repeat it.
+- **Pinned codes (recommended for spec-ahead):** `<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-TAG] — no <match> block element yet -->`. The block must then fail with exactly that set of distinct error codes; any other set fails the gate. This keeps "expected to fail" from hiding a typo or a real type error. When the bootstrap's refusal legitimately changes, update the pin. Every tutorial spec-ahead marker is pinned.
+- A bootstrap **crash** is always a failure, on a spec-ahead block too.
+- The kind must be exactly `skip` or `spec-ahead` (`skip-me` is an unknown kind and fails).
 - The legacy first line `// gate: skip` still works in unmigrated documents. In a ruled document it is an error, so move it to the HTML marker.
+
+### Fences the gates read
+
+- A block is gated when its fence's info string starts with the word `scrml`, in any case and with or without extra words (` ```scrml title=app.scrml `). Backtick and tilde fences both count.
+- A fence closes only on a run of the same character at least as long as the one that opened it. So a ```` ```` ````-fenced example can show ` ```scrml ` text without starting a gated block.
+- These are **errors**, not silent skips: an info string that starts with `scrml` but whose first word is something else (`scrml-old`), a scrml fence inside a blockquote (`> ```scrml`), and an unclosed scrml fence.
+
+### Snippet markers in claim-gate
+
+claim-gate hands a `<!-- snippet: … -->` block to snippet-gate only when snippet-gate really checks it: the target file exists, it is inside the snippet corpus (`docs/tutorial-snippets/`, `docs/readme-snippets/`, `docs/website/`), and the document is one the drift check scans (README.md, NERDME.md, DESIGN.md, `docs/` except `docs/changes/` and `docs/articles/archive/`, `marketing/`). Otherwise the block fails.
 
 Grammar and checks: `scripts/doc-gate-markers.js`. Tests: `compiler/tests/unit/doc-gate-bootstrap-mode.test.js`.
 
@@ -54,4 +67,4 @@ Grammar and checks: `scripts/doc-gate-markers.js`. Tests: `compiler/tests/unit/d
 
 ## Archived drafts
 
-`docs/articles/archive/` holds the April–May 2026 devto drafts and `llm-kickstarter-v1`, which are superseded. Each carries a "SUPERSEDED. DO NOT PASTE." banner. The directory is outside both gates on purpose: its code is an older dialect and is not checked. Do not link to it as current material.
+`docs/articles/archive/` holds the April–May 2026 devto drafts and `llm-kickstarter-v1`, which are superseded. Each carries a "SUPERSEDED. DO NOT PASTE." banner. The directory is outside both gates on purpose, and outside the drift check: its code is an older dialect and is not checked. Do not link to it as current material.

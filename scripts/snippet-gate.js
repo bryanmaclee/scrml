@@ -74,7 +74,7 @@ import { existsSync, statSync, readdirSync, readFileSync, mkdtempSync, rmSync } 
 import { tmpdir } from "os";
 import { join, extname, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
-import { checkDrift, discoverDocs } from "./snippet-drift.js";
+import { checkDrift, discoverDocs, SNIPPET_CORPUS as DRIFT_SNIPPET_CORPUS } from "./snippet-drift.js";
 import { collectSnippetDialects } from "./doc-gate-markers.js";
 import { execFileSync } from "child_process";
 
@@ -84,20 +84,12 @@ import { execFileSync } from "child_process";
  * explicit. A declared-but-absent row is tolerated so a row may pre-date its
  * directory.
  */
-const SNIPPET_CORPUS = [
-  "docs/tutorial-snippets",
-  "docs/readme-snippets",
-  // S292: the scrml.dev pages. These are the most-read public surface we ship
-  // and they sat OUTSIDE this gate until now — the same hollow-gate shape the
-  // gate was built to close at S280, one directory over. Adding the root (98
-  // files, all passing at time of addition) rather than naming pages, so a new
-  // page is gated by existing rather than by someone remembering to list it.
-  // NB: this gates that a page COMPILES. It cannot gate whether the page's
-  // PROSE is true — the seven false claims corrected at S292 were all in prose
-  // on a page that compiled fine. Prose currency needs the empirical re-verify,
-  // not this gate.
-  "docs/website",
-];
+// The list lives in scripts/snippet-drift.js (SNIPPET_CORPUS: docs/tutorial-snippets,
+// docs/readme-snippets, docs/website) so claim-gate can check a snippet marker's target
+// against it. S292 added docs/website — the scrml.dev pages, the most-read public surface,
+// gated as a root so a new page is gated by existing. NB: this gates that a page
+// COMPILES; it cannot gate whether its PROSE is true.
+const SNIPPET_CORPUS = DRIFT_SNIPPET_CORPUS;
 
 const args = process.argv.slice(2);
 const listOnly = args.includes("--list");
@@ -213,6 +205,15 @@ for (const file of files) {
     if (bootMod === null) bootMod = await import("./doc-boot-check.js");
     const r = await bootMod.bootCheck(resolve(file));
     if (d.specAhead) {
+      // One rule for both gates (doc-boot-check.js classifySpecAhead): a crash or a
+      // pin mismatch is a failure; a clean compile is stale; else the expected failure.
+      const c = bootMod.classifySpecAhead(r, d.specAhead.codes);
+      if (c.verdict === "crash" || c.verdict === "pin-mismatch") {
+        perMode.ruled.failed++;
+        failures.push({ file, output: `spec-ahead marker at ${d.specAhead.doc}:${d.specAhead.line}: ${c.message}\n${r.lines.join("\n")}` });
+        console.log(`  FAIL  ${file}  (bootstrap; spec-ahead ${c.verdict})`);
+        continue;
+      }
       if (r.ok) {
         perMode.ruled.stale++;
         staleList.push({ file, ...d.specAhead });

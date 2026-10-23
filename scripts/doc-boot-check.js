@@ -16,13 +16,14 @@ import { compileSource, formatDiagnostic } from "./scrml-boot.ts";
 /**
  * @param {string} absPath  the path the source is compiled AS (need not exist on disk when `text` is given)
  * @param {string} [text]   the source; omitted → read from `absPath`
+ * @param {Function} [compile] the compiler (default scrml-boot's compileSource; tests inject one)
  * @returns {Promise<{ ok: boolean, crash: boolean, codes: string[], lines: string[] }>}
  *   `codes`: the Error-severity diagnostic codes, in order; `lines`: one line per diagnostic.
  */
-export async function bootCheck(absPath, text) {
+export async function bootCheck(absPath, text, compile = compileSource) {
   try {
     const overlay = text === undefined ? undefined : new Map([[absPath, text]]);
-    const r = await compileSource(absPath, { overlay });
+    const r = await compile(absPath, { overlay });
     const errors = r.diagnostics.filter((d) => d.severity === "error");
     return {
       ok: r.ok,
@@ -43,4 +44,32 @@ export function codeSummary(codes, max = 4) {
   const shown = sorted.slice(0, max).map(([c, k]) => (k > 1 ? `${c}×${k}` : c));
   if (sorted.length > max) shown.push(`+${sorted.length - max} more`);
   return shown.join(", ");
+}
+
+/**
+ * A spec-ahead marker may pin the bootstrap's expected Error codes. Returns null when the
+ * distinct codes equal the pinned set (or nothing is pinned), else a message naming both.
+ */
+export function pinMismatch(pins, codes) {
+  if (!pins) return null;
+  const want = [...new Set(pins)].sort();
+  const got = [...new Set(codes)].sort();
+  if (want.length === got.length && want.every((c, k) => c === got[k])) return null;
+  return `pinned codes [${want.join(", ")}] but the bootstrap reported [${got.join(", ")}] — fix the block, or update the pin if the bootstrap's refusal legitimately changed`;
+}
+
+/**
+ * How a SPEC-AHEAD block's bootstrap result counts — one rule for both gates:
+ *   "crash"         a bootstrap crash: always a FAILURE (never an expected failure)
+ *   "pin-mismatch"  it failed, but not with the pinned codes: a FAILURE
+ *   "stale"         it compiled: the marker should go (a failure only under --strict)
+ *   "expected"      it failed the expected way
+ * @returns {{ verdict: "crash" | "pin-mismatch" | "stale" | "expected", message: string | null }}
+ */
+export function classifySpecAhead(r, pins) {
+  if (r.crash) return { verdict: "crash", message: "bootstrap crash on a spec-ahead block" };
+  if (r.ok) return { verdict: "stale", message: null };
+  const m = pinMismatch(pins, r.codes);
+  if (m) return { verdict: "pin-mismatch", message: m };
+  return { verdict: "expected", message: null };
 }

@@ -61,6 +61,7 @@
  *                                          (the §8 measured-migration discipline:
  *                                          assumed-zero is not measured-zero).
  *   `bun scripts/claim-gate.js --strict`   also fail on a stale spec-ahead marker.
+ *   `bun scripts/claim-gate.js --list`     list the resolved surface, compile nothing.
  *   `bun scripts/claim-gate.js [paths...]` override the surface with explicit paths.
  *
  * Exit: 0 on all-pass (or any --report run); 1 on any failure in GATE mode.
@@ -79,6 +80,7 @@ import { join, extname, resolve, relative, sep } from "path";
 import { execFileSync } from "child_process";
 import { lintGhostPatterns } from "../compiler/src/lint-ghost-patterns.js";
 import { parseDocMarkers } from "./doc-gate-markers.js";
+import { isDriftScanned, inSnippetCorpus } from "./snippet-drift.js";
 
 /**
  * The declared PUBLIC SURFACE. A path may be a file or a directory (walked
@@ -133,12 +135,31 @@ if (files.length === 0) {
   console.log("claim-gate: no markdown files resolved from the declared surface.");
   process.exit(0);
 }
+if (args.includes("--list")) {
+  console.log(`claim-gate — ${files.length} file(s) in the surface:`);
+  for (const f of files) console.log(`  ${f}`);
+  process.exit(0);
+}
 
 // Loaded lazily: an impl1-only run never pays for the bootstrap bundle.
 let bootCheckFn = null;
 async function bootCheck(path, text) {
   if (bootCheckFn === null) bootCheckFn = await import("./doc-boot-check.js");
   return bootCheckFn.bootCheck(path, text);
+}
+async function classifySpecAhead(r, pins) {
+  if (bootCheckFn === null) bootCheckFn = await import("./doc-boot-check.js");
+  return bootCheckFn.classifySpecAhead(r, pins);
+}
+const REPO_ROOT = resolve(import.meta.dir, "..");
+const repoRel = (p) => relative(REPO_ROOT, resolve(p)).split(sep).join("/");
+/** Why a snippet-marked block in `doc` would NOT be checked by snippet-gate, or null. */
+function delegationProblem(doc, target) {
+  const rel = target.startsWith("/") ? repoRel(target) : target;
+  if (!existsSync(resolve(REPO_ROOT, rel)) || !statSync(resolve(REPO_ROOT, rel)).isFile()) return `target ${target} does not exist`;
+  if (!inSnippetCorpus(rel)) return `target ${target} is outside the compiled snippet corpus`;
+  if (!isDriftScanned(repoRel(doc))) return `${repoRel(doc)} is not drift-scanned, so the copy is never compared to the file`;
+  return null;
 }
 async function codeSummary(codes) {
   if (bootCheckFn === null) bootCheckFn = await import("./doc-boot-check.js");
@@ -176,8 +197,18 @@ for (const file of files) {
     blockTotal++;
 
     if (b.snippet) {
-      f.snippet++;
-      m.snippet++;
+      // Delegate only when snippet-gate really checks it (round 2, A2): the target exists,
+      // is in the compiled snippet corpus, and this document is drift-scanned (so the copy
+      // is compared to the file). Anything else would be counted as gated while nobody checks it.
+      const why = delegationProblem(file, b.snippet.path);
+      if (why === null) {
+        f.snippet++;
+        m.snippet++;
+      } else {
+        f.failed++;
+        m.failed++;
+        failures.push({ file, blockNum, startLine: b.startLine, why: `snippet marker not checked by snippet-gate: ${why}`, compileOutput: "", ghostDiags: [] });
+      }
       continue;
     }
     if (b.gate?.kind === "skip" || (doc.dialect === "impl1" && b.legacySkip && !b.gate)) {
@@ -192,6 +223,15 @@ for (const file of files) {
     if (doc.dialect === "ruled") {
       if (b.gate?.kind === "spec-ahead" && doc.dialect === "ruled") {
         const r = await bootCheck(path, b.body);
+        // One rule for both gates (doc-boot-check.js classifySpecAhead): a crash is never an
+        // expected failure; a pinned block must fail the pinned way.
+        const c = await classifySpecAhead(r, b.gate.codes);
+        if (c.verdict === "crash" || c.verdict === "pin-mismatch") {
+          f.failed++;
+          m.failed++;
+          failures.push({ file, blockNum, startLine: b.startLine, why: `spec-ahead ${c.verdict}: ${c.message}`, compileOutput: r.lines.join("\n"), ghostDiags: [] });
+          continue;
+        }
         if (r.ok) {
           f.stale++;
           m.stale++;
