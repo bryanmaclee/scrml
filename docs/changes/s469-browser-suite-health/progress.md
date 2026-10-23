@@ -119,3 +119,24 @@ Baseline 11 → 8.
   `<p>${ @f ? <span>HI ${@n}</span> : "" }</p>` → `createTextNode("HI")`; plain markup keeps
   `HELLO `). Filed: `g-ast-markup-text-interp-adjacent-space-dropped` (MED, ruling-gated
   whitespace-model call) and `g-lift-path-drops-whitespace-around-interpolation-s462` (LOW).
+
+## Final run (branch head, local)
+
+- `bun test ./compiler/tests/browser/` — load avg 20.1 → 16.5 during the run.
+- **1773 pass / 43 skip / 4 todo / 8 fail** (was 1727 / 46 / 4 / 51), 136 files, 85.8s. (3 fewer
+  skips: TodoMVC dist-gated cases now run.)
+- `bun scripts/browser-baseline.ts --check` (CI's exact gate, sorted explicit file order): PASS,
+  8 asserted. Baseline 48 → 8 (`recordedAt` 2026-10-23).
+- The 8 remaining: 7 × the known whitespace-before-interpolation gap
+  (`g-ast-markup-text-interp-adjacent-space-dropped`, ruling-gated) + 1 × the new known-red repro for
+  `g-soft-nav-rehydrate-seed-apply-unscoped`.
+
+## Why CI never caught any of this
+
+CI's `browser` job runs the whole tier and gates on the failure NAME SET — so all 48 were red in CI
+too, recorded as "expected". 41 of them were TEST bugs, mostly one root: BUG-6/N4 chunk
+namespacing (#180) moved cells to `<token>$name` and engine names to `__scrml_engine_<token>_…`,
+and harnesses that reached the store through the bare runtime accessors silently addressed phantom
+cells. Recording them in the baseline made the gate blind to the soft-nav/outlet/transition
+behavior they were meant to cover — and hid one real product bug behind them.
+The S462 leak passed in CI only by file order (CI's sorted list puts other files between the two).

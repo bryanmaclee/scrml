@@ -1,7 +1,7 @@
 {
   "_comment": "GENERATED — the browser tier's documented failure NAME SET. Regenerate with `bun scripts/browser-baseline.ts --write`; verify with `--check`. Timings and counts are deliberately excluded (non-deterministic / uninformative). A name LEAVING this list is as much a failure as one joining it: prune it in the same commit that fixes the test.",
   "tier": "compiler/tests/browser",
-  "recordedAt": "2026-08-02",
+  "recordedAt": "2026-10-23",
   "count": 8,
   "failures": [
     "finding #5 — a persistent SHELL cell is NOT reset by a soft-nav rehydrate > [gap g-soft-nav-rehydrate-seed-apply-unscoped] the rehydrate seed-apply keys route cells into the chunk namespace (no phantom bare cell)",
