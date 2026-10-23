@@ -90,7 +90,7 @@ async function clickAndRead(outDir, id, extraFiles = []) {
 }
 
 // ---------------------------------------------------------------------------
-// SIDE "nav" (S469 n23) — a soft navigation across a BUILD boundary.
+// SIDE "nav" (S469 n26) — a soft navigation across a BUILD boundary.
 //
 // A shape is build A's shell (`shape.src`, written as app.scrml) plus `extra = { a, b, nav }`: build A's
 // other files, build B's files (B's app.scrml + routes), and how the tab navigates (`nav.via`: "call" =
@@ -146,7 +146,8 @@ async function navClickAndRead(A, B, nav, id) {
     if (id === "wrong") {
       // Serve B: the page at nav.to and B's chunks for any script the soft nav injects.
       const routeName = nav.to.replace(/^\//, "") || "app";
-      let bPage = B.read(`${routeName}.html`) ?? "";
+      // nav.page "a": the fetched page is A's OWN (identity matches) while the chunk URL serves B.
+      let bPage = (nav.page === "a" ? A : B).read(`${routeName}.html`) ?? "";
       if (nav.strip) bPage = bPage.replace(/\s+data-scrml-build="[^"]*"/, "");
       globalThis.fetch = (input) => {
         const p = typeof input === "string" ? input : input?.url ?? "";
@@ -160,7 +161,7 @@ async function navClickAndRead(A, B, nav, id) {
         const src = node?.getAttribute?.("src");
         if (String(node?.tagName).toLowerCase() !== "script" || !src) return append(node);
         setTimeout(() => {
-          const js = B.read(src.split("/").pop());
+          const js = nav.ungate ? ungate(B.read(src.split("/").pop())) : B.read(src.split("/").pop());
           if (js == null) { node.onerror?.(); return; }
           try { globalThis.__scrml_pack_load(js); node.onload?.(); } catch { node.onerror?.(); }
         }, 0);
@@ -184,7 +185,8 @@ async function navClickAndRead(A, B, nav, id) {
       else b.dispatchEvent(new Event("click", { bubbles: true }));
       await settle();
     }
-    return { text: document.querySelector("#out")?.textContent ?? null, swapped: !!document.querySelector("#wrong"), hard };
+    const swapped = !!document.querySelector("#wrong") || (nav.page === "a" && !!document.querySelector("[data-scrml-outlet] h2"));
+    return { text: document.querySelector("#out")?.textContent ?? null, swapped, hard };
   } finally {
     globalThis.fetch = realFetch;
     console.error = oe;
@@ -192,6 +194,14 @@ async function navClickAndRead(A, B, nav, id) {
     delete globalThis.__scrml_pack_load;
     await GlobalRegistrator.unregister();
   }
+}
+
+// A pre-identity build's chunk: no build gate, no region-ownership checks (review F1).
+function ungate(js) {
+  if (js == null) return js;
+  return js
+    .replace(/^if \(typeof _scrml_build_admit === "function" && !_scrml_build_admit\("[^"]*"\)\) return;\n/m, "")
+    .replace(/^\s*if \(!_scrml_build_owns\([^)]*\)\) return;\n/gm, "");
 }
 
 async function runNavShape(shape, dir) {
@@ -206,10 +216,16 @@ async function runNavShape(shape, dir) {
   const aIds = idsOf(A.read("app.html"));
   const bIds = [...idsOf(B.read(`${nav.to.replace(/^\//, "")}.html`))];
   if (!bIds.some((x) => aIds.has(x))) return { cls: "UNJUDGED", detail: `no ${ev} id collision between the builds` };
+  if (nav.ungate && /_scrml_build_/.test(ungate(B.read(`${nav.to.replace(/^\//, "")}.client.js`)) ?? "")) {
+    return { cls: "UNJUDGED", detail: "the ungated chunk still carries a build check" };
+  }
   const wrong = await navClickAndRead(A, B, nav, "wrong");
   const right = await navClickAndRead(A, B, nav, "right");
   const detail = `wrong->${JSON.stringify(wrong.text)} (${wrong.swapped ? "swapped" : "not swapped"}, hard-nav ${JSON.stringify(wrong.hard)}) right->${JSON.stringify(right.text)}`;
   if (wrong.text === "LOGGED IN") return { cls: "FAIL", detail };
+  // nav.judge "accepted": the floor is "an unverified chunk never joins the page" — a soft nav that
+  // completed (swapped, no hard navigation) with that chunk is the failure, whatever #out reads.
+  if (nav.judge === "accepted" && wrong.swapped && wrong.hard.length === 0) return { cls: "FAIL", detail };
   return { cls: right.text === "LOGGED IN" ? "PASS" : "PASS-DENY", detail };
 }
 

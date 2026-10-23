@@ -1,4 +1,4 @@
-// Probe family `n23` — S469 (s469-softnav-build-guard): a soft navigation across a BUILD boundary
+// Probe family `n26` — S469 (s469-softnav-build-guard): a soft navigation across a BUILD boundary
 // (g-soft-nav-cross-build-handler-id-collision-s469, SECURITY). Data, not logic: the default export is a
 // list of [name, build-A shell source, { a, b, nav }]. Side: nav (see pack.js `runNavShape`). Do not edit
 // a shape to make it pass.
@@ -14,6 +14,8 @@
 //
 // Measured on cd040ea25 (main 0ff6c93aa + test-only #1511; before the fix): all 5 FAIL — the wrong click
 // LOGGED IN (B swapped in, no hard navigation). After the fix: all 5 PASS (hard navigation, nothing applied).
+// Shape 6 (review F1, round 2): FAIL on the round-1 head 095c96407 (the ungated chunk was accepted),
+// PASS after the admit-count check.
 
 export const SIDE = "nav";
 
@@ -72,4 +74,9 @@ export default [
   ["soft-nav into an unstamped page", A_SHELL(), { ...builds(), nav: { via: "call", to: "/reports", strip: true } }],
   // The same collision through the delegated SUBMIT listener.
   ["soft-nav into another build's form (submit)", A_SHELL_FORM, { ...builds(B_REPORTS_FORM), nav: { via: "call", to: "/reports", event: "submit" } }],
+  // Review F1 (S469 round 2): A's OWN page (identity matches) but the chunk URL serves an UNGATED
+  // chunk — a pre-identity build's bytes (no admit, no ownership check). It never refuses, so the
+  // old onload check accepted it; its walker then resolved A's shell ids (a click on A's #right ran
+  // grant() AND B's handler). Judge: the soft nav must not complete with an unverified chunk.
+  ["ungated chunk under a matching page", A_SHELL(), { ...builds(), nav: { via: "call", to: "/reports", page: "a", ungate: true, judge: "accepted" } }],
 ];
