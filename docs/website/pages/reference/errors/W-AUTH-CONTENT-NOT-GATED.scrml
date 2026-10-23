@@ -20,7 +20,7 @@
                 <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded font-semibold">
                     Warning
                 </span>
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§40"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§40"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §40.9.5 + §34 (catalogue)
                 </a>
@@ -65,7 +65,7 @@
         <h2 class="text-2xl font-semibold text-slate-900 mt-10 mb-4">Specification</h2>
         <p class="text-slate-700 leading-relaxed">
             Normative text:
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">compiler/SPEC.md</a>
             &sect;40.9.5 (content-visibility scope) + &sect;34 (catalogue).
         </p>

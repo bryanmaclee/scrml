@@ -30,7 +30,7 @@
                 <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
                     Compile-time
                 </span>
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§51"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§51"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC &sect;51.0.J
                 </a>

@@ -85,12 +85,19 @@ An implicit "return JSX" model hides this information. `lift` makes it explicit,
 `^{}` blocks run at compile time. This is scrml's answer to code generation.
 
 ```scrml
-^{
-    const fields = reflect(UserFields)
-    for (const [name, type] of Object.entries(fields)) {
-        emit(`<input type="${type}" name="${name}"/>`)
-    }
+<program>
+${
+    type UserFields:struct = { name: string, email: string }
 }
+<form>
+    ^{
+        const info = reflect(UserFields);
+        for (const f of info.fields) {
+            emit(`<label>${f.name} <input name="${f.name}"/></label>`);
+        }
+    }
+</form>
+</program>
 ```
 
 Why compile-time? Because the alternative is runtime metaprogramming — eval, Proxy, Reflect — which is opaque to the compiler, opaque to the type system, and opaque to debugging.

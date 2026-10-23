@@ -32,7 +32,7 @@
                 <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
                     Compile-time
                 </span>
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§18"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§18"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §18.0.1 (normative)
                 </a>
@@ -149,7 +149,7 @@
             <strong>§14.10</strong> (bare-variant inference; cross-ref for
             arm patterns),
             <strong>§34</strong> catalog row. Spec lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>.

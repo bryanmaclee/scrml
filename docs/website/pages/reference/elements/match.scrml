@@ -31,7 +31,7 @@
                 &lt;engine&gt;.
             </p>
             <div class="flex gap-4 mt-4 text-xs">
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§18"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§18"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §18.0 (normative)
                 </a>
@@ -331,18 +331,18 @@
             This page summarizes <strong>SPEC &sect;18</strong>
             (Pattern Matching and Enums) plus <strong>&sect;56</strong>
             (Promotion Ergonomics). The normative text lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>
-            in the scrmlTS repository. When this page disagrees with
+            in the scrml repository. When this page disagrees with
             SPEC.md, SPEC.md is authoritative &mdash; surface the
             contradiction and we'll fix the docs.
         </p>
 
         <p class="text-slate-700 leading-relaxed mt-4 text-sm">
             Quick-lookup anchors:
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC-INDEX.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC-INDEX.md"
                class="text-blue-700 hover:text-blue-900 underline">SPEC-INDEX.md</a>
             entries &mdash; <em>&#109;atch block-form &lt;match for=Type&gt;</em>,
             <em>&#109;atch attribute legality</em>, <em>bare-variant
