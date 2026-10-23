@@ -8907,8 +8907,8 @@ the driver and names the database the `?{}` runs on. `<db>`'s other
 attributes — `tables=`, `protect=` — cover the queries of the scope the `<db>` defines, and of
 the program it supplies (§14.8.4, §14.8.9).
 
-*(S469, O61 — §66.2.5: a §66 declaration, `let <x/>` / `<x/>`, MAY stand in a `<db>` body, scoped to that block; its
-state is server-side. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — O61: `let <x/>` allowed inside `<db>` / `<channel>` bodies, scoped to the block" — *"Allowed, scoped to the block (Rec)"* (*"A channel's state is shared across its clients; a db block's state is server-side. Declarations nest as they do elsewhere."*))*
+*(S469, O61 — §66.2.5: a §66 declaration, `let <x/>` / `<x/>`, MAY stand in a `<db>` body, scoped to and owned by that block and
+readable by the rest of the program (S469 "Readable program-wide (Rec)"); its state is server-side. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — O61: `let <x/>` allowed inside `<db>` / `<channel>` bodies, scoped to the block" — *"Allowed, scoped to the block (Rec)"* (*"A channel's state is shared across its clients; a db block's state is server-side. Declarations nest as they do elsewhere."*))*
 
 The codegen target is **Bun.SQL** for all SQL drivers (SPEC §44). MongoDB uses `^{}` meta
 contexts, not `?{}`. The driver-prefix table below is the source-language view; for the
@@ -29604,8 +29604,8 @@ The auto-reconnect delay emitted into every channel's client-side `onclose` setT
 
 ### 38.4 Reactive Sync — V5-strict channel body (auto-sync from placement)
 
-*(S469, O61 — §66.2.5: a §66 declaration, `let <x/>` / `<x/>`, MAY stand in a `<channel>` body, scoped to the channel;
-its state is shared across the channel's clients, as below. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — O61: `let <x/>` allowed inside `<db>` / `<channel>` bodies, scoped to the block" — *"Allowed, scoped to the block (Rec)"* (*"A channel's state is shared across its clients; a db block's state is server-side. Declarations nest as they do elsewhere."*))*
+*(S469, O61 — §66.2.5: a §66 declaration, `let <x/>` / `<x/>`, MAY stand in a `<channel>` body, scoped to and owned by the channel,
+and readable by the rest of the program (rule 4 above; S469 "Readable program-wide (Rec)"); its state is shared across the channel's clients, as below. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — O61: `let <x/>` allowed inside `<db>` / `<channel>` bodies, scoped to the block" — *"Allowed, scoped to the block (Rec)"* (*"A channel's state is shared across its clients; a db block's state is server-side. Declarations nest as they do elsewhere."*))*
 
 Reactive variables declared inside a `<channel>` body are **automatically synchronized across all connected clients** by virtue of being declared inside the channel body. There is no `@shared` modifier in v0.next — the synchronization comes from placement, not from a marker.
 
@@ -48102,14 +48102,21 @@ attribute (`<x let a:T/>`, `export let a:T`) — is `E-DECL-LET-IN-OPENER` (§66
 > **Amendment (S469) — O61 RULED for `<db>` and `<channel>`: their bodies are item positions, scoped to the
 > block.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — O61: `let <x/>` allowed inside `<db>` / `<channel>` bodies, scoped to the block" — *"Allowed, scoped to the block (Rec)"* (*"A channel's state is shared across its clients; a db block's state is server-side. Declarations nest as they do elsewhere."*)
 > `let <x/>` / `export <x/>` (and a locked `<x/>` declaration) MAY stand directly in a `<db>` body or a `<channel>`
-> body. A declaration there is scoped to that block: its name is visible inside the block (and nested blocks, which
-> nest as everywhere else) and not outside it. A `<channel>` body's state is shared across the channel's clients
+> body. A declaration there is scoped to that block: ~~its name is visible inside the block (and nested blocks, which
+> nest as everywhere else) and not outside it~~ the block OWNS it (declares, writes and syncs it), and the rest of
+> the program can READ it by `@` (S469 reach ruling, below). A `<channel>` body's state is shared across the channel's clients
 > (§38.4); a `<db>` body's state is server-side (§8.1.1). **supersedes:** the open question below, for those two
 > bodies. **Direction of change:** newly-accepting. **Status:** Nominal on both compilers — impl#1 carries it
 > (§34.0); the bootstrap reads those bodies as free text and refuses `let <x/>` there
-> (`g-bootstrap-let-decl-in-db-channel-body-refused-s469`). *(PA readings: "scoped to the block" means the
-> declaration is not visible to the enclosing program body; `export` from inside the block is not addressed by the
-> ruling and stays under §66.14.)*
+> (`g-bootstrap-let-decl-in-db-channel-body-refused-s469`). *(PA readings: ~~"scoped to the block" means the
+> declaration is not visible to the enclosing program body;~~ *(struck S469 — reversed by the owner, below)*
+> `export` from inside the block is not addressed by the ruling and stays under §66.14.)*
+> **Amendment (S469) — O61 reach: readable program-wide.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — O61 reach and the page/theme half; impl#1 divergences; code names" — O61 reach: *"Readable program-wide (Rec)"* (*"State declared inside `<channel>` / `<db>` is owned and synced by the block, and the rest of the program can read it (§38 rule 4 stands). This corrects the PA reading in the SPEC catch-up draft, which had made it invisible outside."*)
+> State declared in a `<channel>` or `<db>` body is owned and synced by that block — only the block declares and
+> writes it — and every other part of the same `<program>` MAY read it by `@` (canonical access, the §38.1 rule 4
+> cross-scope read, which stands). **supersedes:** the struck PA reading "not visible to the enclosing program
+> body". **Direction of change:** newly-accepting (reads from outside the block). *(PA reading: "owned" means a
+> write from outside the block is not granted by this ruling — writes follow each block's own rules, §38 / §8.)*
 > ⚑ **Still OPEN (not addressed by the ruling) — the rest of O61:** whether a `<page>` body and a `<theme>` body
 > are item positions (the original question, below).
 
