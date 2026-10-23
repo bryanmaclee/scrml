@@ -114,7 +114,7 @@ import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
 import { iterDestructuredNames } from "../type-system.ts";
 import { lowerPresenceCheck, lowerAbsenceCheck, lowerVariantCheck } from "./is-predicate-lowering.ts";
-import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw, droppedStatementTextOf, hasLostTrailingContent } from "../expression-parser.ts";
+import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw, droppedStatementTextOf, hasLostTrailingContent, rawArmHasStrayComma } from "../expression-parser.ts";
 import { sqlQueryExprShape, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { emitSqlQueryShape, emitNestedGuardExpr, emitServerFnValueFromText, emitServerFnValue } from "./emit-logic.js";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
@@ -5098,6 +5098,23 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
   // expressions are uncommon (they appear only in server-handler bodies
   // referencing request-body shapes) and continue using the existing
   // rewrite pipeline.
+  // S469 (dpa-073 F2) — the arm list is a comma list; the expression parser has
+  // already split every `,` that separates two arms (`splitArmSeparatorCommas`). A
+  // depth-0 `,` still inside a raw arm separates nothing: `,,`, a leading `,`, or a
+  // comma sequence in an arm body (`.A :> f(x), 2`). Refuse it — never emit it as a
+  // JS comma operator (scrml has none, §40.8).
+  for (const arm of node.rawArms) {
+    if (typeof arm !== "string" || !rawArmHasStrayComma(arm)) continue;
+    recordRefusedLowering(new CGError(
+      "E-PARSE-001",
+      `E-PARSE-001: the \`match\` arm \`${excerptRaw(arm)}\` holds a \`,\` that separates no two arms. ` +
+        "An arm list puts one `,` after each arm, the trailing one optional (`{ .A :> 1, .B :> 2, }`); " +
+        "a leading `,`, a doubled `,,`, or a comma sequence inside an arm body (scrml has no comma " +
+        "operator, §40.8) is not an arm list. Remove the `,` (§18.2).",
+      (node as { span?: object }).span ?? {},
+    ), node as object);
+    return "null /* E-PARSE-001 */";
+  }
   if (ctx.mode === "server") {
     const subject = emitExpr(node.subject, ctx);
     const arms = node.rawArms.join(" ");

@@ -2703,6 +2703,27 @@ function splitArmSeparatorCommas(arm: string): string[] {
   return pieces;
 }
 
+/**
+ * S469 — does a raw arm string still hold a depth-0 `,` (outside strings, templates
+ * and `( )` `[ ]` `{ }`)? After `splitArmSeparatorCommas` every separator is gone, so
+ * one that remains separates nothing an arm can be read from — `,,`, a leading `,`,
+ * or a comma sequence in the body (`.A :> f(x), 2`; scrml has no comma operator,
+ * §40.8). The match lowering refuses such an arm rather than emit a JS comma operator.
+ */
+export function rawArmHasStrayComma(arm: string): boolean {
+  let depth = 0;
+  let str: string | null = null;
+  for (let i = 0; i < arm.length; i++) {
+    const c = arm[i];
+    if (str) { if (c === "\\") i++; else if (c === str) str = null; continue; }
+    if (c === '"' || c === "'" || c === "`") { str = c; continue; }
+    if (c === "(" || c === "[" || c === "{") { depth++; continue; }
+    if (c === ")" || c === "]" || c === "}") { depth--; continue; }
+    if (depth === 0 && c === ",") return true;
+  }
+  return false;
+}
+
 /** Does `s` carry an arm arrow (`:>` / `=>` / `->`) at bracket depth 0, outside strings? */
 function hasTopLevelArmArrow(s: string): boolean {
   let depth = 0;
