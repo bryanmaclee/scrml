@@ -7392,6 +7392,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // alternate arm is even read.
       if (markupRootClosed && depth === 0 && ternaryDepth === 0) break;
       if (stopAt && tok.text === stopAt && depth === 0) break;
+      // S469 (dpa-073 F2 / F5(1)) — the arm list is a comma list: at the ARM
+      // level of a `match { … }` body a depth-0 `,` is the arm SEPARATOR, so the
+      // arm (its body, or a raw arm kept as text) ends here; the body loop
+      // (`_parseRecursiveBodyInner`) consumes the `,`. scrml has no comma
+      // operator (§40.8), so a depth-0 `,` never belongs to the body; a `,`
+      // inside `( … )` / `[ … ]` / `{ … }` / markup is the body's own (§18.2).
+      if (
+        depth === 0 && angleDepth === 0 &&
+        tok.kind === "PUNCT" && tok.text === "," &&
+        _matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth
+      ) break;
       // BLOCK_REF at depth 0 is a statement boundary — the child block
       // (sql, error-effect, meta) should be its own AST node, not part of a bare-expr.
       // Exception: when the BLOCK_REF is inside a tag body (tagNesting > 0), the
@@ -9914,6 +9925,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   function _parseRecursiveBodyInner() {
     const stmts = [];
     const _swallowed = swallowedMarkupTracker(); // S464 Q24
+    // S469 (dpa-073 F2 / F5(1)) — the arm level of a `match` body reads `,` as the
+    // arm separator. `_armSepOpen`: the last thing read at this level was a `,`
+    // (or nothing yet), so another `,` has no arm before it.
+    const _atArmLevel = _matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth;
+    let _armSepOpen = true;
     while (true) {
       _swallowed.step();
       const tok = peek();
@@ -9942,6 +9958,27 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // that then failed recognition and rendered nothing (SILENT-WRONG).
       if (tok.text.trim() === "" && tok.kind !== "EOF" && tok.kind !== "STRING") { consume(); continue; }
 
+      // S469 (dpa-073 F2 / F5(1)) — the arm separator `,` (§18.2: a `,` between
+      // every pair of arms, the trailing one optional). impl#1 ACCEPTS it and
+      // keeps reading a newline-separated list (a carried divergence; it never
+      // enforces commas), so a list may mix the two. A `,` with no arm before it
+      // (a leading `,`, or `,,`) separates nothing: E-PARSE-001 (fail closed),
+      // consumed so the rest of the list still parses.
+      if (_atArmLevel && tok.kind === "PUNCT" && tok.text === ",") {
+        if (_armSepOpen) {
+          errors.push(new TABError(
+            "E-PARSE-001",
+            "E-PARSE-001: a `,` with no match arm before it. A `match` arm list puts one `,` " +
+            "after each arm, the trailing one optional (`{ .A :> 1, .B :> 2, }`) — a leading " +
+            "`,` or a doubled `,,` separates nothing. Remove this `,` (§18.2).",
+            tokenSpan(tok, filePath),
+          ));
+        }
+        consume();
+        _armSepOpen = true;
+        continue;
+      }
+
       // §18.19 — an optional leading `|` arm separator before a whole-product
       // wildcard (`| _` / `| else`) or a product arm (`| ( p, p )`). The
       // collectExpr value-arm boundary (above) now breaks BEFORE such a `|`,
@@ -9958,9 +9995,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (startsArm) { consume(); continue; }
       }
 
-      if (rejectDanglingElse(stmts[stmts.length - 1])) continue;
+      if (rejectDanglingElse(stmts[stmts.length - 1])) { _armSepOpen = false; continue; }
 
       const node = parseOneStatement();
+      _armSepOpen = false;
       if (node) {
         // GUARDED-EXPR: check if next token is a BLOCK_REF to error-effect — if so, wrap
         const nextTok = peek();
@@ -20326,6 +20364,9 @@ function _errArmGluedToPrev(tokens, i) {
   const pe = prev && prev.span && typeof prev.span.end === "number" ? prev.span.end : null;
   const cs = cur && cur.span && typeof cur.span.start === "number" ? cur.span.start : null;
   if (pe === null || cs === null || pe !== cs) return false;
+  // S469 — a head glued to the `,` arm separator (`.A :> 1,.B :> 2`) starts an arm;
+  // nothing continues across a `,`.
+  if (prev.kind === "PUNCT" && prev.text === ",") return false;
   // Glued only matters where it makes `cur` a continuation: `.`/`::` after any
   // token (member / qualified access), or a name right after a `.`/`::`.
   return _errArmIsSep(cur) || _errArmIsSep(prev);
@@ -20491,9 +20532,35 @@ function parseErrorTokens(tokens, filePath, errors) {
   };
   const isStrayArrowAt = (k, depth) =>
     depth === 0 && tokens[k] && tokens[k].kind === "OPERATOR" && tokens[k].text === ":>";
+  // S469 (dpa-073 F2 / F5(1)) — a `!{}` arm list is a comma list, the same arm
+  // list as a `match` (§18.2, §19.4.5): a depth-0 `,` ends an arm's handler and
+  // separates it from the next; the trailing one is optional. impl#1 keeps
+  // reading newline-separated arms too (it never enforces commas). `_armSepOpen`:
+  // nothing but a `,` (or nothing at all) since the last arm, so another `,`
+  // separates nothing — E-PARSE-001 (fail closed).
+  const isArmSepComma = (k, depth) =>
+    depth === 0 && tokens[k] && tokens[k].kind === "PUNCT" && tokens[k].text === ",";
+  let _armSepOpen = true;
 
   while (i < tokens.length && tokens[i].kind !== "EOF") {
     const tok = tokens[i];
+
+    if (isArmSepComma(i, 0)) {
+      if (_armSepOpen && errors) {
+        errors.push(new TABError(
+          "E-PARSE-001",
+          "E-PARSE-001: a `,` with no `!{}` handler arm before it. An arm list puts one `,` after each arm, " +
+          "the trailing one optional (`!{ .A(m) :> f(m), .B :> g(), }`) — a leading `,` or a doubled `,,` " +
+          "separates nothing. Remove this `,` (§18.2, §19.4.5).",
+          tokenSpan(tok, filePath),
+        ));
+      }
+      _armSepOpen = true;
+      _strayRunOpen = false;
+      i++;
+      continue;
+    }
+    if (tok.kind !== "COMMENT") _armSepOpen = false;
 
     // Arm starts with `|`, OR (S452) is a pipe-less §18.2 arm head. A
     // pipe-less arm is parsed by the SAME path as its `|`-prefixed spelling —
@@ -20676,6 +20743,8 @@ function parseErrorTokens(tokens, filePath, errors) {
       let _armDepth = 0; // S452 — bracket depth within this arm's handler
       while (i < tokens.length && tokens[i].kind !== "EOF") {
         if (tokens[i].kind === "PUNCT" && tokens[i].text === "|") break;
+        // S469 — the `,` arm separator ends the handler (the outer loop consumes it).
+        if (isArmSepComma(i, _armDepth)) break;
         // S452 — stop at a pipe-less §18.2 arm head at the arm-list's level.
         if (_armDepth === 0 && isPipelessErrorArmStart(tokens, i)) break;
         if (isStrayArrowAt(i, _armDepth)) reportStrayArrow(tokens[i]);
@@ -20767,6 +20836,8 @@ function parseErrorTokens(tokens, filePath, errors) {
       while (i < tokens.length && tokens[i].kind !== "EOF") {
         if (tokens[i].kind === "PUNCT" && tokens[i].text === "|") break;
         if (tokens[i].kind === "OPERATOR" && tokens[i].text === "::") break;
+        // S469 — the `,` arm separator ends the handler (the outer loop consumes it).
+        if (isArmSepComma(i, _armDepth2)) break;
         // S452 r3 — stop at a pipe-less §18.2 arm head at the arm-list's level
         // (as the `|` and short-form paths do); a following `else :>` /
         // `.Gone :>` was absorbed into this arm's body.
@@ -20828,6 +20899,8 @@ function parseErrorTokens(tokens, filePath, errors) {
       const handlerPartStarts = []; // parallel: source offset of each part (S468)
       let _armDepth3 = 0; // S452 — bracket depth within this arm's handler
       while (i < tokens.length && tokens[i].kind !== "EOF") {
+        // S469 — the `,` arm separator ends the handler (the outer loop consumes it).
+        if (isArmSepComma(i, _armDepth3)) break;
         // S452 — stop at a pipe-less §18.2 arm head at the arm-list's level.
         if (_armDepth3 === 0 && isPipelessErrorArmStart(tokens, i)) break;
         if (isStrayArrowAt(i, _armDepth3)) reportStrayArrow(tokens[i]);

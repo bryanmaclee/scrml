@@ -2228,15 +2228,11 @@ export function propagateOperandOfArmText(text: string): string | null {
 
 function _matchArmInlineToMatchArm(node: any): MatchArm | null {
   const test: string = node.test ?? "";
-  // S144 Cluster D (Bug Y) — strip a stray trailing comma arm-separator.
-  // §18.2 has NO comma separator between arms; when source writes `.A => x,`
-  // the AST builder folds the `,` into this arm's `result` (`"x" ,`). Left
-  // intact it emits invalid JS (`return "x" ,;`) which the validate-emit gate
-  // reports as the GENERIC E-CODEGEN-INVALID-LOGIC. The typer already fires the
-  // clean source-anchored E-MATCH-ARM-SEPARATOR (type-system.ts) — that error
-  // is what fails the build. Here we only sanitize so the never-meant-to-ship
-  // emitted JS still PARSES, leaving E-MATCH-ARM-SEPARATOR as the sole
-  // diagnostic the developer sees (no duplicate generic invalid-JS report).
+  // S144 Cluster D (Bug Y) stripped a `,` the AST builder folded into an arm's
+  // `result`. S469 (dpa-073 F2): the arm list is a comma list and the AST builder
+  // reads the `,` as the separator, so it no longer reaches `result`; the strip
+  // stays as a belt-and-braces guard (a trailing `,` is never part of an arm body
+  // — scrml has no comma operator, §40.8).
   const result: string = String(node.result ?? "").replace(/,\s*$/, "");
   const binding: string | null = node.binding ?? null;
   // errarm-refail: a bare re-`fail` value-arm carries a fail-expr node.
@@ -3884,7 +3880,10 @@ function collectMatchArms(body: any[], opts?: any): MatchArm[] {
     // so a global collapse of `- >` is safe.
     const _armsBefore = arms.length;
     const armStrings = splitMultiArmString(trimmed.replace(/-\s*>/g, "->"));
-    for (const armStr of armStrings) {
+    for (const armStrRaw of armStrings) {
+      // S469 (dpa-073 F2) — a raw arm list is a comma list: the `,` that ends an
+      // arm is its separator, not part of its body (scrml has no comma operator).
+      const armStr = armStrRaw.replace(/,\s*$/, "");
       const arm = parseMatchArm(armStr);
       if (arm) arms.push(stampLeave(stampPropagateOperand(arm)));
     }

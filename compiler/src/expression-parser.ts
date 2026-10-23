@@ -2673,7 +2673,49 @@ function splitMatchArms(content: string): string[] {
   if (arms.length === 0 && content.trim()) {
     arms.push(content.trim());
   }
-  return arms;
+  return arms.flatMap(splitArmSeparatorCommas);
+}
+
+/**
+ * S469 (dpa-073 F2 / F5(1)) — the arm list is a comma list (§18.2: a `,` between
+ * every pair of arms, the trailing one optional). impl#1 accepts the `,` and keeps
+ * reading newline-separated arms. Split one line-joined arm string at its depth-0
+ * `,` separators (strings, templates, `( )` `[ ]` `{ }` respected — a `,` inside a
+ * call, an object or a product pattern is the arm's own) and drop the trailing one.
+ *
+ * Fail closed: the split is taken only when EVERY piece is an arm — it carries a
+ * depth-0 arm arrow (`:>` / `=>` / `->`) — and only the LAST piece may be empty (the
+ * trailing `,`). Anything else (a `,` in markup text, an empty arm `,,`) is left
+ * exactly as written, for the stage that reads the arm to refuse.
+ */
+function splitArmSeparatorCommas(arm: string): string[] {
+  if (!arm.includes(",")) return [arm];
+  const pieces = splitTopLevelCommas(arm);
+  // splitTopLevelCommas drops a trailing empty piece (the trailing `,`) but keeps
+  // interior ones; an interior empty piece (`,,`) is not a separator list.
+  if (pieces.some((p) => p.length === 0)) return [arm];
+  if (pieces.length <= 1) {
+    const only = pieces[0] ?? "";
+    // `arm,` — a single arm with its trailing separator.
+    return only && only !== arm.trim() && hasTopLevelArmArrow(only) ? [only] : [arm];
+  }
+  if (!pieces.every(hasTopLevelArmArrow)) return [arm];
+  return pieces;
+}
+
+/** Does `s` carry an arm arrow (`:>` / `=>` / `->`) at bracket depth 0, outside strings? */
+function hasTopLevelArmArrow(s: string): boolean {
+  let depth = 0;
+  let str: string | null = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (str) { if (c === "\\") i++; else if (c === str) str = null; continue; }
+    if (c === '"' || c === "'" || c === "`") { str = c; continue; }
+    if (c === "(" || c === "[" || c === "{") { depth++; continue; }
+    if (c === ")" || c === "]" || c === "}") { depth--; continue; }
+    if (depth === 0 && s[i + 1] === ">" && (c === ":" || c === "=" || c === "-")) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
