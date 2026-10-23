@@ -18,7 +18,7 @@
     function bodies(items) {
         let out = []
         for (const it of items) {
-            const row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get() !{ _ :> not }
+            const row = ?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get() !{ _ :> not };
             out.push(row is not ? "none" : row.body)
         }
         return out.join(",")
@@ -26,14 +26,14 @@
     function bodiesGone(items) {
         let out = []
         for (const it of items) {
-            const row = ?{`SELECT id, body FROM gone WHERE id = ${it.id}`}.get() !{ _ :> not }
+            const row = ?{`SELECT id, body FROM gone WHERE id = ${it.id}`}.get() !{ _ :> not };
             out.push(row is not ? "none" : row.body)
         }
         return out.join(",")
     }
     function go() {
-        @found = bodies([{ id: 7 }, { id: 8 }]) !{ .Transport(_) :> return }
-        @failed = bodiesGone([{ id: 7 }, { id: 8 }]) !{ .Transport(_) :> return }
+        @found = bodies([{ id: 7 }, { id: 8 }]) !{ .Transport(_) :> return };
+        @failed = bodiesGone([{ id: 7 }, { id: 8 }]) !{ .Transport(_) :> return };
     }
     <button id="go" onclick=go()>go</button>
     <p id="found">${@found}</p>

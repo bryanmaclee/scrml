@@ -2,7 +2,7 @@
 <program>
     type R:enum = { Ok(v: int), Bad }
     fn show(r: R) -> string {
-        return `r=${r}`
+        return `r=${r}`;
     }
     <main>
         <p>x</p>

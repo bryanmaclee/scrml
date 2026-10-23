@@ -1,4 +1,4 @@
 ${
-    import { appPhase pinned } from './m.scrml'
+    import { appPhase pinned } from './m.scrml';
 }
 <p>${appPhase}</>

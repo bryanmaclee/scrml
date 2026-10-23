@@ -8,12 +8,12 @@ ${
     <blank> = "init"
 
     function go() {
-        let name: string | not = "ada"
-        let age: int | not = not
-        let empty: string | not = ""
-        given name :> { @seen = "hello " + name }
-        given name, age :> { @both = "both present" }
-        given empty :> { @blank = "empty string is present" }
+        let name: string | not = "ada";
+        let age: int | not = not;
+        let empty: string | not = "";
+        given name :> { @seen = "hello " + name; }
+        given name, age :> { @both = "both present"; }
+        given empty :> { @blank = "empty string is present"; }
     }
 }
 <program>

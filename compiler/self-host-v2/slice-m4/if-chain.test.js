@@ -36,8 +36,8 @@ const ids = (sel) => [...$$(sel)].map((n) => n.id).join(",");
 const prog = (body, extra = "") => `<program>
     let <step:number=1/>
     let <label:string="alpha"/>
-    function go(n: number) { @step = n }
-    function relabel(s: string) { @label = s }
+    function go(n: number) { @step = n; }
+    function relabel(s: string) { @label = s; }
 ${extra}
     <main>
 ${body}
@@ -52,7 +52,7 @@ const THREE = prog(`        <p id="one" if=(@step == 1)>ONE \${@label}</p>
 
 describe("§17.1.1 — exactly the first true branch is in the DOM, reactively", () => {
   let program;
-  beforeAll(async () => { ({ program } = await loadProgram(clean(THREE), "chain-three", ["go", "relabel"])); });
+  beforeAll(async () => { ({ program } = await loadProgram(clean(THREE), "chain-three", ["go", "relabel"])); }, { timeout: 60000 }); // each loadProgram compiles via the bootstrap (~4s idle)
 
   test("step 1 → only #one exists (not hidden — absent)", () => {
     expect(ids("main p")).toBe("one");

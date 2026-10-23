@@ -52,7 +52,7 @@ describe("§66.19.6 — the front end", () => {
 
 describe("§66.19.6 — behaviour", () => {
   let rt, program;
-  beforeAll(async () => { ({ rt, program } = await loadProgram(compile().core, "engine", ["load", "finish"])); });
+  beforeAll(async () => { ({ rt, program } = await loadProgram(compile().core, "engine", ["load", "finish"])); }, { timeout: 60000 }); // each loadProgram compiles via the bootstrap (~4s idle)
 
   test("renders the initial state: `<*phase/>` shows .Idle's body; two cards", () => {
     expect(stateText()).toBe("Ready");

@@ -4,7 +4,7 @@
     </>
     // `assets` is tenant-scoped HERE; the read lives in ./admin.scrml, which declares no schema.
     ${
-        import { listAssets } from './admin.scrml'
+        import { listAssets } from './admin.scrml';
     }
     <button onclick=${ listAssets() }>list</button>
 </program>

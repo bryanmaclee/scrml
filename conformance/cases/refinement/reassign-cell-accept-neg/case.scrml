@@ -2,7 +2,7 @@ ${
     <link>: string(url) = "https://scrml.dev/"
     <other>: string = "https://example.com/"
     function setLink(v: string) {
-        @link = v
+        @link = v;
     }
 }
 <program>

@@ -1,7 +1,7 @@
 ${
     <items> = [{ id: 1, label: "one" }, { id: 2, label: "two" }]
     <shown> = false
-    function clear() { @items = [] }
+    function clear() { @items = []; }
 }
 <button id="clear" onclick=clear()>Clear</>
 <ul id="list">

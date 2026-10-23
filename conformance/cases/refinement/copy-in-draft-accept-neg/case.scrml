@@ -4,10 +4,10 @@ ${
     <m>: number = -5
     <rows>: L[] = []
     <draft>: Q = { u: "d", n: 1 }
-    function add() { @rows.push(@draft) }
+    function add() { @rows.push(@draft); }
     function edit() {
-        const d = @draft
-        d.n = @m
+        const d = @draft;
+        d.n = @m;
     }
 }
 <program>

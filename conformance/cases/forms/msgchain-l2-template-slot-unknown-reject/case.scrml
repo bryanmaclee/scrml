@@ -1,6 +1,6 @@
 <program>
 ${
-    import { registerMessages } from 'scrml:data'
+    import { registerMessages } from 'scrml:data';
     registerMessages({
         .Required:  "{field} is required",
         .MinFailed: "{field} must be at least {expected}",

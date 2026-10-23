@@ -73,7 +73,7 @@ renders <a class="lnk" href=u>l</a>
     let <list:string="/a;javascript:alert(2)"/>
     let <animated:string="fill"/>
     <rows:Row[]=([{ id: 1, url: "JaVaScRiPt:alert(3)" }, { id: 2, url: "https://example.com/" }])/>
-    function flip() { @u = "vbscript:x" }
+    function flip() { @u = "vbscript:x"; }
 
     <main>
         <a id="e" href=@bad>bound</a>
@@ -216,7 +216,7 @@ ${body}
 describe("§5.2 rules 1–2 — handler text is never built from data", () => {
   const prog = (body) => `<program>
     let <code:string="alert(1)"/>
-    function go(s: string) { @code = s }
+    function go(s: string) { @code = s; }
     <main>
 ${body}
     </main>
@@ -261,7 +261,7 @@ describe("§5.2 (S464) — a quoted event-handler attribute with no `${…}` is 
   const prog = (body, extra = "") => `${extra}<program>
     let <code:string="x"/>
     <rows:Row[]=([{ id: 1 }])/>
-    function go(s: string) { @code = s }
+    function go(s: string) { @code = s; }
     <main>
 ${body}
     </main>
@@ -285,6 +285,6 @@ ${body}
     expect(codes(prog(`        <btn t="a"/>\n        <btn t="b"/>`, ROW + `<btn t:string>\n</>\nrenders <button onclick="alert(1)">b</button>\n\n`))).toEqual([QH]);
   });
   test("the unquoted forms and the exempt words stay clean", () => {
-    clean(prog(`        <button onclick=go("y")>a</button>\n        <button onclick={ go("y") }>b</button>\n        <div one="1" online="2" onboarding="3"></div>`, ROW));
+    clean(prog(`        <button onclick=go("y")>a</button>\n        <button onclick={ go("y"); }>b</button>\n        <div one="1" online="2" onboarding="3"></div>`, ROW));
   });
 });

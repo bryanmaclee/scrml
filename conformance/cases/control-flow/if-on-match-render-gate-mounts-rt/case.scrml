@@ -2,8 +2,8 @@ ${
     type Phase:enum = { Loading, Ready }
     <phase>: Phase = .Loading
     <shown> = false
-    function ready() { @phase = Phase.Ready }
-    function reveal() { @shown = true }
+    function ready() { @phase = Phase.Ready; }
+    function reveal() { @shown = true; }
 }
 <button id="ready" onclick=ready()>Ready</>
 <button id="reveal" onclick=reveal()>Reveal</>

@@ -8,6 +8,6 @@
         <Failed  rule=(.Loading | .Idle) : "Failed — retry?">
     </>
 
-    function load() { @phase = .Loading }
+    function load() { @phase = .Loading; }
     <button onclick=load()>Load</button>
 </program>

@@ -1,6 +1,6 @@
 ${
-    function fetchToken() { return "t" }
-    function useToken(t: string | bool) { return t }
+    function fetchToken() { return "t"; }
+    function useToken(t: string | bool) { return t; }
     let flag = true
     lin token = fetchToken()
     useToken(token)

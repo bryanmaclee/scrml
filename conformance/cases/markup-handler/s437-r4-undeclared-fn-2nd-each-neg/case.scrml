@@ -3,6 +3,6 @@
 <r> = 0
 <r2> = 0
 <items> = [1]
-${ function h() { @r2 = 9 } }
-<ul><each in=@items as it><li><button onclick={ @n = 2; nope2(1) }>x</button></li></each></ul>
+${ function h() { @r2 = 9; } }
+<ul><each in=@items as it><li><button onclick={ @n = 2; nope2(1); }>x</button></li></each></ul>
 </program>

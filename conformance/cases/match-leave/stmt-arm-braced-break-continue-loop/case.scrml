@@ -6,25 +6,25 @@ ${
     <seen> : string = "none"
     <after> : string = "not-run"
     function risky(n: number)! E {
-        if (n < 0) { fail E.Boom("neg") }
-        return n
+        if (n < 0) { fail E.Boom("neg"); }
+        return n;
     }
     function count() -> number {
-        let n = 0
-        const ks: K[] = [K.C, K.A, K.C, K.B, K.C]
+        let n = 0;
+        const ks: K[] = [K.C, K.A, K.C, K.B, K.C];
         for (const x of ks) {
-            const k: K = x
+            const k: K = x;
             match k {
-                .A :> { continue }
-                .B :> { break }
-                .C :> { n = n + 1 }
+                .A :> { continue; }
+                .B :> { break; }
+                .C :> { n = n + 1; }
             }
         }
-        return n
+        return n;
     }
     function go() {
-        const n = count()
-        @out = `n=${n}`
+        const n = count();
+        @out = `n=${n}`;
     }
 }
 <button id="go" onclick=go()>go</>

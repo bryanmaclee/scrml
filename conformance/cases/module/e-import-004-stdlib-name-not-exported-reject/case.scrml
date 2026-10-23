@@ -1,4 +1,4 @@
 ${
-    import { totallyBogus } from 'scrml:data'
+    import { totallyBogus } from 'scrml:data';
 }
 <p>${totallyBogus}</>

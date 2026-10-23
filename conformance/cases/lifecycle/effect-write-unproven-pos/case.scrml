@@ -2,11 +2,11 @@
 <program>
   <n> = 0
   function beacon(v: number) {
-    return v
+    return v;
   }
   <effect deps=[@n]>${
-    const g = beacon
-    g(@n)
+    const g = beacon;
+    g(@n);
   }</>
   <p>${@n}</p>
 </program>

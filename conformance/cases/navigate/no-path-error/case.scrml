@@ -1,5 +1,5 @@
 <program>
   <outlet/>
-  ${ function go() { navigate(.Soft) } }
+  ${ function go() { navigate(.Soft); } }
   <button onclick=go()>Go</button>
 </program>

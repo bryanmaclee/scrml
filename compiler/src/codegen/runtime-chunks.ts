@@ -37,6 +37,10 @@
  *                 _scrml_active_mount_scope (the if= mount scope FLAG stays here —
  *                 _scrml_region_track reads it on every page; the mount FUNCTIONS
  *                 are in 'ifmount')
+ *   owner         §6.7.2 owner-scope tree (S469) — _scrml_scope_track/open/gone,
+ *                 _scrml_owner_destroy, _scrml_in_scope, _scrml_mount_owner,
+ *                 _scrml_arm_scope, _scrml_row_dispose, _scrml_release_rows. Pulled by
+ *                 'reconciliation' and by a dispatcher's `_scrml_arm_scope` call.
  *   ifmount       §17.1 if= mount/unmount — _scrml_create_scope,
  *                 _scrml_find_if_marker, _scrml_mount_template,
  *                 _scrml_unmount_scope, _scrml_self_scope, _scrml_mount_wire.
@@ -146,6 +150,7 @@ export const RUNTIME_CHUNK_ORDER = [
   'derived',
   'lift',
   'scope',
+  'owner',
   'ifmount',
   'timers',
   'animation',
@@ -291,6 +296,12 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // which every emitted controller — standalone AND chain, mount-mode AND
   // display-mode — contains. `_scrml_active_mount_scope` deliberately stays in
   // `scope`: `_scrml_region_track` reads it on every page.
+  // S469 — the owner-scope tree: every <each> row and every dispatched <match> /
+  // <engine> arm owns the effects created inside it, and is torn down with it.
+  // Pulled by 'reconciliation' (CHUNK_DEPENDENCIES) and by the emitted-helper index
+  // (a dispatcher names `_scrml_arm_scope`). Kept out of the always-included 'scope'
+  // chunk: a list-free, match-free page never creates a row or arm scope.
+  owner:          "§6.7.2 owner-scope tree (chunk: 'owner')",
   ifmount:        "§17.1 if= mount/unmount runtime (chunk: 'ifmount')",
   timers:         '§6.7.5 / §6.7.6 Timer and Poll runtime',
   animation:      '§6.7.7 animationFrame runtime',
@@ -584,6 +595,9 @@ export const CHUNK_DEPENDENCIES: Partial<Record<RuntimeChunkName, RuntimeChunkNa
   // through `_scrml_machine_arm_timer` / `_scrml_machine_clear_timer`, which moved out of the
   // always-included 'core' into 'machine'.
   engine: ['machine'],
+  // S469 — `_scrml_reconcile_list` / `_scrml_each_clear` open, record and destroy row
+  // scopes (`_scrml_scope_open`, `_scrml_mount_owner`, `_scrml_row_dispose`, …).
+  reconciliation: ['owner'],
 };
 
 // Pulls all transitive chunk dependencies into the set in place. Returns

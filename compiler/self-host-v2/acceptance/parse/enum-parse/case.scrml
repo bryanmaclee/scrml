@@ -3,10 +3,10 @@
     type Guess:enum = { Yes, No }
     function show(g: Guess | not) -> string {
         return match g {
-            .Yes :> "Yes"
-            .No :> "No"
+            .Yes :> "Yes",
+            .No :> "No",
             not :> "not"
-        }
+        };
     }
     <main>
         <p id="a">${show(Guess.parse("Yes"))} ${show(Guess.parse("No"))} ${show(Guess.parse("yes"))} ${show(Guess.parse("constructor"))}</p>

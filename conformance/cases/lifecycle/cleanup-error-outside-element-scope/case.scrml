@@ -1,7 +1,7 @@
 // §6.7.2 — cleanup() at file level, outside any element scope: nothing to tear down.
 ${
   function teardown() {
-    return 1
+    return 1;
   }
   cleanup(teardown)
 }

@@ -2,9 +2,9 @@
 <program>
     function f(xs: int[append] | not) -> string {
         return match xs {
-            not :> "none"
+            not :> "none",
             else :> "some"
-        }
+        };
     }
     <main><p>${f(not)}</p></main>
 </program>

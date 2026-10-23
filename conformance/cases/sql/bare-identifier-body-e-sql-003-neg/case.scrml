@@ -1,6 +1,6 @@
 ${
     function loadRows() {
-        const q = "SELECT id FROM tasks"
+        const q = "SELECT id FROM tasks";
         return ?{q}.all()
     }
 }

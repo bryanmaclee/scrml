@@ -12,9 +12,9 @@ ${ function t(x) { @log = @log + x + "," } }
 
 <button id="top" onclick={
             // first
-            t("T1")
+            t("T1");
             // second
-            t("T2")
+            t("T2");
             // done
         }>top</button>
 
@@ -22,9 +22,9 @@ ${ function t(x) { @log = @log + x + "," } }
     <Idle>
         <button id="eng" onclick={
             // first
-            t("E1")
+            t("E1");
             // second
-            t("E2")
+            t("E2");
             // done
         }>engine</button>
     </>
@@ -35,9 +35,9 @@ ${ function t(x) { @log = @log + x + "," } }
     <Idle>
         <button id="mat" onclick={
             // first
-            t("M1")
+            t("M1");
             // second
-            t("M2")
+            t("M2");
             // done
         }>match</button>
     </>
@@ -48,9 +48,9 @@ ${ function t(x) { @log = @log + x + "," } }
     <each in=@items key=@.id>
         <li><button class="row" onclick={
             // first
-            t("R1")
+            t("R1");
             // second
-            t("R2")
+            t("R2");
             // done
         }>${@.name}</button></li>
     </each>

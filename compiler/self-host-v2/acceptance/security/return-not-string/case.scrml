@@ -3,20 +3,20 @@
     let <wrong:string=""/>
     let <right:string=""/>
     function find(pw: string) -> string | not {
-        if (pw == "hunter2") return "bryan"
-        return not
+        if (pw == "hunter2") return "bryan";
+        return not;
     }
     function attempt(pw: string) -> string {
-        let m: string = "denied"
+        let m: string = "denied";
         match find(pw) {
-            not :> m = "denied"
+            not :> m = "denied",
             _ :> m = "welcome"
         }
-        return m
+        return m;
     }
     function login() {
-        @wrong = attempt("hunter3")
-        @right = attempt("hunter2")
+        @wrong = attempt("hunter3");
+        @right = attempt("hunter2");
     }
     <main>
         <button id="go" onclick=login()>go</button>

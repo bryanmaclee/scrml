@@ -5,10 +5,10 @@ ${
     <l>: L = { u: "a", n: 1 }
     <ls>: number(>0)[] = [1, 2]
     <o>: number(>0) | not = 1
-    function fieldWrite() { @l.n = @p }
-    function pushGood() { @ls.push(@p) }
+    function fieldWrite() { @l.n = @p; }
+    function pushGood() { @ls.push(@p); }
     function inc() { @n++ }
-    function clear() { @o = not }
+    function clear() { @o = not; }
 }
 <program>
 <button id="field" onclick=fieldWrite()>b</button>

@@ -2,7 +2,7 @@
 ${
   lin token = "secret"
   @userId = 1
-  function authenticate(x: string) { return x }
+  function authenticate(x: string) { return x; }
 }
 <request id="profile">
   ${ @userId = authenticate(token) }

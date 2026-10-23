@@ -1,4 +1,4 @@
 ${
-    import { hash } from './m.scrml'
+    import { hash } from './m.scrml';
 }
 <p>${hash}</>

@@ -6,8 +6,8 @@
     // the compiler does not judge what it creates — it is declared in <schema> or refused.
     ${
         function setup() {
-            ?{`CREATE VIEW recent AS SELECT id, name FROM assets`}.acrossTenants().run()
-            return 1
+            ?{`CREATE VIEW recent AS SELECT id, name FROM assets`}.acrossTenants().run();
+            return 1;
         }
     }
     <button onclick=${ setup() }>setup</button>

@@ -1,5 +1,5 @@
 ${
-    import { tableFor } from 'scrml:data'
+    import { tableFor } from 'scrml:data';
     type UserRole:enum = { Admin, Editor, Viewer }
     type User:struct = { id: integer, name: string req, role: UserRole req }
     <users>: User[] = [ User{ id: 1, name: "Ada", role: .Admin }, User{ id: 2, name: "Bob", role: .Editor } ]

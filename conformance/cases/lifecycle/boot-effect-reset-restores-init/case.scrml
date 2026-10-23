@@ -1,10 +1,10 @@
 ${
     type Phase:enum = { Loading, Empty, Editing }
     function grow() {
-        @tasks.push(3)
+        @tasks.push(3);
     }
     function doReset() {
-        reset(@tasks)
+        reset(@tasks);
     }
 }
 const loadTasks = () => [1, 2]

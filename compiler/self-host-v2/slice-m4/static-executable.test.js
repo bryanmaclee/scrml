@@ -323,18 +323,18 @@ describe("check.scrml C18 — the Core backstop: no Static attribute is executab
 });
 
 describe("§5.2.4 / §5.2 rule 2 — a `{…}` value on a non-handler attribute is refused, never written as `\"\"`", () => {
-  const decls = `    let <doc:string="<p>x</p>"/>\n    let <bad:string="javascript:alert(1)"/>\n    function go() { @bad = "/x" }`;
+  const decls = `    let <doc:string="<p>x</p>"/>\n    let <bad:string="javascript:alert(1)"/>\n    function go() { @bad = "/x"; }`;
   test("`srcdoc={@doc}` → E-ATTR-INTERP-EXECUTABLE (data into an HTML document; was `srcdoc=\"\"`)", () => {
-    expect(codes(P(`        <iframe srcdoc={@doc}></iframe>`, decls))).toEqual(["E-ATTR-INTERP-EXECUTABLE"]);
+    expect(codes(P(`        <iframe srcdoc={@doc;}></iframe>`, decls))).toEqual(["E-ATTR-INTERP-EXECUTABLE"]);
   });
   test("`href={@bad}` and `title={@bad}` → E-BOOTSTRAP-UNSUPPORTED naming the `(…)` form (was `attr=\"\"`, value dropped)", () => {
-    const r = run(P(`        <a href={@bad}>a</a>\n        <p title={@bad}>t</p>`, decls));
+    const r = run(P(`        <a href={@bad;}>a</a>\n        <p title={@bad;}>t</p>`, decls));
     expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
     expect(r.diags[0].message).toContain("`href=(…)`");
     expect(r.diags[0].message).toContain("§5.2.4");
   });
   test("twins: the `(…)` expression form binds (and is guarded); an inline-block HANDLER `onclick={ … }` is unchanged", async () => {
-    await loadProgram(clean(P(`        <a id="b" href=(@bad)>a</a>\n        <button id="g" onclick={ go() }>g</button>`, decls)), "braced-twins", []);
+    await loadProgram(clean(P(`        <a id="b" href=(@bad)>a</a>\n        <button id="g" onclick={ go(); }>g</button>`, decls)), "braced-twins", []);
     expect($("#b").getAttribute("href")).toBe("about:blank");
   });
 });

@@ -66,7 +66,7 @@ const SIGNUP = `<program>
         <button type="submit" class="draft" formnovalidate>Draft</button>
     </form>
 
-    function save() { @calls = @calls + 1 }
+    function save() { @calls = @calls + 1; }
 
     <main>
         <*signup/>
@@ -78,7 +78,7 @@ const SIGNUP = `<program>
 const calls = () => $("p.calls").textContent;
 
 describe("§55.17.3 — the gate is FAIL-CLOSED", () => {
-  beforeAll(async () => { await loadProgram(clean(SIGNUP), "gate-signup"); });
+  beforeAll(async () => { await loadProgram(clean(SIGNUP), "gate-signup"); }, { timeout: 60000 }); // each loadProgram compiles via the bootstrap (~4s idle)
 
   test("the form keeps `novalidate` (S442 (3)) and carries the §55.17.6 marker", () => {
     expect($("main form").hasAttribute("novalidate")).toBe(true);
@@ -134,7 +134,7 @@ const TOP = `<program>
     let <email:string="" req length(>=5)/>
     let <calls:int=0/>
 
-    function register() { @calls = @calls + 1 }
+    function register() { @calls = @calls + 1; }
 
     <main>
         <form onsubmit=register()>
@@ -153,7 +153,7 @@ const errs = () => [...document.querySelectorAll("main p.scrml-error")].map((p) 
 const clickEl = (el) => el.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 
 describe("§55.5.1 / §55.17 — a validated TOP-LEVEL value: lowered, surfaced, gated", () => {
-  beforeAll(async () => { await loadProgram(clean(TOP), "gate-top"); });
+  beforeAll(async () => { await loadProgram(clean(TOP), "gate-top"); }, { timeout: 60000 }); // each loadProgram compiles via the bootstrap (~4s idle)
 
   test("its validators lower onto the bound control (§55.17.1); the form is gated + `novalidate`", () => {
     expect($("main input").getAttribute("required")).toBe("");
@@ -214,7 +214,7 @@ const COMPOUND = `<program>
         <button type="submit" class="draft" formnovalidate>Draft</button>
     </form>
 
-    function save() { @calls = @calls + 1 }
+    function save() { @calls = @calls + 1; }
 
     <main>
         <*signup/>
@@ -228,7 +228,7 @@ const COMPOUND = `<program>
 const comp = () => $("p.c").textContent;
 
 describe("§55.5 / §55.6 — a declaration's compound and per-field surface", () => {
-  beforeAll(async () => { await loadProgram(clean(COMPOUND), "gate-compound"); });
+  beforeAll(async () => { await loadProgram(clean(COMPOUND), "gate-compound"); }, { timeout: 60000 }); // each loadProgram compiles via the bootstrap (~4s idle)
 
   test("`data-scrml-gated` names the child fields by compound path, in source order (§55.17.6)", () => {
     expect($("main form").getAttribute("data-scrml-gated")).toBe("signup.email signup.password");
@@ -288,7 +288,7 @@ describe("§55.17.3 — the gate set and the instance it judges", () => {
         renders <input bind:value=@v/>
     </>
     renders <span><*v/></span>
-    function save() { @calls = @calls + 1 }
+    function save() { @calls = @calls + 1; }
     <main>
         <form onsubmit=save()><f/><f/><button type="submit">go</button></form>
         <p class="calls">\${@calls}</p>
@@ -314,8 +314,8 @@ describe("diagnostics — the surface is read-only; `<errors>` takes a surface",
   const P = (decls, main) => `<program>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
   const F = `    <f note:string="n">\n        let <v:string="" req/>\n        renders <input bind:value=@v/>\n    </>\n    renders <div><*v/></div>`;
   test("E-SYNTHESIZED-WRITE: writing a top-level value's or a field's surface property (§55.5.1 rule 7, §55.7)", () => {
-    expect(codes(P(`    let <e:string="" req/>\n    function g() { @e.isValid = true }`, `        <input bind:value=@e/>`))).toEqual(["E-SYNTHESIZED-WRITE"]);
-    expect(codes(P(F + `\n    function g() { @f.v.touched = true }`, `        <*f/>`))).toEqual(["E-SYNTHESIZED-WRITE"]);
+    expect(codes(P(`    let <e:string="" req/>\n    function g() { @e.isValid = true; }`, `        <input bind:value=@e/>`))).toEqual(["E-SYNTHESIZED-WRITE"]);
+    expect(codes(P(F + `\n    function g() { @f.v.touched = true; }`, `        <*f/>`))).toEqual(["E-SYNTHESIZED-WRITE"]);
   });
   test("E-VALIDITY-NO-SURFACE: a top-level value with no validators — read or `<errors of=…/>` (§55.5.1 rule 2, §55.8)", () => {
     expect(codes(P(`    let <q:string=""/>`, `        <p>\${@q.isValid}</p>`))).toEqual(["E-VALIDITY-NO-SURFACE"]);
@@ -416,7 +416,7 @@ describe("§55.17.3 static reach — a bound value in an unmounted region still 
     let <show:bool=false/>
     let <email:string="" req/>
     let <calls:int=0/>
-    function register() { @calls = @calls + 1 }
+    function register() { @calls = @calls + 1; }
     <main>
         <form onsubmit=register()>
             <div if=@show><input bind:value=@email/></div>
@@ -454,7 +454,7 @@ describe("§55.17.3 static reach — a bound value in an unmounted region still 
     let <email:string="" req/>
     let <password:string="" req length(>=8)/>
     let <calls:int=0/>
-    function register() { @calls = @calls + 1 }
+    function register() { @calls = @calls + 1; }
     <main>
         <form onsubmit=register()>
             <div if=(@step == 1)><input class="e" bind:value=@email/></div>
@@ -512,7 +512,7 @@ describe("§55.7 — a compound's submitted is set by a form that binds ANY of i
         let <email:string="" req/>
     </>
     renders <form onsubmit=save()><*name/><button type="submit">go</button></form>
-    function save() { @calls = @calls + 1 }
+    function save() { @calls = @calls + 1; }
     <main>
         <*signup/>
         <p class="calls">\${@calls}</p>

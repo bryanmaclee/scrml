@@ -4,13 +4,13 @@ ${
     <k> = 1
     <v> = 0
     function ins() {
-        @ls.splice(0, 0, @ins9)
+        @ls.splice(0, 0, @ins9);
     }
     function add() {
-        @ls.push(@ins9, @k)
+        @ls.push(@ins9, @k);
     }
     function wipe() {
-        @ls.fill(@v, 0, 2)
+        @ls.fill(@v, 0, 2);
     }
 }
 <button id="ins" onclick=ins()>ins</>

@@ -3,11 +3,11 @@ ${
     <m>: number = -5
     <rows>: L[] = []
     function load() {
-        const r = [{ u: "o", n: 4 }]
-        @rows = r
-        const p = { u: "p", n: @m }
-        r[0].n = @m
-        r.push(p)
+        const r = [{ u: "o", n: 4 }];
+        @rows = r;
+        const p = { u: "p", n: @m };
+        r[0].n = @m;
+        r.push(p);
     }
 }
 <program>

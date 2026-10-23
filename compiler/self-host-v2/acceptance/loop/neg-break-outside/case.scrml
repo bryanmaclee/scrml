@@ -2,8 +2,8 @@
 <program>
 
     function f() -> int {
-        break
-        return 1
+        break;
+        return 1;
     }
     <main>
         <p id="o">${f()}</p>

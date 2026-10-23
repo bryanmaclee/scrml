@@ -2,8 +2,8 @@ ${
     type Mode:enum = { Off, On }
     <shown> = false
     <ticks> = 0
-    function toOn() { @mode = .On }
-    function reveal() { @shown = true }
+    function toOn() { @mode = .On; }
+    function reveal() { @shown = true; }
 }
 <engine for=Mode initial=.Off if=@shown>
     <Off rule=.On>

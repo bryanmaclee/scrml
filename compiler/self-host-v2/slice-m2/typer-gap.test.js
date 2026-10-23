@@ -24,7 +24,7 @@ beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
 const LIB = () => ({ path: "lib/dropdown.scrml", src: readSlice("src/lib/dropdown.scrml") });
 const app = (decls, markup) => ({
   path: "app.scrml",
-  src: `\${ import { dropdown, Openness } from "./lib/dropdown.scrml" }\n<program>\n${decls}\n    <main>\n${markup}\n    </main>\n</program>\n`,
+  src: `\${ import { dropdown, Openness } from "./lib/dropdown.scrml"; }\n<program>\n${decls}\n    <main>\n${markup}\n    </main>\n</program>\n`,
 });
 const codes = (files) => frontEnd(mods, files).diags.map((d) => d.code);
 
@@ -35,25 +35,25 @@ const SHAPES = [
     // §66.1 rule 5: "Every cell and field write SHALL be type-checked against the target's declared type";
     // the §34 row E-TYPE-031: "a value is assigned to a position whose declared type it does not satisfy".
     want: ["E-TYPE-031"],
-    files: () => [LIB(), app("    let <x:int=0/>\n    function f() { @x = \"oops\" }", "<p>x</p>")],
-    twin: () => [LIB(), app("    let <x:int=0/>\n    function f() { @x = 5 }", "<p>x</p>")] },
+    files: () => [LIB(), app("    let <x:int=0/>\n    function f() { @x = \"oops\"; }", "<p>x</p>")],
+    twin: () => [LIB(), app("    let <x:int=0/>\n    function f() { @x = 5; }", "<p>x</p>")] },
   { name: "a call with the wrong arity (too few)",
     // RULED S440 #2; §7.3: "A call that passes FEWER is a compile error too, unless each omitted parameter
     // has a default (§7.3.2)." (§34 row E-CALL-ARITY.)
     want: ["E-CALL-ARITY"],
-    files: () => [LIB(), app("    function g(a: int) { }\n    function f() { g() }", "<p>x</p>")],
-    twin: () => [LIB(), app("    function g(a: int) { }\n    function f() { g(1) }", "<p>x</p>")] },
+    files: () => [LIB(), app("    function g(a: int) { }\n    function f() { g(); }", "<p>x</p>")],
+    twin: () => [LIB(), app("    function g(a: int) { }\n    function f() { g(1); }", "<p>x</p>")] },
   { name: "a call with the wrong arity (too many)",
     // §7.3: "A call that passes MORE arguments than the function declares parameters is a compile error".
     want: ["E-CALL-ARITY"],
-    files: () => [LIB(), app("    function g(a: int) { }\n    function f() { g(1, 2) }", "<p>x</p>")],
-    twin: () => [LIB(), app("    function g(a: int, b: int) { }\n    function f() { g(1, 2) }", "<p>x</p>")] },
+    files: () => [LIB(), app("    function g(a: int) { }\n    function f() { g(1, 2); }", "<p>x</p>")],
+    twin: () => [LIB(), app("    function g(a: int, b: int) { }\n    function f() { g(1, 2); }", "<p>x</p>")] },
   { name: "a call with a wrong argument type into an `int` parameter",
     // RULED S442: "`int` enforcement reaches every §7.5.1 position (returns, arguments, all initializers)" —
     // supersedes, for `int`-bearing parameters, §7.5.1's "Positions 3-5 are NOT YET CHECKED" (other types: still unchecked).
     want: ["E-TYPE-031"],
-    files: () => [LIB(), app("    function g(a: int) { }\n    function f() { g(\"s\") }", "<p>x</p>")],
-    twin: () => [LIB(), app("    function g(a: int) { }\n    function f() { g(1) }", "<p>x</p>")] },
+    files: () => [LIB(), app("    function g(a: int) { }\n    function f() { g(\"s\"); }", "<p>x</p>")],
+    twin: () => [LIB(), app("    function g(a: int) { }\n    function f() { g(1); }", "<p>x</p>")] },
   { name: "`<each in=@x>` over an int",
     // RULED S440 #3; §17.7.2: "`<each in=expr>` over a value that is not a sequence is a compile error,
     // `E-EACH-NOT-SEQUENCE` (§34)."

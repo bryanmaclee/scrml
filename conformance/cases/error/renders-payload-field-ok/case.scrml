@@ -1,6 +1,6 @@
 ${
     function retry() {
-        return 1
+        return 1;
     }
     type PaymentError:enum = {
         InvalidAmount(reason: string)

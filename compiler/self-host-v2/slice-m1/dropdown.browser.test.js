@@ -27,7 +27,7 @@ function pick(dd, option) {
 }
 
 describe("§66.19.3 — initial render", () => {
-  beforeAll(async () => { await loadProgram(cores.dropdown(), "dropdown"); });
+  beforeAll(async () => { await loadProgram(cores.dropdown(), "dropdown"); }, { timeout: 60000 }); // each loadProgram compiles via the bootstrap (~4s idle)
 
   test("instances 1 and 2 plus one per row; the conditional instance is absent", () => {
     expect(labels()).toEqual(["Country: US", "Size: M", "Tea: 1", "Milk: 1"]);
@@ -38,7 +38,7 @@ describe("§66.19.3 — initial render", () => {
 });
 
 describe("dpa-050 D1 — one click opens ONE dropdown; every instance toggles independently", () => {
-  beforeAll(async () => { await loadProgram(cores.dropdown(), "dropdown"); });
+  beforeAll(async () => { await loadProgram(cores.dropdown(), "dropdown"); }, { timeout: 60000 }); // each loadProgram compiles via the bootstrap (~4s idle)
 
   test("clicking Country opens exactly one menu, inside Country", () => {
     click(toggles()[0]);
@@ -93,7 +93,7 @@ describe("dpa-050 D1 — one click opens ONE dropdown; every instance toggles in
 
 describe("as=country — the handle reads/writes instance 1 only", () => {
   let rt;
-  beforeAll(async () => { ({ rt } = await loadProgram(cores.dropdown(), "dropdown")); });
+  beforeAll(async () => { ({ rt } = await loadProgram(cores.dropdown(), "dropdown")); }, { timeout: 60000 }); // each loadProgram compiles via the bootstrap (~4s idle)
 
   test("the handle points at the first dropdown instance, and `Shipping to` follows it", () => {
     const program = instancesOf(rt, "program")[0];
@@ -124,7 +124,7 @@ describe("as=country — the handle reads/writes instance 1 only", () => {
 
 describe("L12 (b) — an unconditional instance exists when the program is CONSTRUCTED, before any render", () => {
   let rt;
-  beforeAll(async () => { ({ rt } = await loadProgram(cores.dropdownEarlyRead(), "dropdown-early")); });
+  beforeAll(async () => { ({ rt } = await loadProgram(cores.dropdownEarlyRead(), "dropdown-early")); }, { timeout: 60000 }); // each loadProgram compiles via the bootstrap (~4s idle)
 
   const early = () => document.querySelector("p.early").textContent;
 
@@ -152,7 +152,7 @@ describe("L12 (b) — an unconditional instance exists when the program is CONST
 
 describe("the conditional Color instance mounts and disposes with showColor", () => {
   let rt;
-  beforeAll(async () => { ({ rt } = await loadProgram(cores.dropdown(), "dropdown")); });
+  beforeAll(async () => { ({ rt } = await loadProgram(cores.dropdown(), "dropdown")); }, { timeout: 60000 }); // each loadProgram compiles via the bootstrap (~4s idle)
 
   test("hidden: no instance, handle is `not`; clearColor() is a no-op", () => {
     const program = instancesOf(rt, "program")[0];

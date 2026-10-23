@@ -7,8 +7,8 @@
     </schema>
     function bulkInsert(a: string, b: string) {
         transaction {
-            ?{`INSERT INTO orders (name) VALUES (${a})`}.run()
-            ?{`INSERT INTO orders (name) VALUES (${b})`}.run()
+            ?{`INSERT INTO orders (name) VALUES (${a})`}.run();
+            ?{`INSERT INTO orders (name) VALUES (${b})`}.run();
         }
     }
     <p>x</p>

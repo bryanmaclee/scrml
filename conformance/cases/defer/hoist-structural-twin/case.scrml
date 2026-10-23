@@ -2,13 +2,13 @@ ${
     <trace> = ""
 
     function add(s: string) {
-        @trace = @trace + s + ";"
+        @trace = @trace + s + ";";
     }
 
     // No-defer twin of hoist-structural: each deferred call is written as the
     // last statement of its block instead.
     function destructObj() {
-        let a = "OUTER"
+        let a = "OUTER";
         if (true) {
             const { a } = { a: "INNER" }
             function show() {

@@ -4,17 +4,17 @@
     let <right:string=""/>
     type Denied:enum = { Bad }
     function chk(pw: string)! Denied {
-        if (pw != "hunter2") fail .Bad
+        if (pw != "hunter2") fail .Bad;
     }
     function attempt(pw: string) -> string {
         return match chk(pw) {
-            .Ok(v) :> "welcome " + v
+            .Ok(v) :> "welcome " + v,
             .Bad :> "denied"
-        }
+        };
     }
     function login() {
-        @wrong = attempt("hunter3")
-        @right = attempt("hunter2")
+        @wrong = attempt("hunter3");
+        @right = attempt("hunter2");
     }
     <main>
         <button id="go" onclick=login()>go</button>
