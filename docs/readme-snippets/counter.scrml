@@ -1,0 +1,18 @@
+// counter.scrml — README "What changed", item 1: declarations, locked by default.
+// SPEC §66.19.1. The older dialect wrote this as `<count> = 0` / `const <doubled> = …`.
+<program>
+
+let <count:int=0/>
+<step=1/>
+<doubled:int=(@count * 2)/>
+
+function bump()    { @count = @count + @step; }
+function restart() { reset(@count); }
+
+<main>
+    <p>Count ${@count} (doubled ${@doubled})</p>
+    <button onclick=bump()>+${@step}</button>
+    <button onclick=restart()>Reset</button>
+</main>
+
+</program>
