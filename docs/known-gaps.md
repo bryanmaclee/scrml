@@ -31,10 +31,31 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 4 |
-| MED | 669 | 7 |
-| LOW | 467 | 0 |
+| MED | 670 | 7 |
+| LOW | 468 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-impl1-semicolon-in-attribute-list-accepted-s469 — impl#1 silently accepts a `;` inside a markup opener's attribute list (`<match for=Phase; on=@phase>`) and compiles it exactly as if the `;` were not there — `NEW S469; LOW; open`
+
+<!-- @gap id=g-impl1-semicolon-in-attribute-list-accepted-s469 sev=LOW status=open locus=searched:compiler/src(markup opener attribute scanning)—not-traced prov=dispatch:s469-boot-semicolons(review of 151366efc, round 2) · empirical:S469-emit-diff -->
+Found by the s469-boot-semicolons `;` codemod (round 1), which inserted a `;` after an unquoted attribute value in `components/bind-prop-write-back-positions` and `components/declared-prop-not-root-attr` (`<match for=Phase; on=@phase>`). impl#1's compile of both cases was byte-identical with and without the `;` (codes and emitted html / client / server JS, content hashes normalized) — the `;` is neither an error nor part of the `for=` value, it is dropped without a word. An opener's attribute list has no statement separator (§5), so a stray `;` there is a malformed opener and should be refused. The inserts were reverted in round 2; this gap is the impl#1 half. (The bootstrap's char-level opener scanner was not probed for the same shape.)
+
+### g-bootstrap-newline-sensitive-rules-remain-s469 — after the S469 `;` enforcement the bootstrap still decides several constructs by LINE, which dpa-073 F1 (a) ("a newline ends nothing") says it must not — `NEW S469; MED; open (owed bootstrap change)`
+
+<!-- @gap id=g-bootstrap-newline-sensitive-rules-remain-s469 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(parsePostfixFrom `(` / `[` / `!{` same-line tests, isPresenceTest, isPropagate, failAhead / deferAhead / transaction, parseStmt `return`, parseArmBlock `lift`, statement `match` boundary) prov=ruling:user-voice-scrml.md S469 "⭐⭐⭐ RULED — dpa-073 F1 = (a)" · ruling:user-voice-scrml.md S469 dpa-073 F2(i)/F3(i)/F4(ii) · dispatch:s469-boot-semicolons(review of 151366efc, round 2) -->
+The s469-boot-semicolons slice made `;` and arm `,` mandatory (E-STMT-MISSING-SEMICOLON / E-MATCH-ARM-SEPARATOR) and made a line break whitespace inside an arm body, but these rules still read the line. Each fails closed except where marked:
+- `x⏎(y)` — a call `(` continues only on the same line; the next line is a new statement (with `;` enforced: E-STMT-MISSING-SEMICOLON after `x`). F4 (ii) rules this an error naming the split; today's code is the generic one.
+- `x⏎[y]` — an index `[` continues only when touching; same outcome.
+- `x⏎!{ … }` — a handler attaches only on the same line.
+- `x⏎is given` / `x⏎is not` — the presence test is read only on the same line (E-PARSE-* / E-SYNTAX-044 cascade; pinned in typer-s460.test.js).
+- `x⏎?` — propagation vs a conditional `?` is partly decided by end-of-line.
+- `return⏎expr` — refused fail closed (E-STMT-MISSING-SEMICOLON after `return`; F6 rules it returns `expr`, deferred until the newline-terminated corpus is migrated).
+- `lift⏎expr` — refused fail closed the same way (s469 r2; before r2 it was silently read as `lift expr`).
+- `fail⏎.E` — `fail` is a statement only before a same-line token, so the split form is read as the name `fail`: E-STMT-MISSING-SEMICOLON after it plus a misleading E-SCOPE-001 (`fail` is not declared) (probed S469 r2); `defer⏎…` and `transaction⏎{` likewise (route-to-PA R8 in the dpa-073 deep-dive: newline-free keyword decisions need design).
+- **Not fail-closed:** a statement `match k { … }` is block-like (no `;`), but its closing `}` is not a statement boundary, so `match k { … }⏎-1;` glues into ONE expression statement (probed S469 r2: the body is `[Eval(Binary), Return]` — the `match` became the left operand of `-`; that probe is then refused as E-BOOTSTRAP-UNSUPPORTED for the value-position match, but a shape the bootstrap can lower would compile to the wrong program).
+- `break⏎label` / `continue⏎label` — a label is read only on the same line (fails closed: E-STMT-MISSING-SEMICOLON).
+Owed: one newline-free decision per construct (F1 (a)), the F4 (ii) diagnostic for `(` / `[` / template continuations, and the R8 keyword design; then the ruled `return⏎expr` / `lift⏎expr` readings.
 
 ### g-spec-route-query-missing-key-s469 — SPEC §20.4 types every `route.query` value `string` but does not say what reading a query key that is ABSENT from the URL yields (`""`, `not`, or an error) — `NEW S469; LOW; open (SPEC editorial)`
 
