@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
 | MED | 668 | 7 |
-| LOW | 464 | 0 |
+| LOW | 465 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -215,6 +215,23 @@ Never fail-open: the runtime check is authoritative in both directions; the nati
 <!-- @gap id=g-spec-s34-rows-owed-e-tape-js-method-w-string-interp-literal-s469 sev=LOW status=open locus=compiler/SPEC.md(§34 catalog)+scripts/gen-bootstrap-severity.ts(PROVISIONAL table: W-STRING-INTERP-LITERAL → Warning) prov=spec:§66.20(E-TAPE-JS-METHOD amendment S469);dispatch:s469-boot-strings-1(bryan approved provisional codes, S469) -->
 
 Without a §34 row, `E-TAPE-JS-METHOD` resolves fail-closed to Error (correct). `W-STRING-INTERP-LITERAL` takes Warning from the generator's PROVISIONAL table; once a §34 row lands the row decides, and the generator throws if they disagree (remove the entry then). The §66.20 row's "the bootstrap's method allowlist still uses the JS names and is owed the rename" is now stale (renamed in s469-boot-strings-1), as is the README item 4 (`@audit.push` → `@audit.append`).
+
+### g-engine-in-lifted-markup-renders-garbled-text-s469 — an `<engine>` inside lifted markup (`${ for (r of @xs) { lift <span><engine for=Phase initial=.Idle>…</></span> } }`) renders the text `> < / span >` and no engine, at exit 0 with zero diagnostics — `NEW S469; MED; open`
+
+<!-- @gap id=g-engine-in-lifted-markup-renders-garbled-text-s469 sev=MED status=open locus=searched:compiler/src/ast-builder.js(parseLiftTag — the engine opener is not a lift-markup element),compiler/src/codegen/emit-lift.js—not-traced prov=empirical:S469-s469-match-if-in-row-audit(executed-under-happy-dom) -->
+
+Found by the S469 audit of `if=` on structural elements in row templates. Fails CLOSED (no arm renders, `if=` or
+not), so not a security hole — but the page shows parser debris and nothing tells the author. `<match>` in the same
+position is refused (`E-MATCH-BLOCK-IN-LIFT`); the engine owes the same refusal, or support. Sibling of
+[[g-engine-inside-each-row-renders-nothing]].
+
+### g-ifmount-chunk-ships-for-row-scoped-structural-if-s469 — a page whose only `if=` is on a row-scoped `<each>` / `<match>` ships the `ifmount` runtime chunk, which nothing calls — `NEW S469 (split from g-structural-if-inside-each-row-template-fails-open); LOW; open`
+
+<!-- @gap id=g-ifmount-chunk-ships-for-row-scoped-structural-if-s469 sev=LOW status=open locus=compiler/src/codegen/emit-client.ts(the ifmount chunk gate keys on AST ifCond presence, not on an emitted mount controller) prov=empirical:S469-s469-match-if-in-row(_scrml_mount_template present in the runtime of a row-match-if page) -->
+
+The row gate is the per-row effect (`_scrml_effect` + the dispatcher teardown / `_scrml_each_clear`), not the §17.1
+mount controller, so `_scrml_mount_template` / `_scrml_unmount_scope` are dead weight there (82,666 B runtime for a
+one-row-match page). Gate the chunk on an emitted `scrml-if-marker` instead. Size only; behaviour is correct.
 
 ### g-nested-each-if-guard-dropped-s469 — (security) the `if=` on an `<each>` nested inside another `<each>`'s row was silently dropped: `<each in=@xs as y><each in=@xs as x if=(@pw == "secret")>LOGGED IN</each></each>` rendered LOGGED IN with `@pw = "wrong"`, and so did the handled-failable guard `if=${ @pw != "" && (check(@pw) !{ _ :> false }) }` — `NEW S469; HIGH; RESOLVED S469`
 
@@ -14344,11 +14361,49 @@ contexts = `["gate"]`.
 reviewer's claim that the branch "cannot commit through the hook" — it can, which is the actual
 problem. The required-check half is mine, found verifying their correction rather than accepting it.
 
-<!-- @gap id=g-structural-if-inside-each-row-template-fails-open sev=HIGH status=open -->
-### G-STRUCTURAL-IF-INSIDE-EACH-ROW-TEMPLATE-FAILS-OPEN — a gated `<each>`/`<match>` inside an `<each>` row template silently ships the content it was told to withhold — `NEW S302; MED → HIGH (S469 review of 67bbca342: an open fail-open guard); open (the <each> half RESOLVED S469; the <match> half open)`
+<!-- @gap id=g-structural-if-inside-each-row-template-fails-open sev=HIGH status=resolved locus=compiler/src/codegen/emit-each.ts(match-block branch of renderTemplateChildToJs — the per-row dispatch never read ifCond)+compiler/src/codegen/emit-variant-guard.ts(itemScopedTeardown)+compiler/src/codegen/emit-match.ts(collectMatchBlocks — an <empty>-body match was given the module-scope dispatcher) prov=empirical:S469-security-failable-pack-n20(22-FAIL-on-main-7ede5c5c1,22-PASS-after);dispatch:s469-match-if-in-row -->
+### G-STRUCTURAL-IF-INSIDE-EACH-ROW-TEMPLATE-FAILS-OPEN — a gated `<each>`/`<match>` inside an `<each>` row template silently ships the content it was told to withhold — `NEW S302; MED → HIGH (S469 review of 67bbca342: an open fail-open guard); RESOLVED S469 (the <each> half by #1491, the <match> half by s469-match-if-in-row)`
+
+✅ **S469 — the `<match>` half is RESOLVED** (branch `s469-match-if-in-row`). Cause, confirmed: the per-row match
+dispatch (emit-each.ts `match-block` branch → the item-scoped dispatcher) never read the match-block's `ifCond`; the
+top-level `<match if=>` is gated by the §17.1 mount controller (`<template>` + marker), which a row-built mount has no
+static HTML for. Fix: the per-row dispatch effect IS the gate. The condition is lowered by the one row-scoped if=
+lowering the nested-each gate uses (`lowerRowScopedEachIfGate` → `lowerMountToggleCondition`), in the row's scope
+(`@.` / a row alias name the item; an outer row's alias is re-resolved live by key); true dispatches, false calls a
+per-mount `…_teardown(_mount)` the dispatcher now emits for a match with `if=` (emit-variant-guard
+`itemScopedTeardown`: dispose the arm's wiring, remove its nodes, forget the mount's last value / row scope, so
+re-entry re-renders the CURRENT variant). The effect is a render-gate effect (R7-1). An unlowerable `if=` is refused
+(E-CG-003) and gates false. Also fixed on the way: a `<match>` in an `<each>`'s `<empty>` body was given the
+module-scope dispatcher while emit-each called the item-scoped form (`dispatch(_mount, _v)` read as `dispatch(_v)`),
+so it rendered nothing at boot and, after a scrutinee change, rendered UNGATED through the module-scope subscribe —
+now item-scoped, in its own effect. Measured through the security-failable-pack harness (n20, 22 shapes: plain /
+call-ref guard × 1 / 2 / 3 deep, under a row element, component, engine arm, `<empty>`; a guard reading the row / an
+outer row × id / index keys): **22 FAIL on main `7ede5c5c1`, 22 PASS after.** Browser:
+`compiler/tests/browser/match-if-in-each-row-s469.browser.test.js` (both directions, more than once, keyed and index
+reorders; 9 of 10 fail on main, the 10th is the no-`if=` control).
+
+**Audit of the other structural / `if=`-carrying elements in a row template (S469, executed, not read):**
+
+| element in the row | behaviour after this fix | ledger |
+|---|---|---|
+| `<each if=>` (row, lifted markup) | gated, reactive both ways | resolved by #1491 ([[g-nested-each-if-guard-dropped-s469]]) |
+| `<match if=>` (row 1–3 deep, component, engine arm, `<empty>`) | gated, reactive both ways | this entry |
+| `<match if=>` in lifted markup | refused `E-MATCH-BLOCK-IN-LIFT` (fails closed) | — |
+| `<engine if=>` in a row | the engine renders NOTHING, `if=` or not (fails closed) | [[g-engine-inside-each-row-renders-nothing]] |
+| `<engine if=>` in lifted markup | garbled text, no engine, no diagnostic (fails closed) | [[g-engine-in-lifted-markup-renders-garbled-text-s469]] |
+| markup `if=` on the row ROOT (`<errorBoundary>` included) | gated, reactive (`_scrml_ifrow_apply`) | — |
+| markup `if=` on a NON-root element (`<errorBoundary>` included) | create-time gate: closed on grant, **OPEN on revoke** | [[g-each-nested-peritem-if-not-reactive]] (raised HIGH S469) |
+| markup `if=` in lifted markup | `display:none` toggle — content stays in the DOM | [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]] |
+
+⚑ **SPEC §17.1.2.3 is now stale in the safe direction.** It says structural `if=` inside a row template "is NOT
+honored"; `<each>` and `<match>` there are now honoured. The carve-out text (and its measured table) owes an update;
+not edited here (SPEC wording is the PA's).
+
+The LOW consequence below (the `ifmount` chunk ships keyed on `ifCond` presence) still holds — the row gate does not
+use the mount controller — and is now its own entry, [[g-ifmount-chunk-ships-for-row-scoped-structural-if-s469]].
 
 ⛑ **S469 — the `<each>` half is RESOLVED** by [[g-nested-each-if-guard-dropped-s469]]: `<each … if=…>` inside a row is
-now gated, reactively, both ways. **The `<match … if=…>` half is still OPEN and still fails open** — re-measured on the
+now gated, reactively, both ways. **(Superseded — see the ✅ above.) The `<match … if=…>` half was still OPEN and still failed open** — re-measured on the
 fix branch through the security-failable-pack harness: `<each in=@xs as y><match for=Phase on=@ph if=(@pw == "secret")>…`
 renders its arm with `@pw = "wrong"` (FAIL), while the same `<match if=>` at top level is gated (PASS). The per-row
 match dispatch (emit-each.ts `match-block` branch → emit-variant-guard `itemScopedDispatch`) never reads `ifCond`;
@@ -21693,7 +21748,21 @@ it widens: under the S432 hold branch A, head-shaped PROSE after markup (`when @
 path instead of rendering as text — 0 corpus files. found by: S432 bare-when gift-wrap agent measuring review finding F3.
 
 ### g-each-nested-peritem-if-not-reactive — an `if=` on a NON-root element of an `<each>` row is evaluated once at row creation and never follows the row's data — `NEW S432-peter; MED; open`
-<!-- @gap id=g-each-nested-peritem-if-not-reactive sev=MED status=open locus=compiler/src/codegen/emit-each.ts(renderTemplateChildToJs, the nested per-row if= create-time append gate) prov=empirical:S432-PA-review-of-hold/s432-q5(ifrow.mjs)-reproduced-by-dev-on-764365cc -->
+<!-- @gap id=g-each-nested-peritem-if-not-reactive sev=HIGH status=open locus=compiler/src/codegen/emit-each.ts(renderTemplateChildToJs, the nested per-row if= create-time append gate) prov=empirical:S432-PA-review-of-hold/s432-q5(ifrow.mjs)-reproduced-by-dev-on-764365cc;empirical:S469-s469-match-if-in-row-audit(revoke-direction-probe) -->
+
+⛑ **S469 — RAISED MED → HIGH: in the REVOKE direction this is a fail-open guard, and for an outer-state condition
+it is SILENT.** Measured on `s469-match-if-in-row` through the security-failable-pack harness (page starts granted,
+`#wrong` revokes): `<each in=@xs as y><span><b if=(@pw == "secret")>LOGGED IN</b></span></each>` still shows
+LOGGED IN after `@pw = "wrong"` — and `W-IF-IN-EACH` does NOT fire, because it is scoped to item-referencing
+conditions on the stated premise that "an outer-state-only `if=` re-evaluates through the each render fn's
+collection effect". **That premise is false:** the collection effect does not re-run on `@pw`, and a re-run would
+reuse the keyed row anyway. The SPEC §34 `W-IF-IN-EACH` row repeats the false premise. Same for `if=r.ok` (warned)
+and for `<errorBoundary if=>` on a non-root element (same markup path). Fix direction (the §34 row calls it a
+deliberately-deferred extension, routed): a NON-root element is not reconcile-tracked, so the element⇄comment swap
+(`_scrml_ifrow_apply`) in a per-row render-gate effect needs no reconcile-core change — the "per-child anchor +
+reconcile-core interaction" cost applies to multi-root ITEM roots ([[g-each-peritem-if-multiroot-deferred]], which
+has the same revoke-direction fail-open), not to nested elements. Not fixed in `s469-match-if-in-row`: it changes
+the normative §34 / §17.1 text and every nested row `if=` in the corpus, so it is surfaced for a ruling.
 
 `<each in=@groups key=@.id as g><li><em if=g.hot>HOT</em><s>${g.hot}</s></li></each>` — a field write (`@groups[0].hot = true`, or `g.hot = true` through a loop alias) updates the `<s>` text to `true` but the `<em>HOT</em>` never appears. Same on a literal-initialised and a computed cell, and on main. **LOUD, not silent:** `W-IF-IN-EACH` fires at compile (§34 row names it a "deliberately-deferred §17.1 reactive-surface extension"), and only the sole-item-root `if=` is reactive. Filed so the deferral has a ledger entry the §6.5.6 item 3 carve-out can cite (it lists `<each>` per-item bindings as fine-grained). Closing it = the §17.1 per-row structural swap for nested elements (per-child anchor + reconcile interaction). Workaround in the warning text: a `show=` / `class` toggle, which IS reactive.
 
