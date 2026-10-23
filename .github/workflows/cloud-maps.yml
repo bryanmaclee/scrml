@@ -14,7 +14,7 @@
 #   A PAT-opened PR DOES fire gate. Needs a fine-grained PAT (Contents R/W + Pull-requests R/W on this repo)
 #   as the `MAPS_PAT` secret. Until it exists a run reds at checkout — HARMLESS (this workflow is off the
 #   required-checks list, it cannot block a merge). NB fine-grained PATs expire (≤1yr) → renew MAPS_PAT
-#   before expiry or the bot goes dark.
+#   before expiry or the bot goes dark. S469: facts-regen.yml uses the same secret, same reason.
 #
 # TWO STAGES: (1) deterministic `bun scripts/state.ts --write` (@generated rollup; zero AI cost) then
 #   (2) the `project-mapper` agent (committed at .claude/agents/, force-added since .claude/ is gitignored)
