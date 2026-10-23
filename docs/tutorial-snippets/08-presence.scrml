@@ -2,18 +2,16 @@
 
 <program>
 
-  type User:struct = { name: string }
+  let <user:string | not=not/>            // optional — starts absent
+  let <loggedIn:bool=false/>
 
-  <user>: User? = not              // optional — starts absent
-  <loggedIn> = false
-
-  const <message> = @user is given ? "Hello, " + @user.name : "Sign in to continue"
+  <message:string=(@user is given ? "Hello, " + @user : "Sign in to continue")/>
 
   <div>
     <p>${@message}</p>
 
-    <button if=(!@loggedIn) onclick={ @user = { name: "Ada" }; @loggedIn = true }>Sign in</button>
-    <button else onclick={ @user = not; @loggedIn = false }>Sign out</button>
+    <button if=(!@loggedIn) onclick={ @user = "Ada"; @loggedIn = true; }>Sign in</button>
+    <button else onclick={ @user = not; @loggedIn = false; }>Sign out</button>
   </div>
 
 </program>

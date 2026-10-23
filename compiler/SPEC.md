@@ -38468,7 +38468,7 @@ transitions are declared via the `internal:` attribute prefix on `rule=`.
 > as naming sugar over the §51.4 multi-engine pattern) was struck following the
 > [parallel-attribute-disposition deep-dive (2026-05-08)](../docs/deep-dives/parallel-attribute-disposition-2026-05-08.md):
 > the attribute conceded synonym status by its own spec text, failed the synonym-detection
-> test from the [zod-amend methodology](../docs/articles/scrml-debate-amends-zod-claim-devto-2026-05-06.md),
+> test from the [zod-amend methodology](../docs/articles/archive/scrml-debate-amends-zod-claim-devto-2026-05-06.md),
 > and a subsequent SCXML semantic audit confirmed nothing not already expressible via
 > §51.4 + §51.0.J + §51.0.Q. Two top-level `<engine>` declarations ARE the parallel
 > pattern; document orthogonality with a comment if needed. Section number §51.0.P is

@@ -7,6 +7,8 @@ cover_image:
 canonical_url:
 ---
 
+> **SUPERSEDED. DO NOT PASTE.** This is an archived April–May 2026 draft, moved to `docs/articles/archive/` in S469. Its scrml is an older dialect that the language has since replaced, and its code is not compile-gated, so code copied from here will not compile as today's scrml. For current scrml, start from the [tutorial](../../tutorial.md); [`docs/DIALECT.md`](../../DIALECT.md) explains which docs teach the ruled dialect.
+
 *by Bryan MacLee*
 
 **TL;DR: The goal is a shipped app that is essentially bullet-proof — every reachable state has UI, every transition is intentional, every effect runs at the right moment. Getting there should not require rewriting the prototype. scrml has a three-tier ladder — `if=` → `<match>` → `<engine>` — where the state-children migrate verbatim. The compiler tells you when to promote. The wrapper swap is the commitment moment.**
