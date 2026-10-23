@@ -11,8 +11,8 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 155 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
-// generator's PROVISIONAL table: none); 69 without one (FAIL-CLOSED Error):
+// 187 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// generator's PROVISIONAL table: none); 37 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-POSITION — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -41,38 +41,6 @@
 //   E-INTERNAL-RECOVERED-UNREPORTED — no §34 row
 //   E-OPERAND-NOT-NARROWED — no §34 row
 //   E-OPERATOR-OPERAND-TYPE — no §34 row
-//   E-PARSE-ARM — no §34 row
-//   E-PARSE-AT — no §34 row
-//   E-PARSE-ATTR — no §34 row
-//   E-PARSE-CLOSER — no §34 row
-//   E-PARSE-COMMENT — no §34 row
-//   E-PARSE-DECL-BODY — no §34 row
-//   E-PARSE-EFFECT — no §34 row
-//   E-PARSE-EXPECTED — no §34 row
-//   E-PARSE-EXPORT — no §34 row
-//   E-PARSE-EXPR — no §34 row
-//   E-PARSE-FN — no §34 row
-//   E-PARSE-FOR-HEAD — no §34 row
-//   E-PARSE-GIVEN — no §34 row
-//   E-PARSE-IMPORT — no §34 row
-//   E-PARSE-ITEM — no §34 row
-//   E-PARSE-LET — no §34 row
-//   E-PARSE-LOCAL — no §34 row
-//   E-PARSE-NO-NULL — no §34 row
-//   E-PARSE-OBJECT — no §34 row
-//   E-PARSE-OPENER-EQ-SPACED — no §34 row
-//   E-PARSE-PROGRAM — no §34 row
-//   E-PARSE-RENDERS — no §34 row
-//   E-PARSE-SHORTHAND — no §34 row
-//   E-PARSE-SHORTHAND-GT — no §34 row
-//   E-PARSE-SQL-CHAIN — no §34 row
-//   E-PARSE-STRICT-EQ — no §34 row
-//   E-PARSE-TAG — no §34 row
-//   E-PARSE-TEMPLATE — no §34 row
-//   E-PARSE-TRAILING — no §34 row
-//   E-PARSE-TYPE — no §34 row
-//   E-PARSE-UNCLOSED — no §34 row
-//   E-PARSE-WHEN — no §34 row
 //   E-PROGRAM-MISSING — no §34 row
 //   E-RESET-ARG — no §34 row
 //   E-RESET-POSITION — no §34 row
@@ -187,6 +155,38 @@ ${
             "E-MW-002" :> Severity.Error
             "E-OUTLET-OUTSIDE-SHELL" :> Severity.Error
             "E-PARSE-001" :> Severity.Error
+            "E-PARSE-ARM" :> Severity.Error
+            "E-PARSE-AT" :> Severity.Error
+            "E-PARSE-ATTR" :> Severity.Error
+            "E-PARSE-CLOSER" :> Severity.Error
+            "E-PARSE-COMMENT" :> Severity.Error
+            "E-PARSE-DECL-BODY" :> Severity.Error
+            "E-PARSE-EFFECT" :> Severity.Error
+            "E-PARSE-EXPECTED" :> Severity.Error
+            "E-PARSE-EXPORT" :> Severity.Error
+            "E-PARSE-EXPR" :> Severity.Error
+            "E-PARSE-FN" :> Severity.Error
+            "E-PARSE-FOR-HEAD" :> Severity.Error
+            "E-PARSE-GIVEN" :> Severity.Error
+            "E-PARSE-IMPORT" :> Severity.Error
+            "E-PARSE-ITEM" :> Severity.Error
+            "E-PARSE-LET" :> Severity.Error
+            "E-PARSE-LOCAL" :> Severity.Error
+            "E-PARSE-NO-NULL" :> Severity.Error
+            "E-PARSE-OBJECT" :> Severity.Error
+            "E-PARSE-OPENER-EQ-SPACED" :> Severity.Error
+            "E-PARSE-PROGRAM" :> Severity.Error
+            "E-PARSE-RENDERS" :> Severity.Error
+            "E-PARSE-SHORTHAND" :> Severity.Error
+            "E-PARSE-SHORTHAND-GT" :> Severity.Error
+            "E-PARSE-SQL-CHAIN" :> Severity.Error
+            "E-PARSE-STRICT-EQ" :> Severity.Error
+            "E-PARSE-TAG" :> Severity.Error
+            "E-PARSE-TEMPLATE" :> Severity.Error
+            "E-PARSE-TRAILING" :> Severity.Error
+            "E-PARSE-TYPE" :> Severity.Error
+            "E-PARSE-UNCLOSED" :> Severity.Error
+            "E-PARSE-WHEN" :> Severity.Error
             "E-PERSIST-KEY-REQUIRED" :> Severity.Error
             "E-PERSIST-STORAGE-UNKNOWN" :> Severity.Error
             "E-PERSIST-WITH-SERVER" :> Severity.Error
