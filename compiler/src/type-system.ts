@@ -79,7 +79,7 @@ import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 import { ScrmlParser } from "./scrml-acorn.ts";
 import { soleLogicBlockPayload } from "./interpolation-extent.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
-import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw, templateTextInterpolationNodes } from "./expression-parser.ts";
+import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw, templateTextInterpolationNodes, templateInterpolationNodesAll } from "./expression-parser.ts";
 import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS, STATEMENT_CHILD_KEYS, provableSubjectCallees, failableBindingFacts, failableFnValueOf } from "./failable-value-calls.ts";
 import type { FailableEnv, FailableCallCandidate, RootHandling } from "./failable-value-calls.ts";
 import { PH_EB_CHECK, isCompilerPlaceholderName } from "./placeholder-nonce.ts";
@@ -132,6 +132,7 @@ import { checkValueFunctionStored, setValueFnModuleIndex } from "./value-functio
 import { judgeTypeOf, unjudgeableIn, wrapRefine, wrapRefineUpdate, wrapRefineMerge, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
 import * as acorn from "acorn";
 import { refusedElementMessage } from "./element-refusal.ts";
+import { RULED_FORM_CODE, ruledFormMessage, forEachRuledCallForm, collectRuledStatementForms, collectLiteralTapeNames } from "./impl1-ruled-form-refusal.ts";
 import { analyzedParamDefault, paramDefaultSpan } from "./at-refs.ts";
 import { identityReadInDefault } from "./free-name.ts";
 
@@ -9098,6 +9099,49 @@ const RESERVED_AMBIENT_PROJECTION_NAMES: ReadonlySet<string> = new Set([
  *   - name collision with declared struct/enum types: already covered by the
  *     type registry check.
  */
+/**
+ * S469 — E-IMPL1-RULED-FORM-UNSUPPORTED for the call forms (see impl1-ruled-form-refusal.ts). One
+ * report per call node: an expression can reach checkLogicExprIdents from more than one site.
+ */
+const _ruledCallReported = new WeakSet<object>();
+/** Per-file literal-tape names (collectLiteralTapeNames), set at the top of runTS. */
+let _ruledLiteralTapeNames: ReadonlySet<string> = new Set();
+function checkRuledCallForms(
+  exprNode: unknown,
+  span: Span,
+  scopeChain: ScopeChain,
+  typeRegistry: Map<string, ResolvedType>,
+  errors: TSError[],
+): void {
+  forEachRuledCallForm(
+    exprNode,
+    {
+      lookupKind: (name) => (scopeChain.lookup(name)?.kind as string | undefined) ?? null,
+      typeKind: (name) => (typeRegistry.get(name)?.kind as string | undefined) ?? null,
+      receiverKind: (node) => {
+        const k = (resolveReceiverExprType(node, scopeChain)?.kind as string | undefined) ?? null;
+        if (k !== null && k !== "asIs" && k !== "unknown") return k;
+        // An array-literal binding is an inference gap in impl#1; the literal-tape pass proves it.
+        const id = node as { kind?: string; name?: string };
+        if (id && id.kind === "ident" && typeof id.name === "string" && _ruledLiteralTapeNames.has(id.name)) {
+          const entry = scopeChain.lookup(id.name.replace(/^@/, ""));
+          if (entry && (entry.kind === "variable" || entry.kind === "reactive")) return "array";
+        }
+        return k;
+      },
+    },
+    (lit) => templateInterpolationNodesAll(lit as Parameters<typeof templateInterpolationNodesAll>[0]),
+    (f) => {
+      const key = f.node as object | undefined;
+      if (key) {
+        if (_ruledCallReported.has(key)) return;
+        _ruledCallReported.add(key);
+      }
+      errors.push(new TSError(RULED_FORM_CODE, ruledFormMessage(f.form, f.section, f.detail), span, "error"));
+    },
+  );
+}
+
 function checkLogicExprIdents(
   exprNode: unknown,
   span: Span,
@@ -9124,6 +9168,10 @@ function checkLogicExprIdents(
   // conditions, return, props, attr-value interpolations, …). Gated on a
   // genuine struct-typed binding — no-op for the `asIs` default.
   checkRowFieldAccessInExpr(exprNode, span, scopeChain, errors);
+  // S469 (E-IMPL1-RULED-FORM-UNSUPPORTED) — a ruled call form impl#1 does not implement
+  // (`int.parse(s)`, `E.parse(s)`, a tape's `append` / `prepend` / `insert` / `remove`) fails closed
+  // here, at every expression site this walker covers. impl1-ruled-form-refusal.ts owns the list.
+  checkRuledCallForms(exprNode, span, scopeChain, typeRegistry, errors);
   forEachIdentInExprNode(exprNode as any, (ident) => {
     if (typeof ident.name !== "string") return;
     const raw = ident.name;
@@ -29542,12 +29590,20 @@ function processFile(
       ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
       ?? [];
     checkFunctionTypedStructFields(typeDecls, fnFieldTopNodes, errors, fileSpan);
+    _ruledLiteralTapeNames = collectLiteralTapeNames(fnFieldTopNodes);
     // §20.6.7 / W-LOG-SHADOWED — a user-declared `function log` / `fn log`
     // shadows the location-transparent log() builtin; info-level nudge.
     checkLogShadowing(fnFieldTopNodes, errors, fileSpan);
     // §20.1 / E-NAV-NO-PATH — navigate() called with no path (a bare `.Soft` /
     // `.Hard` modifier is not a destination). navigate-wave1b finding #5.
     checkNavigateCall(fnFieldTopNodes, errors, fileSpan);
+    // S469 / E-IMPL1-RULED-FORM-UNSUPPORTED — ruled statement forms impl#1 does not implement
+    // (`for { … }`, `for (cond)`, a range head, a value-form block whose `lift` follows an
+    // expression statement) fail closed. impl1-ruled-form-refusal.ts owns the list.
+    for (const f of collectRuledStatementForms(fnFieldTopNodes)) {
+      const fSpan = ((f.node as { span?: Span } | null | undefined)?.span) ?? fileSpan;
+      errors.push(new TSError(RULED_FORM_CODE, ruledFormMessage(f.form, f.section, f.detail), fSpan, "error"));
+    }
     // ss16 C3 / W-RENDER-SHADOWED — a user-declared `function render` / `fn
     // render` shadows the render() client component-render builtin; info-level
     // nudge (mirrors W-LOG-SHADOWED).
