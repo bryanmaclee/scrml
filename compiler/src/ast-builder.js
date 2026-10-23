@@ -9741,6 +9741,53 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   let _multiScrutineeArity = 0;
   // The `_nestedBlockDepth` of the innermost `match { … }` body being parsed (0 = none) — its ARM level.
   let _matchArmBodyDepth = 0;
+  // S469 r6 — the innermost `match` body being parsed is a VALUE match (`const v = match …`), not a
+  // statement match. Saved/restored with `_matchArmBodyDepth`.
+  let _matchArmValueCtx = false;
+
+  /**
+   * S469 r6 (g-impl1-stmt-match-arm-bare-handled-call-dropped-s469) — at a match's arm level, does
+   * the arm starting at `tokens[i]` have a BARE handled-call body, `<head> :> call(…) !{ … }` with
+   * no braces? Returns `{ bodyAt, handlerAt }` (peek offsets of the body's first token and of the
+   * `!{}` BLOCK_REF that ends it), or null. The body ends at the handler: the next token is the
+   * list's `}`, a `,` separator, or on a later line.
+   */
+  function bareHandledArmBody() {
+    const t0 = peek();
+    if (!t0 || !t0.span) return null;
+    let k = 0;
+    let arrow = null;
+    for (; k < 80; k++) {
+      const t = peek(k);
+      if (!t || t.kind === "EOF" || !t.span || t.span.line !== t0.span.line) return null;
+      arrow = matchArrowGlyphAt(peek, k);
+      if (arrow) break;
+      if (t.kind === "BLOCK_REF" || (t.kind === "PUNCT" && (t.text === "{" || t.text === "}" || t.text === ";"))) return null;
+    }
+    if (!arrow) return null;
+    const bodyAt = k + arrow.len;
+    const first = peek(bodyAt);
+    if (!first || first.kind === "EOF" || (first.kind === "PUNCT" && first.text === "{")) return null;
+    let depth = 0;
+    let prev = null;
+    for (let j = bodyAt; j < bodyAt + 400; j++) {
+      const t = peek(j);
+      if (!t || t.kind === "EOF") return null;
+      if (depth === 0 && prev && prev.span && t.span && t.span.line > prev.span.line) return null;
+      if (depth === 0 && t.kind === "PUNCT" && (t.text === "," || t.text === "}" || t.text === ";")) return null;
+      if (depth === 0 && t.kind === "BLOCK_REF" && t.block && t.block.type === "error-effect") {
+        if (j === bodyAt) return null;
+        const n = peek(j + 1);
+        const ends = !n || n.kind === "EOF" || (n.kind === "PUNCT" && (n.text === "}" || n.text === ",")) ||
+          (n.span && t.span && n.span.line > t.span.line);
+        return ends ? { bodyAt, handlerAt: j } : null;
+      }
+      if (t.kind === "PUNCT" && (t.text === "(" || t.text === "[" || t.text === "{")) depth++;
+      else if (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) { if (depth === 0) return null; depth--; }
+      prev = t;
+    }
+    return null;
+  }
 
   /**
    * S469 r2 (#1450) — is the match-arm brace body that starts at `tokens[i]` (the `{`
@@ -10025,6 +10072,35 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
 
       if (rejectDanglingElse(stmts[stmts.length - 1])) { _armSepOpen = false; continue; }
+
+      // S469 r6 (g-impl1-stmt-match-arm-bare-handled-call-dropped-s469) — an arm whose body is a
+      // BARE handled call, `1 :> risky(2) !{ … }`. The statement loop below wrapped the whole ARM in
+      // a guarded-expr (the `!{}` read as the handler of the arm), which no match lowering reads: the
+      // arm was silently DROPPED. In a statement match the arm is the braced form exactly — braces are
+      // inserted around the body (zero-width tokens), so it parses, checks and lowers as
+      // `1 :> { risky(2) !{ … } }`. A value match has no braced equivalent (a block arm yields with
+      // `lift`): refused, E-PARSE-001.
+      if (_atArmLevel) {
+        const bh = bareHandledArmBody();
+        if (bh && !_matchArmValueCtx) {
+          const at = tokens[i + bh.bodyAt];
+          const hEnd = tokens[i + bh.handlerAt];
+          const zw = (ref, text, atEnd) => {
+            const off = atEnd ? (ref.span.end ?? ref.span.start) : ref.span.start;
+            return { kind: "PUNCT", text, span: { ...ref.span, start: off, end: off } };
+          };
+          tokens.splice(i + bh.handlerAt + 1, 0, zw(hEnd, "}", true));
+          tokens.splice(i + bh.bodyAt, 0, zw(at, "{", false));
+        } else if (bh) {
+          errors.push(new TABError(
+            "E-PARSE-001",
+            "E-PARSE-001: this value `match` arm's body is a handled call (`f() !{ … }`) written without braces, " +
+            "which impl#1 cannot read as the arm's value. Bind the handled call first " +
+            "(`const r = f() !{ … }`) and use `r` (§18.5, §19.4.3).",
+            tokenSpan(tok, filePath),
+          ));
+        }
+      }
 
       const node = parseOneStatement();
       _armSepOpen = false;
@@ -15593,11 +15669,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   // scrutinee count for the duration (so a single-position `( pat )` arm is
   // recognized as a wrong-arity product arm → E-MATCH-SCRUTINEE-ARITY). Assumes
   // the next token is the body `{`. Restores the prior arity (nested matches).
-  function parseMatchBodyWithArity(headerText, isMatch = true) {
+  function parseMatchBodyWithArity(headerText, isMatch = true, valueCtx = false) {
     if (peek().text !== "{") return [];
     consume(); // consume `{`
     const saved = _multiScrutineeArity;
     const savedArmDepth = _matchArmBodyDepth;
+    const savedValueCtx = _matchArmValueCtx;
+    _matchArmValueCtx = !!valueCtx;
     const mh = detectMultiScrutineeHead(headerText);
     _multiScrutineeArity = mh ? mh.length : 0;
     // The arm level of THIS match body: parseRecursiveBody increments
@@ -15606,7 +15684,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     _matchArmBodyDepth = isMatch ? _nestedBlockDepth + 1 : 0;
     let body;
     try { body = parseRecursiveBody(); }
-    finally { _multiScrutineeArity = saved; _matchArmBodyDepth = savedArmDepth; }
+    finally { _multiScrutineeArity = saved; _matchArmBodyDepth = savedArmDepth; _matchArmValueCtx = savedValueCtx; }
     if (isMatch) {
       reportOrphanArmLines(body);
       markPropagateArms(body);
@@ -15697,7 +15775,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     if (isPartial) consume(); // consume 'partial'
     const startTok = consume(); // consume 'match'
     const { expr: header } = collectExpr("{");
-    const body = parseMatchBodyWithArity(header);
+    const body = parseMatchBodyWithArity(header, true, true);
     // errarm-refail (§19.5.2 / §19.3): recognize a bare re-`fail` VALUE-arm
     // (`::X(reason) :> fail AErr::Wrapped(reason)`). The inline-arm `result` is
     // captured as a string where `fail` is a leading ident, so it emitted
