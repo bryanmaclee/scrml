@@ -8431,8 +8431,10 @@ rest parameter is annotated like any other (`...xs: int[]`).
 - **A function-valued parameter** is annotated with a function signature type. Until function types are built
   (dpa-074 R1 deferred; R3′ after RP1), the spelling is the §15.11.4 signature type, `f: (x: int) => int`
   *(PA derivation — the one function-signature type the SPEC has; it moves with the function-types slice)*.
-- A host-supplied value of no scrml type (a middleware `request`, a host event) is annotated `asIs` (§14.1.1)
-  where no scrml type names it.
+- A host-supplied value of no scrml type ~~(a middleware `request`, a host event)~~ — a handle returned by a `.js`
+  import or a `_{ }` block, e.g. `function redraw(chart: asIs)` for a third-party chart object — is annotated
+  `asIs` (§14.1.1) where no scrml type names it. *(S469 r2: middleware `request` is not one — §40.3.2 types it
+  `request: Request`; an event is typed by its handler position, the lambda ruling above.)*
 
 > **Amendment (S469) — function parameters must be annotated.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — function parameters must be annotated" — *"Require types (Recommended)"* (*"`function f(x: int)` is required; an unannotated parameter is an error. Lambda parameters in tape methods (`xs.map(x => …)`) stay inferred from the tape. The SPEC currently tolerates unannotated parameters, so SPEC text is owed."*)
 > **supersedes:** §7.5's ~~"Type annotations SHALL be optional on all variable declarations and function
