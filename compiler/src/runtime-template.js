@@ -1567,13 +1567,9 @@ function _scrml_lift(factoryOrElement) {
 // closure at call-time (after module init, so no TDZ issue).
 let _scrml_lift_target = null;
 
-// S469 — an if-lift arm render as an owner scope (§6.7.2 tree). Called by the
-// emitted _scrml_lift_if_group / _scrml_lift_arm_run helper: when the 'owner' chunk ships
-// (a list renders somewhere in the file), each arm render is an "as" scope, so the rows of
-// a list it renders — then or later — are its children and die with the render (their
-// effects never run again; what they registered, a value-bucket release, runs). Without the
-// chunk there are no row scopes to own: the calls are no-ops. The owner helpers are named
-// only here, so a file without lists does not ship the owner chunk for its arms.
+// S469 — an if-lift arm render is an owner scope (§6.7.2) when the 'owner' chunk ships, so
+// the rows of a list it renders die with the render; without the chunk these are no-ops
+// (named only here, so a list-free file does not ship the owner chunk for its arms).
 function _scrml_lift_arm_scope_open(host) {
   if (typeof _scrml_scope_recs === "undefined") return null;
   const sid = _scrml_scope_open("as", _scrml_mount_owner(host));
@@ -1587,6 +1583,35 @@ function _scrml_lift_arm_scope_close(host, sid) {
   if (sid === null) return;
   if (host._scrml_arm_sid === sid) host._scrml_arm_sid = undefined;
   _scrml_owner_destroy(sid);
+}
+
+/**
+ * §17.1 if= render gate (<each> rows and lifted markup): put \`el\` (on) or the placeholder
+ * comment \`ph\` (off) where \`cur\` is, returning the node now in the DOM. A list row's
+ * tracking (\`_scrml_key\`, group membership, owner scope) moves with it, so reorder /
+ * delete act on the live node. A no-op while \`cur\` already matches (the first run inside
+ * a row factory, before the key is assigned). In the 'lift' chunk (S469 round 4), so a
+ * list-free page does not ship the reconciler for it.
+ */
+function _scrml_ifrow_apply(cur, el, ph, on) {
+  const want = on ? el : ph;
+  if (cur === want) return cur;
+  want._scrml_key = cur._scrml_key;
+  if (cur._scrml_group_member) want._scrml_group_member = true;
+  // S469 — the row's owner scope rides on the group head: move it with the head.
+  if (cur._scrml_row_scope !== undefined) { want._scrml_row_scope = cur._scrml_row_scope; cur._scrml_row_scope = undefined; }
+  // S469 — a root of a MULTI-root item: replace the node in its group's array (and,
+  // for the head, move the array itself), so a later reorder / delete / replace of
+  // the group acts on the node that is actually in the DOM.
+  const grp = cur._scrml_group_of;
+  if (grp) {
+    const i = grp.indexOf(cur);
+    if (i >= 0) grp[i] = want;
+    want._scrml_group_of = grp;
+    if (cur._scrml_group) { want._scrml_group = cur._scrml_group; cur._scrml_group = undefined; }
+  }
+  if (cur.parentNode) cur.parentNode.replaceChild(want, cur);
+  return want;
 }
 
 // ---------------------------------------------------------------------------
@@ -2856,42 +2881,6 @@ function _scrml_resolve_item(container, key) {
   return _scrml_deep_reactive(_v);
 }
 
-/**
- * Tier-1 <each> per-row \`if=\` STRUCTURAL reactivity (SPEC §17.1). For an
- * if-gated per-item ROOT, the reconcile-tracked node is ALWAYS present: EITHER
- * the real element (cond true) OR a placeholder COMMENT node (cond false). This
- * swaps one for the other IN PLACE, transplanting \`_scrml_key\` (and, for a
- * multi-root group member, \`_scrml_group_member\`) so the reconciler keeps
- * discovering the tracked node by reading \`_scrml_key\` off the live DOM —
- * keying / ordering / reorder / delete keep working with no reconcile-core
- * change. Called from a per-item effect (\`maybeWrapEachPerItemEffect\`), so it
- * re-fires on the item-field change AND every reconcile pass.
- *
- * NO-OP when \`cur\` already equals the wanted node — this is the FIRST-RUN
- * guard: the effect runs once synchronously inside createFn BEFORE the
- * reconciler has set \`_scrml_key\`, and there \`cur\` already matches the initial
- * condition, so we must not transplant a not-yet-assigned key.
- */
-function _scrml_ifrow_apply(cur, el, ph, on) {
-  const want = on ? el : ph;
-  if (cur === want) return cur;
-  want._scrml_key = cur._scrml_key;
-  if (cur._scrml_group_member) want._scrml_group_member = true;
-  // S469 — the row's owner scope rides on the group head: move it with the head.
-  if (cur._scrml_row_scope !== undefined) { want._scrml_row_scope = cur._scrml_row_scope; cur._scrml_row_scope = undefined; }
-  // S469 — a root of a MULTI-root item: replace the node in its group's array (and,
-  // for the head, move the array itself), so a later reorder / delete / replace of
-  // the group acts on the node that is actually in the DOM.
-  const grp = cur._scrml_group_of;
-  if (grp) {
-    const i = grp.indexOf(cur);
-    if (i >= 0) grp[i] = want;
-    want._scrml_group_of = grp;
-    if (cur._scrml_group) { want._scrml_group = cur._scrml_group; cur._scrml_group = undefined; }
-  }
-  if (cur.parentNode) cur.parentNode.replaceChild(want, cur);
-  return want;
-}
 
 /**
  * Compute the indices of the Longest Increasing Subsequence.

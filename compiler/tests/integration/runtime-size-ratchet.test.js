@@ -346,3 +346,46 @@ describe("§3 the 16 KB aspiration, measured on both shapes", () => {
     expect(SHELL_RUNTIME_GZIP_CEILING).toBeLessThan(COUNTER_RUNTIME_GZIP_ASPIRATION);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §4 — a lifted `if=` with no list (S469 round 4, F-D)
+// ---------------------------------------------------------------------------
+
+/**
+ * A page whose only reactive structure is one lifted `if=` (the §17.1 render gate,
+ * `_scrml_ifrow_apply`). Rounds 1–3 of s469-lift-if-render-gate made that call pull the
+ * `reconciliation` chunk (and, through it, the owner-scope tree): measured with this
+ * file's pinned compressor, stripped —
+ *
+ *     main 0a2d747d3 (display toggle)          17,971 raw / 4,016 B
+ *     round 3 e7c7f7a28 (swap in reconciliation) 32,200 raw / 7,453 B  (+86%)
+ *     round 4 (swap in the 'lift' chunk)        18,986 raw / 4,303 B  (+287 B: the swap
+ *                                                and the arm-scope wrappers)
+ *
+ * ⚑ RATCHET — same rule as §1: lower freely, never raise without a ruling.
+ */
+const LIFTED_IF_RUNTIME_GZIP_CEILING = 4303 + RUNTIME_GZIP_TOLERANCE_BAND; // 4,491 B
+
+const LIFTED_IF_PAGE = `<ok> = true
+<button onclick={ @ok = !@ok }>toggle</button>
+<div id="out">\${ lift <span><b if=@ok>secret</b></span> }</div>
+`;
+
+describe("§4 a lifted if= with no list ships no list runtime", () => {
+  test("no reconciler, no owner tree, and within the recorded ceiling", () => {
+    const runtimeBytes = compileAndReadRuntime(LIFTED_IF_PAGE);
+    const text = runtimeBytes.toString();
+    expect(text.includes("function _scrml_ifrow_apply")).toBe(true);
+    expect(text.includes("function _scrml_reconcile_list")).toBe(false);
+    expect(text.includes("function _scrml_owner_destroy")).toBe(false);
+    const gzipped = gzipSize(runtimeBytes);
+    if (gzipped > LIFTED_IF_RUNTIME_GZIP_CEILING) {
+      throw new Error(
+        `CLIENT-RUNTIME SIZE REGRESSION — lifted-if page: ${gzipped} B gzip (level ${RUNTIME_GZIP_LEVEL}), ` +
+        `${runtimeBytes.length} B raw; ceiling ${LIFTED_IF_RUNTIME_GZIP_CEILING} B (4,303 recorded S469 round 4 + ` +
+        `${RUNTIME_GZIP_TOLERANCE_BAND} B band). A RATCHET: lower it freely, never raise it without a ruling.`,
+      );
+    }
+    expect(gzipped).toBeLessThanOrEqual(LIFTED_IF_RUNTIME_GZIP_CEILING);
+  });
+});

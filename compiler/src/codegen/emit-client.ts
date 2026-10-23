@@ -69,11 +69,10 @@ const POST_EMIT_HELPER_CHUNK_GATES: ReadonlyArray<readonly [string, string]> = [
   // covers a controller minted from the binding registry rather than a walkable
   // AST shape.
   ["_scrml_find_if_marker(", "ifmount"],
-  // §17.1 (S469) — a markup `if=` in LIFTED markup is the element⇄comment render gate
-  // `_scrml_ifrow_apply(` (defined in the `reconciliation` chunk). A non-loop lift
-  // (`${ lift <b if=@x>… }`, an `if … lift` arm, a markup value) emits it with no
-  // `_scrml_reconcile_list(` call, so the list gates below would not ship the chunk.
-  ["_scrml_ifrow_apply(", "reconciliation"],
+  // §17.1 (S469) — `_scrml_ifrow_apply(` (the if= element⇄comment swap) is defined in the
+  // `lift` chunk (S469 round 4: it was in `reconciliation`, which a list-free page then
+  // shipped with the owner tree for one swap).
+  ["_scrml_ifrow_apply(", "lift"],
   // g-when-handler-body-invisible-to-chunk-detection (S372 follow-up) — a
   // client `navigate(...)` lowers to `_scrml_navigate_soft(` / `_scrml_navigate(`
   // (rewrite.ts), both DEFINED in the `utilities` chunk. That chunk's pre-emit
