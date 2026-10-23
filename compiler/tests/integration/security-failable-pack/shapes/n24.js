@@ -150,4 +150,49 @@ for (const k of ["negative", "negative-spaced"]) {
     }
   }
 }
+
+// S469 r5 — g-impl1-legacy-pipe-literal-match-arms-s469: a `match` arm written with the `!{}`
+// handler's legacy leading `|` (`| 401 :> …`). §18.2's `match` has none; impl#1 read past it — a
+// statement match ran its LAST arm for every subject, a value match dispatched on the wrong arm — so a
+// deny-list with a default-ALLOW arm logged the wrong password in. Now refused (E-PARSE-001) in every
+// position and spelling: these shapes must be PASS-REFUSED. Measured on be0a7799d (before the fix):
+// the statement shapes FAIL in every spelling.
+const PIPE_PAGE = (deny, pos, armsText) => `type AuthErr:enum = { Denied }
+<msg> = "init"
+<st>: number | string = 0
+\${
+    function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied
+        return true
+    }
+    function code(p) {
+        const good = check(p) !{ .Denied :> false }
+        return good == true ? 200 : ${deny}
+    }
+    function login(p) {
+        @st = code(p)
+${pos === "statement" ? `        match @st {\n${armsText(true)}\n        }` : `        @msg = match @st {\n${armsText(false)}\n        }`}
+    }
+}
+<button id="wrong" onclick=login("wrong")>go</button>
+<button id="right" onclick=login("secret")>go</button>
+<p id="out">\${@msg}</p>
+`;
+const PIPE_LISTS = {
+  // every arm `|`-led; the denied status is 401
+  "every arm piped": ["401", [["| 401", `"rejected"`], ["| 403", `"rejected"`], ["| _", `"LOGGED IN"`]]],
+  // a later arm `|`-led; the denied status is 403
+  "later arm piped": ["403", [["401", `"rejected"`], ["| 403", `"rejected"`], ["_", `"LOGGED IN"`]]],
+  // a string status, every arm `|`-led
+  "string, every arm piped": [`"denied"`, [[`| "denied"`, `"rejected"`], [`| "locked"`, `"rejected"`], ["| _", `"LOGGED IN"`]]],
+};
+for (const [ln, [deny, arms]] of Object.entries(PIPE_LISTS)) {
+  for (const pos of ["statement", "cell"]) {
+    for (const [sn, sep] of SPELLINGS) {
+      const armsText = (stmt) => arms
+        .map(([h, b], i) => `            ${h} :> ${stmt ? `{ @msg = ${b} }` : b}${sep[i]}`).join("\n");
+      shapes.push([`legacy-pipe match arms ${ln}, ${pos} (${sn} arms)`, PIPE_PAGE(deny, pos, armsText)]);
+    }
+  }
+}
 export default shapes;
