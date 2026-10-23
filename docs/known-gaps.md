@@ -32,9 +32,15 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
 | MED | 668 | 7 |
-| LOW | 464 | 0 |
+| LOW | 465 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-spec-route-query-missing-key-s469 — SPEC §20.4 types every `route.query` value `string` but does not say what reading a query key that is ABSENT from the URL yields (`""`, `not`, or an error) — `NEW S469; LOW; open (SPEC editorial)`
+
+<!-- @gap id=g-spec-route-query-missing-key-s469 sev=LOW status=open locus=compiler/SPEC.md(§20.4 Route Parameters: "All values on `route.params` and `route.query` SHALL have type `string`.") prov=review:s469-docs-migrate-2(content review of llm-kickstarter-v2 §11.7, round 1);spec:§20.4 -->
+
+Owed: a ruling on the missing-key value. If it is `not`, `route.query.k` is `string | not` and must be narrowed before use, which contradicts "always `string`". If it is `""`, the SPEC should say so (an absent key and `?k=` become indistinguishable). `docs/articles/llm-kickstarter-v2-2026-05-04.md` §11.7 assumes `""` and carries a ⚑ note pointing here.
 
 ### g-bootstrap-integer-type-name-refused-s469 — the BOOTSTRAP refuses the type name `integer`, which SPEC §14.13.6 keeps as a soft-deprecated synonym of `int` through a §63 window — `NEW S469; LOW; open`
 

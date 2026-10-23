@@ -427,7 +427,7 @@ Both forms: **every parameter is typed** (`E-PARAM-TYPE-REQUIRED`), and a functi
 
 **Mutual recursion + hoisting (§48.6.4):** `fn` declarations at file scope hoist exactly like `function`. Mutual recursion is supported without forward-ref ceremony: `fn isEven(n: int) -> bool { return n == 0 ? true : isOdd(n - 1); }` next to `fn isOdd(n: int) -> bool { ... isEven(n - 1) ... }` compiles clean. The `pinned fn` modifier opts a `fn` OUT of hoisting (forward-ref becomes `E-STATE-PINNED-FORWARD-REF`).
 
-**`lift` inside a function body — `E-SYNTAX-002`.** A function cannot `lift` markup; it must `return` it (markup is a value). `lift` lives in `${ … }` logic blocks, loop bodies bound as values (§11.12), and block arms (§4).
+**`lift` outside a value-form loop or arm — `E-SYNTAX-002`.** A function cannot `lift` markup; it must `return` it (markup is a value). `lift` lives in `${ … }` logic blocks, loop bodies bound as values (§11.12), and block arms (§4).
 
 See SPEC §48 for the full `fn` discipline; §33 for `pure` keyword semantics.
 
@@ -705,26 +705,26 @@ type Mode:enum     = { Idle, Playing }
 type Playback:enum = { Paused, Running, Buffering }
 
 <mode:Mode=.Idle single>
-  <playback:Playback=.Paused>                    // the inner machine: a child field with its own graph
-    <Paused rule=.Running>
-      <button onclick={ @mode.playback = .Running; }>Play</button>
-    </>
-    <Running rule=(.Paused | .Buffering)>
-      <button onclick={ @mode.playback = .Paused; }>Pause</button>
-      <onTimeout after=200ms to=.Buffering/>
-    </>
-    <Buffering rule=.Running/>
-  </>
-
   <Idle rule=.Playing>
     <button onclick={ @mode = .Playing; }>Start</button>
   </>
   <Playing rule=.Idle history>                   // composite state-child + history attribute
-    <*playback/>
+    <playback:Playback=.Paused>                  // the inner machine, in the composite state's body (⚑ O5: placement)
+      <Paused rule=.Running>
+        <button onclick={ @playback = .Running; }>Play</button>
+      </>
+      <Running rule=(.Paused | .Buffering)>
+        <button onclick={ @playback = .Paused; }>Pause</button>
+        <onTimeout after=200ms to=.Buffering/>
+      </>
+      <Buffering rule=.Running/>
+    </>
     <button onclick={ @mode = .Idle; }>Stop</button>
   </>
 </>
 ```
+
+**⚑ O5: placement not yet specified.** The O5 ruling says a nested engine becomes an enum-valued child field with its own graph, but not where a composite state's inner field is declared or how it is addressed. This block declares it inside `<Playing>`'s body and writes it as `@playback`; treat both as provisional, and don't generate this shape for production code until the SPEC settles it.
 
 **Lifecycle coupling.** The inner machine is initialized on outer state-child entry and suspended on outer exit. One outer instance has one inner instance.
 
@@ -975,7 +975,7 @@ These predicates work in three loci with different enforcement contexts: state-c
 | Predicate | Meaning | Example |
 |---|---|---|
 | `req` | Non-empty value (string `""` fails; `not` fails) | `let <name:string="" req/>` |
-| `is given` | Value exists at all (`not` fails). Coexists with `req` because `""` IS given. (`is some` is its soft-deprecated spelling — §55.1 / §63.) | `let <x:string \| not=not is given/>` |
+| `is given` | Value exists at all (`not` fails). Coexists with `req` because `""` IS given. (`is some` is its soft-deprecated spelling — §55.1 / §63.) | `let <nick:string \| not="" is given/>` (the value `""`, then the predicate) |
 | `length(predicate)` | String/tape length matches the predicate | `let <name:string="" length(>=2)/>` |
 | `pattern(regex)` | String matches the regex | `let <email:string="" pattern(/^[^@]+@[^@]+$/)/>` |
 | `min(n)`, `max(n)` | Numeric range | `let <age:int=18 min(18) max(120)/>` |
@@ -1319,7 +1319,7 @@ scrml ships a focused stdlib that covers ~80% of typical-app npm needs. Import f
 
 If you reach for `import X from 'some-npm-package'` while writing scrml, stop. Check this table first; if you don't see what you need, read the module's `index.scrml` before npm-installing.
 
-> Note on debouncing: `scrml:time`'s `debounce(fn, ms)` returns a **`Debouncer` struct** (data — no value holds a function, §14.3): `const searchLater = debounce((q) => search(q), 300);` then `oninput={ run(searchLater, @q); }`, `cancel(searchLater)`, `flush(searchLater)` (§41.21). For a **debounced reactive cell**, use the language-level attribute `let <q:string="" debounced=300ms/>` (§6.13) instead. Different tools.
+> Note on debouncing: `scrml:time`'s `debounce(fn, ms)` returns a **`Debouncer` struct** (data — no value holds a function, §14.3): `const searchLater = debounce((q: string) => search(q), 300);` then `oninput={ run(searchLater, @q); }`, `cancel(searchLater)`, `flush(searchLater)` (§41.21). For a **debounced reactive cell**, use the language-level attribute `let <q:string="" debounced=300ms/>` (§6.13) instead. Different tools.
 
 ---
 
@@ -1461,18 +1461,22 @@ import { env } from "scrml:process";
 type Claims:struct = { email: string }
 
 function signup(email: string, password: string)! -> SqlError {
+    let secret = env("JWT_SECRET");             // string | not
+    if (secret is not) { return not; }          // fail closed: no secret, no account and no token
     let hash = hashPassword(password);
     ?{`INSERT INTO users (email, password_hash) VALUES (${email}, ${hash})`}.run();
     let claims: Claims = { email: email };
-    return signJwt(claims, env("JWT_SECRET"), 3600);
+    return signJwt(claims, secret, 3600);       // `secret` is narrowed to string here
 }
 
 function login(email: string, password: string)! -> SqlError {
+    let secret = env("JWT_SECRET");
+    if (secret is not) { return not; }          // fail closed
     let user = ?{`SELECT password_hash FROM users WHERE email = ${email}`}.get();
     if (user is not) { return not; }
     if (!verifyPassword(password, user.password_hash)) { return not; }
     let claims: Claims = { email: email };
-    return signJwt(claims, env("JWT_SECRET"), 3600);
+    return signJwt(claims, secret, 3600);
 }
 
 let <email:string=""/>
@@ -1498,7 +1502,7 @@ Notes:
 - `protect=` on its own makes the compiler auto-inject `auth="required" csrf="auto"` (it tells you with `W-AUTH-MIDDLEWARE-AUTO-INJECTED`). A sign-in page must be reachable while logged out, so this recipe sets `auth="none"` explicitly.
 - `signup` and `login` run SQL, so the compiler places them on the server and the client calls become fetches. The `!{ _ :> not }` handler turns any failure — a query error, or the network — into "not signed in". The form uses named handlers (`onsubmit=doLogin()`), which prevent the browser's default form submission.
 - Every path of `login` returns (`return not;` included): there is no implicit fall-off value.
-- The JWT payload is built in a typed local (`let claims: Claims = { … };`) so the object literal has a struct type to check against. `env("JWT_SECRET")` (from `scrml:process`) reads the secret on the server; don't reach for the host's `process.env`.
+- The JWT payload is built in a typed local (`let claims: Claims = { … };`) so the object literal has a struct type to check against. `env("JWT_SECRET")` (from `scrml:process`) reads the secret on the server; don't reach for the host's `process.env`. It returns `string | not`, so narrow it before use (`if (secret is not) { return not; }`) and fail closed: a missing secret must never sign a token with an absent key.
 - No `connect-sqlite3`, no `express-session`, no `passport`. The session token from `signJwt` is the session.
 - For multi-field protection, use **comma-separated** values: `protect="password_hash, session_token"`.
 - For auth-as-engine (login → loggedIn → tokenRefresh → expired), use the engine recipe (§11.1) with an `AuthPhase` enum.
@@ -1517,10 +1521,13 @@ import { env } from "scrml:process";
 type SessionClaims:struct = { sub: string, email: string }
 
 // Step 1 — user clicks "Sign in with Google" → server returns the redirect URL.
-function googleSigninStart(sessionId: string) -> string {
+function googleSigninStart(sessionId: string) -> string | not {
+    let clientId = env("GOOGLE_CLIENT_ID");
+    let clientSecret = env("GOOGLE_CLIENT_SECRET");
+    if (clientId is not || clientSecret is not) { return not; }   // fail closed on missing config
     const cfg = googleConfig({
-        clientId:     env("GOOGLE_CLIENT_ID"),
-        clientSecret: env("GOOGLE_CLIENT_SECRET"),
+        clientId:     clientId,
+        clientSecret: clientSecret,
         redirectUri:  "https://app.example.com/auth/google/callback",
         storage:      OAuthStore.Redis(not),   // the default Bun Redis client (REDIS_URL)
     });
@@ -1528,10 +1535,14 @@ function googleSigninStart(sessionId: string) -> string {
 }
 
 // Step 2 — Google redirects back with ?code=...&state=...
-function googleSigninCallback(sessionId: string, code: string, state: string) -> string {
+function googleSigninCallback(sessionId: string, code: string, state: string) -> string | not {
+    let clientId = env("GOOGLE_CLIENT_ID");
+    let clientSecret = env("GOOGLE_CLIENT_SECRET");
+    let jwtSecret = env("JWT_SECRET");
+    if (clientId is not || clientSecret is not || jwtSecret is not) { return not; }   // fail closed
     const cfg = googleConfig({
-        clientId:     env("GOOGLE_CLIENT_ID"),
-        clientSecret: env("GOOGLE_CLIENT_SECRET"),
+        clientId:     clientId,
+        clientSecret: clientSecret,
         redirectUri:  "https://app.example.com/auth/google/callback",
         storage:      OAuthStore.Redis(not),
     });
@@ -1539,7 +1550,7 @@ function googleSigninCallback(sessionId: string, code: string, state: string) ->
     const profile = getUserInfo(cfg, tokens.accessToken);
     // Persist (profile.sub, profile.email) → user row; mint your own session JWT.
     let claims: SessionClaims = { sub: profile.sub, email: profile.email };
-    return signJwt(claims, env("JWT_SECRET"), 3600);
+    return signJwt(claims, jwtSecret, 3600);
 }
 ```
 
@@ -1679,7 +1690,7 @@ Five variants, each with the domain naming this screen actually needs. Customer-
 
 **Errors are states.** A failable `function fetchContacts()! -> ContactsError { … }` server function's `!{}` handler at the call site does only one thing: route each error variant (and `.Transport(t)`) into the right Phase variant. The match block / engine then patterns each variant into the right markup. No `<isError>` + `<errorMsg>` cells; the failure modes live in the type.
 
-Why per-screen, not a stdlib generic: a generic `AsyncPhase<T>` strips the domain — `Loaded(T)` is less informative than `Cached(rows: Contact[])` or `Refreshed(at: number, rows: Contact[])`. The five-variant boilerplate is five lines of useful domain spec, not friction. (User code may declare type parameters on function signatures only.)
+Why per-screen, not a stdlib generic: a generic `AsyncPhase<T>` strips the domain — `Loaded(T)` is less informative than `Cached(rows: Contact[])` or `Refreshed(at: number, rows: Contact[])`. The five-variant boilerplate is five lines of useful domain spec, not friction. scrml has no type parameters: generics are deferred (R1), so there is no `AsyncPhase<T>` to write anyway.
 
 ### 11.6 Schema recipe — `<schema>` declarative DDL
 
@@ -1732,6 +1743,8 @@ function activeTab() -> string {
   const tab = route.query.tab;                 // typed `string`
   return tab == "" ? "profile" : tab;          // `||` takes booleans only, so not `tab || "profile"`
 }
+// ⚑ SPEC §20.4 types every query value `string` but does not say what a MISSING key yields
+// (`""`, `not`, or an error); the `== ""` test above assumes `""`. Gap g-spec-route-query-missing-key-s469.
 
 function go(target: string) {
   navigate(`/users/${target}`);                // Soft (history push) by default
@@ -1773,8 +1786,10 @@ For the remaining 20%, a `function handle(request, resolve)` is the onion-model 
 ```scrml
 <program log="structured" headers="strict">
 
+import { generateUUID } from "scrml:crypto";
+
 function handle(request: Request, resolve: (req: Request) => Response) -> Response {
-    const reqId = crypto.randomUUID();
+    const reqId = generateUUID();
     const start = Date.now();
 
     const response = resolve(request);
@@ -1895,7 +1910,7 @@ Notes:
 
 **The rule:** *`lift` lives only in `${}` logic blocks, loops bound as values, and block arms. A function that produces markup `return`s it — it never `lift`s. To name a reusable piece of markup, declare a component (a declaration with `renders`). To branch inline, use a ternary or `if=`.*
 
-Your strongest reflex here is wrong: *"declare a one-shot named function inside `${}` and `lift` markup out of it."* **It does not compile** — `lift` inside a function body is rejected with `E-SYNTAX-002`. A function `return`s markup; it never `lift`s.
+Your strongest reflex here is wrong: *"declare a one-shot named function inside `${}` and `lift` markup out of it."* **It does not compile** — `lift` outside a value-form loop or arm is rejected with `E-SYNTAX-002`. A function `return`s markup; it never `lift`s.
 
 "One-shot parameterized logic that emits markup" decomposes into a handful of cases — match yours and use the existing form:
 
@@ -2007,7 +2022,7 @@ function findFirstMatch(input: string, patterns: Pattern[]) -> Match | not {
     for (p of patterns) {
       const m = p.exec(input);
       if (m is given) {
-        if (m[0].length < 3) { continue outer; }   // labeled continue restarts the outer loop
+        if (m[0].length < 3) { break outer; }      // labelled break leaves both loops at once
         return m;
       }
     }
@@ -2025,7 +2040,7 @@ function findFirstMatch(input: string, patterns: Pattern[]) -> Match | not {
 ```scrml
 function readRows() -> Row[] {
   let rows: Row[free, append] = [];
-  let line = "";
+  let line: string | not = not;
   for ((line = readLine()) is given) {             // double-paren assignment-as-expr
     if (line.startsWith("#")) { continue; }
     rows.append(parseRow(line));
