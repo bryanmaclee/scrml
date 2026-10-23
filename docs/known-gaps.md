@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 265 | 4 |
 | MED | 673 | 7 |
-| LOW | 458 | 0 |
+| LOW | 457 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -98,11 +98,11 @@ Found by the public-docs lane (PR #1485). Reproduced S469 (s469-spec-catchup): `
 
 Found by the public-docs lane (PR #1485). Reproduced S469 (s469-spec-catchup): `match @k { "a" :> 1, else :> 2 }` → `E-MATCH-ARM-SEPARATOR` ("Match arms are separated by newlines, not commas (§18.2)"). This is NOT a stays-a-gap bug: it is an owed impl#1 change, ruled under the S435 exception because the migration route needs it — impl#1 must accept arm commas (match, `!{}` and engine message arms, trailing comma optional) so the `scrml fix` codemod can insert them and verify by emit diff (dpa-073 F5 steps 1–2). impl#1 does not ENFORCE commas (newline-separated arms stay accepted, a carried divergence). SPEC §18.2 / §19.4.5 state the comma list (s469-spec-catchup).
 
-### g-spec-class-attr-string-coercion-vs-s469-s469 — SPEC §5.5.4 still says a `class=(expression)` result "SHALL be coerced with `String()`" and writes `[]` as its `String()` form (an array joins as `"a,b"`), which contradicts the S469 conversions rule that a non-primitive never reaches a text sink implicitly (`E-TEXT-NON-PRIMITIVE`, §14.13.2) — `NEW S469; LOW; open (SPEC; owner or PA call)`
+### g-spec-class-attr-string-coercion-vs-s469-s469 — SPEC §5.5.4 still says a `class=(expression)` result "SHALL be coerced with `String()`" and writes `[]` as its `String()` form (an array joins as `"a,b"`), which contradicts the S469 conversions rule that a non-primitive never reaches a text sink implicitly (`E-TEXT-NON-PRIMITIVE`, §14.13.2) — `NEW S469; LOW; RESOLVED S469 (s469-spec-catchup r2 — ruled "string or tape of strings")`
 
-<!-- @gap id=g-spec-class-attr-string-coercion-vs-s469-s469 sev=LOW status=open locus=compiler/SPEC.md(§5.5.4 normative statements "The result SHALL be coerced with `String()`" and the non-normative "Coercion refinement" paragraph) prov=ruling:user-voice-scrml.md(S469 "⭐ RULED — conversions: what MUST be spelled out" — "struct/tape → text, through a formatter or serializer, never implicitly");dispatch:s469-spec-catchup(item 3 sweep) -->
+<!-- @gap id=g-spec-class-attr-string-coercion-vs-s469-s469 sev=LOW status=resolved locus=compiler/SPEC.md(§5.5.4 normative statements "The result SHALL be coerced with `String()`" and the non-normative "Coercion refinement" paragraph) prov=ruling:user-voice-scrml.md(S469 "⭐ RULED — conversions: what MUST be spelled out" — "struct/tape → text, through a formatter or serializer, never implicitly");dispatch:s469-spec-catchup(item 3 sweep) -->
 
-Found by the S469 example sweep. Not an example, so not rewritten there. Is `class=(…)` a text sink in the §14.13.1 sense? If so, a tape / struct result is `E-TEXT-NON-PRIMITIVE` and the `String()` sentence and SPEC-ISSUE-013's array-join refinement retire; if `class=` is its own sink (a class LIST), it needs its own typed rule (e.g. a `string` or a tape of `string` joined by spaces). **PA recommendation:** the second — `class=` takes `string` or a tape of `string` (joined with a space), anything else is a type error; it keeps the useful `[a, b]` form without a JS `String()` coercion. Needs a ruling before the bootstrap builds `class=(…)`.
+RESOLVED S469: ruled — ruling:user-voice-scrml.md S469 "⭐ RULED — `class=` takes a string or a tape of strings" — "string or tape of strings (Rec)". §5.5.4 amended: a `string`, a tape of `string` (joined with spaces) or `not`; anything else is E-TYPE-031, no `String()` coercion. impl#1 still coerces (Nominal on impl#1). Original entry: Found by the S469 example sweep. Not an example, so not rewritten there. Is `class=(…)` a text sink in the §14.13.1 sense? If so, a tape / struct result is `E-TEXT-NON-PRIMITIVE` and the `String()` sentence and SPEC-ISSUE-013's array-join refinement retire; if `class=` is its own sink (a class LIST), it needs its own typed rule (e.g. a `string` or a tape of `string` joined by spaces). **PA recommendation:** the second — `class=` takes `string` or a tape of `string` (joined with a space), anything else is a type error; it keeps the useful `[a, b]` form without a JS `String()` coercion. Needs a ruling before the bootstrap builds `class=(…)`.
 
 ### g-spec-s469-pre-ruling-examples-owed — SPEC examples outside the amended sections still use forms the S469 rulings retired: a tail expression as a function's value, a block arm's bare last expression, `+` with a number, ambient `Math.*` / `String(…)` / `parseInt(…)`, `E.toEnum(…)` — `NEW S469; LOW; RESOLVED S469 (s469-spec-catchup)`
 
