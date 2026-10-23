@@ -20169,13 +20169,13 @@ failable-fn ::= 'function' identifier '(' param-list ')' '!' (('->' error-type) 
 
 ```scrml
 // Explicit error type — arrow form
-function processPayment(amount: number, customerId: int)! -> PaymentError {
+function processPayment(amount: number, customerId: string)! -> PaymentError {
     if (amount <= 0) fail PaymentError::InvalidAmount("Must be positive")
     // ... success path
 }
 
 // Explicit error type — bare form (S137 ratification; equivalent to arrow form; §41.14 canon-shown)
-function processPayment(amount: number, customerId: int)! PaymentError {
+function processPayment(amount: number, customerId: string)! PaymentError {
     if (amount <= 0) fail PaymentError::InvalidAmount("Must be positive")
 }
 
@@ -20851,7 +20851,7 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
    `.QueryFailed(m) :>` binds the variant's payload, the `message: string` (§18.7; §19.4.3, S451 ruling 2 — *"in `| ::V m :>`, `m` binds the variant's PAYLOAD (§19.8.3's own example)"* — this example was then written `| ::QueryFailed m :>`, the spelling S452 soft-deprecates, §19.4.5); `.ConstraintViolation(f) :>` binds the `field`. The handler is checked for exhaustiveness against `SqlError` like any other `!{}` handler. Because the compiler MAY add `SqlError` variants (§19.8.4) — §8.9.4's `BatchPrepareFailed` is one — a `_ :>` arm keeps a handler total as the enum grows.
 2. **A `match` on the result** — the success value arrives as `::Ok` (§19.7.1):
    ```scrml
-   function openOrders(customerId: int) {
+   function openOrders(customerId: string) {
        const rows = match ?{`SELECT * FROM orders WHERE customer_id = ${customerId} AND open = 1`}.all() {
            ::Ok(found)       :> found
            ::QueryFailed(m)  :> { log(m); lift []; }
@@ -22098,7 +22098,7 @@ type PaymentError:enum = {
 
 ```scrml
 ${
-    function processPayment(amount: number, customerId: int)! -> PaymentError {
+    function processPayment(amount: number, customerId: string)! -> PaymentError {
         if (amount <= 0) fail PaymentError::InvalidAmount("Amount must be positive")
         if (amount > 10000) fail PaymentError::InvalidAmount("Amount exceeds maximum")
 
@@ -22204,7 +22204,7 @@ type CrudError:enum = {
 }
 
 ${
-    function updateUserProfile(userId: int, updates: ProfileUpdate)! -> CrudError {
+    function updateUserProfile(userId: string, updates: ProfileUpdate)! -> CrudError {
         transaction {
             let current = ?{`SELECT * FROM users WHERE id = ${userId}`}.get()
             if (!current) fail CrudError::NotFound("User", userId)
