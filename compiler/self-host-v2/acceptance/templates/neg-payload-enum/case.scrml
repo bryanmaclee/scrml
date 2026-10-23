@@ -1,0 +1,10 @@
+// §14.13.2: a payload enum value in a slot is refused.
+<program>
+    type R:enum = { Ok(v: int), Bad }
+    fn show(r: R) -> string {
+        return `r=${r}`
+    }
+    <main>
+        <p>x</p>
+    </main>
+</program>

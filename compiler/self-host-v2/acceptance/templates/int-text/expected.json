@@ -1,0 +1,29 @@
+{
+  "id": "acceptance-templates-int-text",
+  "description": "an `int` slot renders its decimal digits; the template is the into-text spelling `+` refuses.",
+  "language-version": "1.0",
+  "spec": "§14.13.3 · §20.7.2",
+  "rationale": "§14.13.1: `typed ${n} chars` — a logic template is a text sink; an int's text is its digits, a leading `-` when negative.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#inc"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#a",
+        "text": "typed 4 chars"
+      },
+      {
+        "selector": "#neg",
+        "text": "typed -42 chars"
+      },
+      {
+        "selector": "#big",
+        "text": "typed 9007199254740991 chars"
+      }
+    ]
+  }
+}

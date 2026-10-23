@@ -1373,6 +1373,19 @@ export function parseNumText(s) {
   return n === 0 ? 0 : n;
 }
 
+/**
+ * s469 (SPEC §14.13.3, §20.7.2) — the one honest text of a logic template slot's value: an `int` /
+ * `number` as ECMAScript Number::toString (`0.1 + 0.2` → "0.30000000000000004", `1e21` → "1e+21",
+ * `-0` → "0"), a `bool` as `true` / `false`, a unit enum value as its variant name (its runtime tag).
+ * The typer admits nothing else (E-TEXT-NON-PRIMITIVE, E-OPERAND-NOT-NARROWED); anything else reaching
+ * here is a compiler defect, refused rather than printed as `[object Object]` or `null`.
+ */
+export function textOf(v) {
+  const t = typeof v;
+  if (t === "number" || t === "boolean" || t === "string") return String(v);
+  throw new Error(`template slot: ${v === null ? "not" : t} has no text (compiler defect: the typer admits only primitives)`);
+}
+
 /** `bool.parse(s)`: exactly `"true"` or `"false"`; else `not`. */
 export function parseBoolText(s) {
   requireText(s, "bool.parse");

@@ -11,8 +11,8 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 153 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
-// generator's PROVISIONAL table: none); 67 without one (FAIL-CLOSED Error):
+// 155 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// generator's PROVISIONAL table: none); 69 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-POSITION — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -38,6 +38,7 @@
 //   E-HANDLE-REDECLARE — no §34 row
 //   E-IMPORT-NOT-EXPORTED — no §34 row
 //   E-INT-DIVISION — no §34 row
+//   E-INTERNAL-RECOVERED-UNREPORTED — no §34 row
 //   E-OPERAND-NOT-NARROWED — no §34 row
 //   E-OPERATOR-OPERAND-TYPE — no §34 row
 //   E-PARSE-ARM — no §34 row
@@ -67,6 +68,7 @@
 //   E-PARSE-SQL-CHAIN — no §34 row
 //   E-PARSE-STRICT-EQ — no §34 row
 //   E-PARSE-TAG — no §34 row
+//   E-PARSE-TEMPLATE — no §34 row
 //   E-PARSE-TRAILING — no §34 row
 //   E-PARSE-TYPE — no §34 row
 //   E-PARSE-UNCLOSED — no §34 row
@@ -145,6 +147,7 @@ ${
             "E-EFFECT-NO-DEPS" :> Severity.Error
             "E-EFFECT-WRITE-UNPROVEN" :> Severity.Error
             "E-EFFECT-WRITES-STATE" :> Severity.Error
+            "E-EQ-001" :> Severity.Error
             "E-EQ-002" :> Severity.Error
             "E-ERROR-001" :> Severity.Error
             "E-ERROR-002" :> Severity.Error
@@ -224,6 +227,7 @@ ${
             "E-SYNTAX-064" :> Severity.Error
             "E-SYNTHESIZED-WRITE" :> Severity.Error
             "E-TAPE-JS-METHOD" :> Severity.Error
+            "E-TEXT-NON-PRIMITIVE" :> Severity.Error
             "E-TYPE-001" :> Severity.Error
             "E-TYPE-020" :> Severity.Error
             "E-TYPE-021" :> Severity.Error

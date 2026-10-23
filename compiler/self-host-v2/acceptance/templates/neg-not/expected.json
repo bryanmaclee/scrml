@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-templates-neg-not",
+  "description": "E-TEXT-NON-PRIMITIVE: `not` in a template slot.",
+  "language-version": "1.0",
+  "spec": "§14.13.3 · §14.13.2 · §34",
+  "rationale": "§14.13.2: the primitives are string, int, number, bool and unit enum values — `not` is none of them.",
+  "expect": {
+    "codes": [
+      "E-TEXT-NON-PRIMITIVE"
+    ],
+    "codeCounts": {
+      "E-TEXT-NON-PRIMITIVE": 1
+    }
+  }
+}

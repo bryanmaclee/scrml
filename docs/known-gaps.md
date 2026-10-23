@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
 | MED | 668 | 8 |
-| LOW | 464 | 0 |
+| LOW | 465 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -165,6 +165,12 @@ Found while probing `<onTransition>` bodies. Inside a state-child, the enclosing
 <!-- @gap id=g-bootstrap-int-to-string-conversion-unruled-s469 sev=MED status=ruling-gated locus=compiler/self-host-v2/analyze.scrml(no conversion built-in; string + int stays E-OPERATOR-OPERAND-TYPE) prov=dispatch:s469-boot-strings-1(part A held by the PA: bryan is reconsidering conversions as a whole, possibly one type-directed tool rather than toString / toNumber / toInt);spec:Appendix-D(the JS globals `String`, instance methods incl. `.toString()`);spec:§41.18(`scrml:math` `toNumber` — the string→number direction only) -->
 
 Found by bryan's first bootstrap program (`acceptance/guess/a-guess-verbatim`). The SPEC sanctions several conversion-like forms but rules none as THE int→string conversion under the S440 operator rule: Appendix D's ambient `String(…)` and instance `.toString()` (a blanket JS-passthrough sanction that §41.18 contradicts: "There is no ambient `Math` global in scrml"), backtick template literals (typed `string` in §7.5.1's literal set; S440 Gotcha Q3 says a `T | not` operand is narrowed "before … use in a string template"), the markup interpolation rule (§8: "JavaScript's standard `String()` coercion"), and `print`'s honest textual form (§20.7.2). Owed: the owner's ruling, then the built-in (and `join(sep)` on a non-string tape, which is E-TYPE-031 until then). The workaround today is markup interpolation (`<p>typed ${@n} chars</p>`).
+
+### g-bootstrap-int-overflow-and-mod-zero-untrapped-s469 — in the BOOTSTRAP, `int` arithmetic is JavaScript number arithmetic with no trap: an overflow past ±(2^53−1) and `n % 0` produce a non-integer value of type `int`, so an `int` text sink (a template slot, markup) prints `7e+21` / `NaN`; and an int literal past 2^53−1 (`9007199254740993`) is accepted and silently rounded — `NEW S469; LOW; open`
+
+<!-- @gap id=g-bootstrap-int-overflow-and-mod-zero-untrapped-s469 sev=LOW status=open locus=compiler/self-host-v2/print.scrml(primJs .Add/.Sub/.Mul/.Mod print bare JS operators for int operands);compiler/self-host-v2/analyze.scrml(resolveNum: no range check on an int literal) prov=review:s469-boot-templates-r1(P2 — filed, not fixed: "Int overflow and modulo by zero never trap, so an int slot can print `7e+21` / `NaN`, and the literal `9007199254740993` is silently accepted");spec:§20.7.2(an int's text is "its decimal digits … no leading zeros", which a non-integer value cannot honour) -->
+
+Found in the review of the logic-template slice (s469-boot-templates). §20.7.2 defines an `int`'s honest text as its decimal digits; the template slot (and markup) print the runtime value with `String()`, which is honest only while the value IS an integer in the safe range. The bootstrap's `int` operations never check that: `int * int` past 2^53−1 is a float (`7e+21`), `n % 0` is `NaN`, and an out-of-range literal is rounded at parse. The fix belongs to the int-semantics owner (a trap — a `ScrmlTrap` like E-INDEX-OUT-OF-RANGE-RT — or a ruled overflow behaviour, plus E- on an out-of-range literal), not to the text sinks.
 
 ### g-bootstrap-method-receiver-narrowing-blind-s469 — in the BOOTSTRAP, a member read or method call on a NARROWED `T | not` is refused: `match @n { not :> 0, else :> @n.length }` and `… else :> @n.toUpperCase()` are E-BOOTSTRAP-UNSUPPORTED although the typer narrows `@n` to `string` there — `NEW S469; LOW; open`
 

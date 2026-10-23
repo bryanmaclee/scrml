@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-templates-neg-plus-strict",
+  "description": "E-OPERATOR-OPERAND-TYPE: `+` stays strict — string + int is refused; the template is the spelling.",
+  "language-version": "1.0",
+  "spec": "§14.13.3 · §14.13.1 · S440",
+  "rationale": "§14.13.1: \"text + a number with `+` … a template, `` `typed ${n} chars` ``\" — `+` takes two numbers or two strings.",
+  "expect": {
+    "codes": [
+      "E-OPERATOR-OPERAND-TYPE"
+    ],
+    "codeCounts": {
+      "E-OPERATOR-OPERAND-TYPE": 1
+    }
+  }
+}
