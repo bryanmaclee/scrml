@@ -68,7 +68,7 @@ import { formatDate, formatRelative } from 'scrml:time';
 
 ### "I need numeral.js / Intl helpers"
 
-`scrml:format` (SPEC §41.22), a typed module: `fixed(x, 2, .HalfEven)`, `pad(n, 3, "0")`, `formatNumber`, `formatPercent`, `pluralize`, `slug`, `truncate`, and more, each returning a string you interpolate. A `${}` slot gives a value's one plain text and takes no format options, so formatting is always a call. The locale-aware members use `Intl` underneath. Money is the exception: its one display path, `formatCurrency(Money, .Mode)`, lands with `scrml:money`.
+`scrml:format` (SPEC §41.22), a typed module: `fixed(x, 2, .HalfEven)` and `pad(n, 3, "0")` (both specified S469; not yet in the module), `formatNumber`, `formatPercent`, `pluralize`, `slug`, `truncate`, and more, each returning a string you interpolate. A `${}` slot gives a value's one plain text and takes no format options, so formatting is always a call. The locale-aware members use `Intl` underneath. Money is the exception: its one display path, `formatCurrency(Money, .Mode)`, lands with `scrml:money`.
 
 ### "I need react-hook-form / formik"
 
@@ -131,7 +131,7 @@ A value's methods are its type's, not the host's. A string has the typed table i
 </program>
 ```
 
-For numbers and randomness the stdlib has sanctioned wrappers — `scrml:math` (pure: `round(x, .Mode)`, `floor`, `trunc`, `clamp`, `parseInt(s, radix)`, …) and `scrml:random` (`random`, `randomInt`) — which keep pure `fn` bodies pure. impl#1 still lets the old host globals through. That is an impl#1 divergence, not the language.
+For numbers and randomness the stdlib has sanctioned wrappers — `scrml:math` (pure: `round(x, .Mode)` and `trunc` (specified S469; not yet in the module), `floor`, `clamp`, `parseInt(s, radix)`, …) and `scrml:random` (`random`, `randomInt`) — which keep pure `fn` bodies pure. impl#1 still lets the old host globals through. That is an impl#1 divergence, not the language.
 
 ---
 
@@ -202,9 +202,11 @@ A vendored plain-JavaScript library (ESM) is imported with a relative path inste
 
 If your external code is not JavaScript at all — Go, Rust, Python, etc. — the specified pattern is a sidecar: nest a `<program name="…" lang="…">` that declares, in scrml types, the functions the sidecar exports, and import them with `use foreign:` at the top level of the outer program:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED, E-PARSE-EXPECTED, E-PARSE-EXPR, E-PARSE-UNCLOSED, E-SCOPE-001, E-TYPE-STRUCT-CONTEXT] — the bootstrap has no nested <program> (sidecar) and no use foreign: declaration yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-REDECLARE, E-BOOTSTRAP-UNSUPPORTED, E-PARSE-EXPECTED, E-PARSE-EXPR, E-PARSE-UNCLOSED, E-SCOPE-001, E-TYPE-STRUCT-CONTEXT] — the bootstrap has no nested <program> (sidecar; it reads the inner Features as a redeclaration) and no use foreign: declaration yet -->
 ```scrml
 <program>
+  type Features:struct = { values: number[], modelId: string }   // declared on both sides: a type does not cross a <program> boundary (§40.4)
+
   <program name="ml" lang="python" port=9001 health="/health">
     type Features:struct = { values: number[], modelId: string }
     export function predict(f: Features) -> number;
