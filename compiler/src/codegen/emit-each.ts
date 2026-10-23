@@ -2124,32 +2124,30 @@ function renderTemplateChildToJs(
     // render-gate effect (R7-1), so a write that turns the condition false unmounts the arm
     // before user effects run. An unlowerable `if=` is refused (E-CG-003) and gates false.
     const _matchGate = lowerRowScopedEachIfGate(child, iterVarName, "match");
+    // The body holds code only (no comment): the enclosing-row re-resolve below scans it
+    // for the outer row names the condition reads, and a comment's text would be scanned too.
     if (_matchGate !== null) {
-      const teardownFnName = `__scrml_match_match_${nsId(matchId)}_teardown`;
-      const _gated = [
-        `${indent}// §17.1.2 — this match's if=: while false no arm is dispatched and the mounted arm is torn down.`,
-        `${indent}if (!(${_matchGate})) {`,
-        `${indent}  ${teardownFnName}(${mountVar});`,
-        `${indent}} else {`,
-        `  ${_dispatchLine}`,
-        `${indent}}`,
-      ];
-      const _wrapped = maybeWrapEachPerItemEffect(_gated, iterVarName, indent, true);
-      if (_wrapped !== _gated) {
-        for (const l of _wrapped) lines.push(l);
-      } else {
-        // No live-keyed row ctx for this scope (e.g. a match in an `<empty>` body): the
-        // gate still needs its own effect, or it would be evaluated once and never again.
-        lines.push(`${indent}_scrml_mount_track(_scrml_effect(() => {`);
-        for (const l of enclosingResolvePreludeLines(_gated.join("\n"), `${indent}  `)) lines.push(l);
-        for (const l of _gated) lines.push("  " + l);
-        lines.push(`${indent}}, true));`);
-      }
+      lines.push(`${indent}// §17.1.2 — the if= on this <match>: while false no arm is dispatched and the mounted arm is torn down.`);
+    }
+    const _body: string[] = _matchGate === null ? [_dispatchLine] : [
+      `${indent}if (!(${_matchGate})) {`,
+      `${indent}  __scrml_match_match_${nsId(matchId)}_teardown(${mountVar});`,
+      `${indent}} else {`,
+      `  ${_dispatchLine}`,
+      `${indent}}`,
+    ];
+    const _wrapped = maybeWrapEachPerItemEffect(_body, iterVarName, indent, _matchGate !== null);
+    if (_wrapped === _body && (_matchGate !== null || (child as any).enclosingEachEmpty === true)) {
+      // No live-keyed row ctx here — a match in an `<empty>` body. Its dispatcher is
+      // item-scoped (emit-match), so nothing at module scope re-dispatches it: the call
+      // runs in its own effect, which re-runs when the discriminant or the if= changes.
+      lines.push(`${indent}_scrml_mount_track(_scrml_effect(() => {`);
+      for (const l of enclosingResolvePreludeLines(_body.join("\n"), `${indent}  `)) lines.push(l);
+      for (const l of _body) lines.push("  " + l);
+      lines.push(_matchGate !== null ? `${indent}}, true));` : `${indent}}));`);
       return;
     }
-    for (const l of maybeWrapEachPerItemEffect([_dispatchLine], iterVarName, indent)) {
-      lines.push(l);
-    }
+    for (const l of _wrapped) lines.push(l);
     return;
   }
 
