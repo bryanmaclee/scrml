@@ -36,7 +36,7 @@
                 <span class="px-2 py-1 bg-slate-50 text-slate-700 rounded">
                     Runtime otherwise
                 </span>
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§51"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§51"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §51.0.F (normative)
                 </a>
@@ -277,7 +277,7 @@
             (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.advance(.X)</code>),
             <strong>§51.0.F.1</strong> (v0.3 self-write carve-out),
             <strong>§34</strong> catalog row. Spec lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>.

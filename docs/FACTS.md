@@ -1,7 +1,7 @@
 # scrml — derived facts
 
 **This file is generated. Do not hand-edit the tables below.**
-Regenerate with `bun scripts/facts.ts --write`; CI `gate` runs `--check` and fails on stale.
+Regenerated on `main` after every merge by `.github/workflows/facts-regen.yml` (an auto-PR through the merge queue), so the figures trail `main` by minutes. Pull requests do not need to regenerate it — CI's `--check` only warns on a stale table. By hand: `bun scripts/facts.ts --write`.
 
 Every figure here is derived from repo content at the current commit. **Public documents — README, articles, tutorial, site copy, outbound correspondence — SHALL cite this file rather than hardcode a number**, because a hardcoded figure rots silently and nothing fails when it does.
 
@@ -21,8 +21,8 @@ Also absent: the §34 diagnostic-code total. It is load-bearing but not reliably
 | fact | value |
 |---|---|
 | compiler version | `0.8.0` |
-| live compiler source (`compiler/src`) | 347,291 lines across 308 files |
-| test files | 1,777 |
+| live compiler source (`compiler/src`) | 348,284 lines across 311 files |
+| test files | 1,779 |
 | specification lines (`compiler/SPEC.md`) | 51,180 |
 | conformance cases | 1807 |
 | standard-library modules | 22 |

@@ -28,7 +28,7 @@
                 <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
                     Compile-time
                 </span>
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§55"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§55"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §6.11 &#47; §55.7 (normative)
                 </a>
@@ -189,7 +189,7 @@ function forceSubmit() &#123;
             <strong>§55.5</strong> &#47; <strong>§55.6</strong> (compound +
             per-field synthesis rules),
             <strong>§34</strong> catalog row. Spec lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>.

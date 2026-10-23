@@ -188,7 +188,7 @@
                 <a href="/reference" class="hover:text-slate-100">Reference</a>
                 <a href="/articles" class="hover:text-slate-100">Articles</a>
                 <a href="/about" class="hover:text-slate-100">About</a>
-                <a href="https://github.com/bryanmaclee/scrmlTS" class="hover:text-slate-100">GitHub</a>
+                <a href="https://github.com/scrml-lang/scrml" class="hover:text-slate-100">GitHub</a>
             </nav>
             <span class="version-pill">${VERSION}</span>
         </div>
@@ -204,7 +204,7 @@
         <div class="max-w-3xl mx-auto px-6 py-10 text-sm text-slate-400 grid grid-cols-1 md:grid-cols-3 gap-8">
             <div class="text-center">
                 <div class="font-semibold text-slate-100 mb-2">scrml</div>
-                <a href="https://github.com/bryanmaclee/scrmlTS" class="block hover:text-slate-100">GitHub</a>
+                <a href="https://github.com/scrml-lang/scrml" class="block hover:text-slate-100">GitHub</a>
                 <a href="/about/changelog" class="block hover:text-slate-100">Changelog</a>
                 <a href="/about/philosophy" class="block hover:text-slate-100">Philosophy</a>
             </div>
@@ -227,7 +227,7 @@
                 Every page on this site was authored as a
                 <code class="font-mono text-slate-300">&lt;page&gt;</code>
                 and compiled by the same
-                <a href="https://github.com/bryanmaclee/scrmlTS/tree/main/docs/website"
+                <a href="https://github.com/scrml-lang/scrml/tree/main/docs/website"
                    class="text-sky-400 hover:text-sky-300 underline">scrml compiler</a>
                 that ships in
                 <code class="font-mono text-slate-300">bun install scrml</code>.

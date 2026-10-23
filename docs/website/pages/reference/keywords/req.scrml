@@ -29,7 +29,7 @@
                 <code class="font-mono text-base">&#123;&#125;</code>.
             </p>
             <div class="flex gap-3 mt-4 text-xs">
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§55"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§55"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC &sect;55 (validators)
                 </a>
@@ -390,7 +390,7 @@
             row
             <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">E-DERIVED-WITH-VALIDATORS</code>.
             Spec lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>.

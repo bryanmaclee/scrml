@@ -5,7 +5,9 @@
 //   `bun scripts/facts.ts --write` WRITE  — in-place-regenerate the `@generated:*` sections of
 //                                           docs/FACTS.md from the derive functions. Idempotent.
 //   `bun scripts/facts.ts --check` CHECK  — regenerate in memory + compare to on-disk; exit 1 on
-//                                           any stale section. Wired into CI `gate`.
+//                                           any stale section, 3 on a missing anchor. Since S469
+//                                           CI + pre-push treat exit 1 as a WARNING: main is
+//                                           regenerated post-merge (.github/workflows/facts-regen.yml).
 //
 // WHY (S280): public content makes CLAIMS, and a number that was true when written rots silently.
 // The C2 (derived-number) half of the claim taxonomy: "745 conformance cases", "21-module standard
@@ -355,10 +357,24 @@ if (write) {
 for (const s of ok) console.log(`  PASS  ${s}`);
 for (const s of stale) console.error(`  STALE ${s}`);
 for (const m of missing) console.error(`  MISSING ${m}`);
-if (stale.length > 0 || missing.length > 0) {
+// S469 — EXIT CODES SPLIT. A MISSING anchor is a broken FILE (a `@generated` marker deleted or
+// mangled): `--write` cannot repair it and the post-merge regen job would fail on it, so it stays a
+// hard error (exit 3) everywhere. A STALE section only means "the numbers moved": since S469 the
+// PR-side CI step and the pre-push hook treat exit 1 as a WARNING, because
+// .github/workflows/facts-regen.yml regenerates docs/FACTS.md on main after every merge (owner
+// ruling S469: "Regenerate on main after merge"). Exit 2 (degenerate zero, above) is always fatal.
+if (missing.length > 0) {
   console.error(
-    `\nFAIL — docs/FACTS.md is out of date with the repo. Run \`bun scripts/facts.ts --write\`.\n` +
-      `Public documents cite these numbers; a stale figure is a false public claim.`,
+    `\nFAIL — docs/FACTS.md is missing a @generated anchor; \`--write\` cannot repair that. Restore the\n` +
+      `START/END marker pair by hand, then run \`bun scripts/facts.ts --write\`.`,
+  );
+  process.exit(3);
+}
+if (stale.length > 0) {
+  console.error(
+    `\nSTALE — docs/FACTS.md is out of date with this tree. main is regenerated automatically after\n` +
+      `every merge (.github/workflows/facts-regen.yml), so a pull request need not — and should not —\n` +
+      `commit a FACTS.md regen (it only conflicts with the bot's). By hand: \`bun scripts/facts.ts --write\`.`,
   );
   process.exit(1);
 }

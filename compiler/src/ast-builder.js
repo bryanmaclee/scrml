@@ -119,6 +119,7 @@ import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { classifyFileShape, isRecognizedNonEntryShape } from "./library-shape.js";
 import { hasTopLevelProgram, findTopLevelProgram } from "./program-role.ts";
 import { lowerMdBlock, checkMdInPhrasing, assignMdHeadingIds, sourceHasMdElement, refuseUnreadMdElements } from "./md-lower.ts";
+import { logicBlockClose } from "./interpolation-extent.ts";
 
 import { existsSync, statSync } from "fs";
 import { dirname as _pathDirname, join as _pathJoin, isAbsolute as _pathIsAbsolute } from "path";
@@ -23939,6 +23940,16 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
             if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") i++; continue; }
             if (c === '"') { inDQ = true; continue; }
             if (c === "'") { inSQ = true; continue; }
+            // S469 (SECURITY) — a `${…}` logic block (the opener `effect=`) is bounded by
+            // acorn (`logicBlockClose`), so a `}` / `>` in its strings, comments, templates or
+            // regular expressions is opaque. One acorn cannot bound leaves the opener unread
+            // (-1); the effect capture below then refuses the same block.
+            if (c === "$" && s[i + 1] === "{" && depth === 0) {
+              const close = logicBlockClose(s, i);
+              if (close < 0) return -1;
+              i = close;
+              continue;
+            }
             if (c === "{") { depth++; continue; }
             if (c === "}") { if (depth > 0) depth--; continue; }
             if (c === "(") { parenDepth++; continue; }
@@ -24184,21 +24195,12 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         if (openerEffectIdx >= 0) {
           const dollarBrace = header.indexOf("${", openerEffectIdx);
           if (dollarBrace >= 0) {
-            let j = dollarBrace + 2;
-            let braceDepth = 1;
-            let inDQ = false;
-            let inSQ = false;
-            while (j < header.length && braceDepth > 0) {
-              const ch = header[j];
-              if (inDQ) { if (ch === '"') inDQ = false; else if (ch === "\\") j++; j++; continue; }
-              if (inSQ) { if (ch === "'") inSQ = false; else if (ch === "\\") j++; j++; continue; }
-              if (ch === '"') { inDQ = true; j++; continue; }
-              if (ch === "'") { inSQ = true; j++; continue; }
-              if (ch === "{") { braceDepth++; j++; continue; }
-              if (ch === "}") { braceDepth--; if (braceDepth === 0) break; j++; continue; }
-              j++;
-            }
-            if (braceDepth === 0) {
+            // S469 (SECURITY, §19.4.3) — the body's extent is read by acorn (`logicBlockClose`),
+            // not a brace counter blind to comments / templates / regular expressions: the text
+            // cut here is the text the failable walk reads and codegen emits. A block acorn
+            // cannot bound is malformed (E-ENGINE-EFFECT-NOT-INTERPOLATED below).
+            const j = logicBlockClose(header, dollarBrace);
+            if (j >= 0) {
               // The inner expression text between `${` and the matching `}`.
               openerEffect = header.slice(dollarBrace + 2, j).trim();
               if (openerEffect.length === 0) openerEffect = null;

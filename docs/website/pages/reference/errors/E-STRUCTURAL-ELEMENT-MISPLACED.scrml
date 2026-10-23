@@ -29,7 +29,7 @@
                 <span class="px-2 py-1 bg-amber-50 text-amber-700 rounded">
                     Compile-time (BS &#47; PA stage)
                 </span>
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§4.15"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§4.15"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC §4.15 (normative)
                 </a>
@@ -266,7 +266,7 @@
             <strong>§24.4</strong> (HTML-aware element classification),
             per-element owning sections (§51.0.H &#47; §51.0.M &#47; §51.0.R &#47; §55.8 &#47; §40.8),
             <strong>§34</strong> catalog row. Spec lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>.

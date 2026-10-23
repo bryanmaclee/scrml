@@ -31,7 +31,7 @@
     "name": "scrml",
     "alternateName": ["scrml language", "scrml-lang", "scrmlTS"],
     "description": "A complete compiler for the web. Markup, logic, styles, SQL, server functions, realtime, and tests in one .scrml file.",
-    "codeRepository": "https://github.com/bryanmaclee/scrmlTS",
+    "codeRepository": "https://github.com/scrml-lang/scrml",
     "programmingLanguage": ["TypeScript", "JavaScript", "scrml"],
     "license": "https://opensource.org/licenses/MIT",
     "runtimePlatform": "Bun",
@@ -53,13 +53,13 @@
   <div class="meta-row">
     <span><span class="badge">MIT</span> open source</span>
     <span><span class="badge">pre-1.0</span> active development</span>
-    <span><a href="https://github.com/bryanmaclee/scrmlTS">GitHub repo</a></span>
+    <span><a href="https://github.com/scrml-lang/scrml">GitHub repo</a></span>
   </div>
 
   <div class="cta-row">
-    <a class="cta cta-primary" href="https://github.com/bryanmaclee/scrmlTS">View on GitHub</a>
-    <a class="cta cta-secondary" href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/tutorial.md">Read the tutorial</a>
-    <a class="cta cta-secondary" href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md">Language spec</a>
+    <a class="cta cta-primary" href="https://github.com/scrml-lang/scrml">View on GitHub</a>
+    <a class="cta cta-secondary" href="https://github.com/scrml-lang/scrml/blob/main/docs/tutorial.md">Read the tutorial</a>
+    <a class="cta cta-secondary" href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md">Language spec</a>
   </div>
 
   <h2>What is scrml?</h2>
@@ -116,12 +116,12 @@
 
   <h3>The compiler eliminates N+1 automatically</h3>
   <p>
-    Because scrml owns both the query context and the loop context, a <code>for (let x of xs) { ?{... WHERE id = ${x.id}}.get() }</code> pattern is rewritten to one pre-loop <code>WHERE id IN (...)</code> fetch plus a keyed <code>Map</code> lookup. Independent reads in a <code>!</code> handler share one <code>BEGIN DEFERRED</code>..<code>COMMIT</code> envelope. On-mount <code>server @var</code> loads coalesce into a single <code>__mountHydrate</code> round-trip. <a href="https://github.com/bryanmaclee/scrmlTS/tree/main/benchmarks/sql-batching">Measured wins</a> (v0.3.0 refresh): ~1.7× at N=10, ~2.3× at N=100, ~3.3× at N=1000 on on-disk WAL SQLite.
+    Because scrml owns both the query context and the loop context, a <code>for (let x of xs) { ?{... WHERE id = ${x.id}}.get() }</code> pattern is rewritten to one pre-loop <code>WHERE id IN (...)</code> fetch plus a keyed <code>Map</code> lookup. Independent reads in a <code>!</code> handler share one <code>BEGIN DEFERRED</code>..<code>COMMIT</code> envelope. On-mount <code>server @var</code> loads coalesce into a single <code>__mountHydrate</code> round-trip. <a href="https://github.com/scrml-lang/scrml/tree/main/benchmarks/sql-batching">Measured wins</a> (v0.3.0 refresh): ~1.7× at N=10, ~2.3× at N=100, ~3.3× at N=1000 on on-disk WAL SQLite.
   </p>
 
   <h3>The compiler knows what code is reachable to whom</h3>
   <p>
-    Auth gates aren't runtime checks; they're compile-time visibility constraints. A <code>&lt;auth role="Admin"&gt;</code> block surrounding a subtree tells the compiler — via the whole-stack closure analysis at <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md">§40</a> — exactly which component code, server functions, and stdlib units are reachable to which role at which entry point. Two consequences fall out. Anonymous visitors download a strictly smaller initial bundle than admins because the gated subtree's atoms aren't shipped; and prefetching is tiered by route topology — visible chunks ship at idle, hover-targets prefetch on hover, deeper navigation pulls on-demand. Every chunk filename embeds a stable FNV-1a content hash (<a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md">§47</a>), so adopter caches stay valid across builds when source bytes don't change. The compiler flags shapes that defeat the analysis — a route that links nowhere, a gate that needs a runtime check — so you fix them at the source.
+    Auth gates aren't runtime checks; they're compile-time visibility constraints. A <code>&lt;auth role="Admin"&gt;</code> block surrounding a subtree tells the compiler — via the whole-stack closure analysis at <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md">§40</a> — exactly which component code, server functions, and stdlib units are reachable to which role at which entry point. Two consequences fall out. Anonymous visitors download a strictly smaller initial bundle than admins because the gated subtree's atoms aren't shipped; and prefetching is tiered by route topology — visible chunks ship at idle, hover-targets prefetch on hover, deeper navigation pulls on-demand. Every chunk filename embeds a stable FNV-1a content hash (<a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md">§47</a>), so adopter caches stay valid across builds when source bytes don't change. The compiler flags shapes that defeat the analysis — a route that links nowhere, a gate that needs a runtime check — so you fix them at the source.
   </p>
 
   <h3>Validators auto-synthesize a validity surface</h3>
@@ -141,7 +141,7 @@
 
   <h3>This page is the highlights</h3>
   <p>
-    The full language surface — refinement types (<code>&lt;price&gt;: number(&gt;0 &amp;&amp; &lt;10000)</code>), the <code>not</code> / <code>is some</code> / <code>given</code> presence model, linear types (<code>lin</code> for exact-once consumption), inline-test blocks, the <code>!{}</code> error handler, lifecycle effects via <code>&lt;onTransition&gt;</code> + temporal effects via <code>&lt;onTimeout&gt;</code> / <code>&lt;onIdle&gt;</code>, the meta layer (<code>^{}</code> blocks that run at compile time), nested <code>&lt;program&gt;</code> for workers, hierarchy + <code>history</code> + <code>internal:rule=</code> on composite engine state-children, <code>&lt;auth role&gt;</code> first-class auth gates with full interpolation, per-route per-role content-addressed chunk splitting with tier-1/tier-2/tier-N prefetching, the <code>import</code> system with <code>pinned</code> for forward-references, scoped CSS via <code>#{}</code>, and the <code>bun scrml promote --match</code> CLI that mechanically lifts <code>if</code>-chains into exhaustive <code>match</code> blocks — is documented in the <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/tutorial.md">tutorial</a> and the <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md">spec</a>. What's on this page is the headline. What's in the spec is the language.
+    The full language surface — refinement types (<code>&lt;price&gt;: number(&gt;0 &amp;&amp; &lt;10000)</code>), the <code>not</code> / <code>is some</code> / <code>given</code> presence model, linear types (<code>lin</code> for exact-once consumption), inline-test blocks, the <code>!{}</code> error handler, lifecycle effects via <code>&lt;onTransition&gt;</code> + temporal effects via <code>&lt;onTimeout&gt;</code> / <code>&lt;onIdle&gt;</code>, the meta layer (<code>^{}</code> blocks that run at compile time), nested <code>&lt;program&gt;</code> for workers, hierarchy + <code>history</code> + <code>internal:rule=</code> on composite engine state-children, <code>&lt;auth role&gt;</code> first-class auth gates with full interpolation, per-route per-role content-addressed chunk splitting with tier-1/tier-2/tier-N prefetching, the <code>import</code> system with <code>pinned</code> for forward-references, scoped CSS via <code>#{}</code>, and the <code>bun scrml promote --match</code> CLI that mechanically lifts <code>if</code>-chains into exhaustive <code>match</code> blocks — is documented in the <a href="https://github.com/scrml-lang/scrml/blob/main/docs/tutorial.md">tutorial</a> and the <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md">spec</a>. What's on this page is the headline. What's in the spec is the language.
   </p>
 
   <h2>Quick start</h2>
@@ -179,22 +179,22 @@ scrml build &lt;dir&gt;         # production build</code></pre>
 
   <h2>Status</h2>
   <p>
-    scrml is in active pre-1.0 development. The language spec evolves as we find friction and the compiler catches up. The <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/changelog.md">changelog</a> tracks what just landed and what's in flight. The compiler runs on <a href="https://bun.sh">Bun</a>; compiled output is plain JavaScript and runs in any browser or JavaScript runtime.
+    scrml is in active pre-1.0 development. The language spec evolves as we find friction and the compiler catches up. The <a href="https://github.com/scrml-lang/scrml/blob/main/docs/changelog.md">changelog</a> tracks what just landed and what's in flight. The compiler runs on <a href="https://bun.sh">Bun</a>; compiled output is plain JavaScript and runs in any browser or JavaScript runtime.
   </p>
 
   <h2>Learn more</h2>
   <ul>
-    <li><a href="https://github.com/bryanmaclee/scrmlTS/blob/main/docs/tutorial.md">Tutorial</a> — step-by-step, zero to full-stack</li>
-    <li><a href="https://github.com/bryanmaclee/scrmlTS/blob/main/DESIGN.md">Design notes</a> — rationale and philosophy</li>
-    <li><a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md">Language specification</a> — the full formal spec</li>
-    <li><a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC-INDEX.md">Spec quick-lookup</a> — find any section fast</li>
-    <li><a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/PIPELINE.md">Pipeline contracts</a> — stage-by-stage compiler pipeline</li>
-    <li><a href="https://github.com/bryanmaclee/scrmlTS/tree/main/examples">23 runnable examples</a> — single-file apps covering state, realtime, SQL, engines, components, validators, channels, and more — plus a multi-page trucking-dispatch reference app</li>
+    <li><a href="https://github.com/scrml-lang/scrml/blob/main/docs/tutorial.md">Tutorial</a> — step-by-step, zero to full-stack</li>
+    <li><a href="https://github.com/scrml-lang/scrml/blob/main/DESIGN.md">Design notes</a> — rationale and philosophy</li>
+    <li><a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md">Language specification</a> — the full formal spec</li>
+    <li><a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC-INDEX.md">Spec quick-lookup</a> — find any section fast</li>
+    <li><a href="https://github.com/scrml-lang/scrml/blob/main/compiler/PIPELINE.md">Pipeline contracts</a> — stage-by-stage compiler pipeline</li>
+    <li><a href="https://github.com/scrml-lang/scrml/tree/main/examples">23 runnable examples</a> — single-file apps covering state, realtime, SQL, engines, components, validators, channels, and more — plus a multi-page trucking-dispatch reference app</li>
   </ul>
 
   <footer>
     <p>
-      scrml is MIT-licensed. The compiler, language spec, and runtime live at <a href="https://github.com/bryanmaclee/scrmlTS">github.com/bryanmaclee/scrmlTS</a>.
+      scrml is MIT-licensed. The compiler, language spec, and runtime live at <a href="https://github.com/scrml-lang/scrml">github.com/scrml-lang/scrml</a>.
     </p>
   </footer>
 </main>
