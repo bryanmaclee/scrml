@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
 | MED | 680 | 8 |
-| LOW | 476 | 0 |
+| LOW | 475 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -26507,14 +26507,17 @@ once, outside any effect. And `setAttribute("disabled", false)` DISABLES the but
 the boolean-attribute half of [[g-lifted-markup-ignores-if-attr-and-false-checked]]. Fix direction: a tracking effect
 writing the DOM property / attribute presence.
 
-### g-test-isolation-gated-handler-narrowing-uncaught-typeerror-s469 — `browser-gated-handler-narrowing-s462` raises an uncaught `TypeError … reactive_get("user").name` that the NEXT browser file's window-error collector counts — `NEW S469; LOW; open`
-<!-- @gap id=g-test-isolation-gated-handler-narrowing-uncaught-typeerror-s469 sev=LOW status=open locus=compiler/tests/browser/browser-gated-handler-narrowing-s462.browser.test.js(a lingering effect / handler after its test ends)+compiler/tests/browser/browser-handler-if-else-helpers-s462.browser.test.js(`<match> arm, ;-sequence` collects it) prov=review:s469-lift-if-render-gate-round-2;empirical:S469(main: running the two files in one process fails the second's `;`-sequence case; each alone passes) -->
+### g-test-isolation-gated-handler-narrowing-uncaught-typeerror-s469 — `browser-gated-handler-narrowing-s462` raises an uncaught `TypeError … reactive_get("user").name` that the NEXT browser file's window-error collector counts — `NEW S469; LOW; RESOLVED S469`
+<!-- @gap id=g-test-isolation-gated-handler-narrowing-uncaught-typeerror-s469 sev=LOW status=resolved locus=compiler/tests/browser/browser-gated-handler-narrowing-s462.browser.test.js(a lingering effect / handler after its test ends)+compiler/tests/browser/browser-handler-if-else-helpers-s462.browser.test.js(`<match> arm, ;-sequence` collects it) prov=review:s469-lift-if-render-gate-round-2;empirical:S469(main: running the two files in one process fails the second's `;`-sequence case; each alone passes) -->
 
 Measured S469 on main and on this branch: `bun test …gated-handler-narrowing-s462… …handler-if-else-helpers-s462…`
 → 1 fail (8 `TypeError: null is not an object (evaluating '_scrml_cs_reactive_get("user").name')` in the second
 file's collector); either file alone passes. A sharded run fails it whenever the two share a shard. Fix
 direction: tear down the first file's page (dispose its effects / reset the window) after each test, or scope the
 collector to the test's own mount.
+
+**RESOLVED S469** by #1511 (s469-browser-suite-health, `0249c41f3` "isolate per-mount listeners in the s462
+gated/if-else files"): re-run on this branch after merging main — the two files in one process: 77 pass, 0 fail.
 
 ### g-row-and-lift-if-gate-not-memoryless-s469 — an `if=` gate in an `<each>` row or in lifted markup keeps the SAME element (its state, its live inner bindings) across false → true; §6.7.2 says an `if=` scope destroys on false and re-mounts memorylessly — `NEW S469; MED; open`
 <!-- @gap id=g-row-and-lift-if-gate-not-memoryless-s469 sev=MED status=open locus=compiler/src/codegen/emit-lift.js(emitLiftIfGate)+compiler/src/codegen/emit-each.ts(renderTemplateChildToJs if= swap)+compiler/src/runtime-template.js(_scrml_ifrow_apply) prov=review:s469-lift-if-render-gate-round-1(F3);empirical:S469(browser lift-if-render-gate-s469 "built once, re-mounted": the same button node returns) -->
