@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 262 | 5 |
-| MED | 677 | 8 |
-| LOW | 472 | 0 |
+| MED | 678 | 8 |
+| LOW | 473 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -27221,3 +27221,18 @@ The client string pipeline's last pass now lowers `==` per §45.4 (`lowerEqualit
 <!-- @gap id=g-bootstrap-local-shadows-state-accepted-s469 sev=LOW status=open locus=searched:compiler/self-host-v2/*.scrml(grep `COLLIDES` — zero hits; no E-NAME-COLLIDES-STATE emitter) prov=empirical:s469-docs-migrate-3-round-3-probe;review:S469-docs-migrate-3-final-review-item-5 -->
 
 SPEC §6.1 / §34: a local identifier declaration that uses the same name as a registered state cell in scope is `E-NAME-COLLIDES-STATE` (Error). Probe (bootstrap, `bun scripts/scrml-boot.ts compile`): `let <count:int=0/>` at program level and `let count = 5;` inside a function body compiles with no diagnostic. impl#1 emits the code. NERDME.md ("State and reactivity" and "Not in the bootstrap yet") says the bootstrap does not check it yet. Fix direction: the bootstrap's scope pass refuses a `let` / `const` / parameter / arm binder whose name is a state cell in scope.
+
+## §S469-boot-css — gaps the S469 review of `s469-boot-css` (`#{}` CSS on the bootstrap) found outside its fix round (2026-10-23; ruling:user-voice-scrml.md S469 "⭐ RULED — `#{}` CSS on the bootstrap" (scrml-support `f487d21`) and "… scope root, engine in `<empty>`, CSS output" (`0908198`); change `docs/changes/s469-boot-css/`. Each probe re-executed on the branch with the bootstrap front end + printer. FILED, not fixed)
+
+### g-bootstrap-style-attr-bound-value-unguarded-s469 — bootstrap: `<p style=(@c)>` writes a cell's whole value into the `style` attribute with no CSS guard
+Probe: `let <c:string="color: red"/>` + `<p style=(@c)>x</p>` compiles clean; the client writes `rt.attr(scope$, el, "style", () => …c.get())`, and `rt.attr` judges only URL-valued attribute names (§5.2 rule 3), so ANY string reaches `el.style` — `background: url(https://evil.example/leak)` is a network fetch on first paint (no script runs: a CSS `url(javascript:…)` does not execute). The `#{}` bridge (`@c` → `var(--scrml-c)`) is guarded by `cssValueOf` (runtime.js); this path is not, so the CSS-injection pack (`slice-m4/css-injection-pack-s469.test.js`) does NOT cover it and its header says so. **Should it route through `cssValueOf`? Not as is:** `cssValueOf` admits one VALUE, and `style=` holds a declaration LIST (`color: red; padding: 2px`). Fix direction (recommended): a `cssDeclarationsOf` guard in the runtime that splits on `;` outside parentheses, admits each `prop: value` whose property is a plain name and whose value passes `cssValueOf`, and writes them with `el.style.setProperty` (refusing the whole value — fail closed — on any part that does not pass). §65.4.2 makes the quoted `style="…"` the dynamic-CSS channel; a `style=(expr)` binding is the same channel and needs the same wall.
+<!-- @gap id=g-bootstrap-style-attr-bound-value-unguarded-s469 sev=MED status=open locus=compiler/self-host-v2/slice-m1/runtime/runtime.js(attr~1744;urlGuardOf-only)+compiler/self-host-v2/print.scrml(Attr.Bound-style) prov=empirical:S469-boot-css-review-F4 -->
+
+### g-bootstrap-css-residuals-s469 — bootstrap `#{}` CSS: LOW residuals (accepted with no diagnostic, or a reader edge)
+1. **`url(@c)` is printed literally.** `p { background: url(@c); }` with a declared cell `c` compiles clean and prints `url(@c)` — the reader keeps an unquoted `url(…)` verbatim (CSS treats its content as a URL, so `@c` is not a reference there), and the browser requests the relative URL `@c`. Fix direction: E-CSS-SYNTAX on an `@` inside an unquoted `url(…)` ("a cell cannot be spliced into a url — §25.7 bridges a whole value"), or bridge the whole `url()` (unruled).
+2. **`:root` / `:host` inside a component scope match nothing.** In `@scope (…) { :root { … } }` `:root` is the document root, never inside the scope (and `:host` needs a shadow root); the rule is silently dead. Fix direction: E-CSS-SYNTAX (or a W-) naming `:scope` / the root's own class.
+3. **An author `data-scrml` attribute collides with the scope key.** The compiler replaces an author `data-scrml` on a component ROOT (lower.scrml `stampAttrs`), but one written on any other element is kept, and it both opens the matching component's scope there and acts as a donut limit for the enclosing component. Fix direction: refuse `data-scrml` as an author attribute (it is compiler-owned, like `data-scrml-gated`).
+4. **An extra `}`** directly after a block (only whitespace between) is now E-CSS-SYNTAX (fixed in this change, ruled S469 item 1). Still open: an extra `}` further on in markup text — after other text — is page text with no diagnostic; it is indistinguishable from content there.
+5. **`-->`** as a selector: `--> p { … }` was read as a type selector `--` (fixed in this change: an element name must start with a letter). The broader class — CSS's `<!--` / `-->` CDO/CDC tokens — needs no rule while every `<` is refused.
+6. **CR-only line endings** (round 3 comment model). The reader ends a `//` comment, a bad (unterminated) string and the `url(` extent bound at `\n` only, so in a file with bare `\r` line breaks a `//` comment runs to the end of the block (silently eating the rules after it) and an unterminated string's recovery skips too far. Fix direction: treat `\r`, `\r\n` and `\f` as line breaks wherever the reader looks for one (CSS Syntax §3.3 preprocessing does exactly that).
+<!-- @gap id=g-bootstrap-css-residuals-s469 sev=LOW status=open locus=compiler/self-host-v2/css-syntax.scrml(parseValue-url;parseCompound-pseudo)+compiler/self-host-v2/lower.scrml(stampAttrs) prov=empirical:S469-boot-css-review-F6 -->

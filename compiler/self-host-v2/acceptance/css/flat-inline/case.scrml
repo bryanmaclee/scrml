@@ -1,0 +1,11 @@
+// A flat `#{}` directly in a component's root is that root's inline style= (§9.1 DQ-7).
+<program>
+    <chip label:string/>
+    renders <span id="chip">
+        #{ color: navy; font-weight: 700; }
+        ${label}
+    </span>
+    <main>
+        <chip label="x"/>
+    </main>
+</program>

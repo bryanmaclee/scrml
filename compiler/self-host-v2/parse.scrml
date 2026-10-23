@@ -50,7 +50,8 @@ ${
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
-             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, mkSpan, newDiag } from "./ast.scrml"
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, ACss, mkSpan, newDiag } from "./ast.scrml"
+    import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml"
 
     // =========================================================================
     // Tokens, as the parser sees them: one TOTAL classification of TokenKind
@@ -3184,13 +3185,18 @@ ${
     // `#` followed by an opening brace: a CSS block (§5.6).
     fn atCss(mp: MP) -> boolean { return chAt(mp, 0) == "#" && chAt(mp, 1) == "{" }
 
-    // A `#{…}` block is out of bootstrap slice M2: report it and skip it whole
-    // (balanced by the lexer), never let it through as text.
-    fn skipCss(mp: MP) -> MP {
-        const start: int = mp.pos
-        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
-        const m: MP = backToMarkup(mp, tp)
-        return mDiag(mAt(m, lastEnd(tp)), "E-BOOTSTRAP-UNSUPPORTED", "a `#{…}` CSS block is not in bootstrap slice M2", start, lastEnd(tp))
+    // s469 — a `#{…}` block (§9.1): read by css-syntax.scrml (CSS is a foreign
+    // language, scanned at the character level — never by the scrml lexer),
+    // its findings reported here. The node renders nothing; analyze's cssPass
+    // decides which stylesheet it feeds.
+    type RCss:struct = { n: ANode, mp: MP }
+
+    fn parseCssNode(mp: MP) -> RCss {
+        const r: CssParsed = parseCssBlock(mp.src, mp.pos, mp.nid)
+        let m: MP = { src: mp.src, pos: r.end, nid: r.nid, diags: mp.diags, file: mp.file }
+        for (const e of r.errs) { m = mDiag(m, e.code, e.text, e.start, e.end) }
+        const n: ANode = { nid: m.nid, span: r.css.span, k: ANodeK.Css(r.css) }
+        return { n: n, mp: mBump(m) }
     }
 
     fn lastEnd(tp: TP) -> int {
@@ -4727,13 +4733,15 @@ ${
             } else if (mLooking(m, "//") && freeTextCommentAt(m)) {
                 m = skipLineComment(m)
             } else if (atCss(m)) {
-                if (text != "") {
-                    out = out.concat([textNode(m, textStart, text)])
-                    m = mBump(m)
-                    text = ""
-                }
-                m = skipCss(m)
-                textStart = m.pos
+                // s469: like a comment, a `#{…}` block does NOT split the text
+                // around it — it renders nothing where it stands, and two
+                // adjacent text runs would print as one DOM text node (the
+                // template paths count one). The pending text stays pending
+                // (flushed after the Css node — order among siblings is
+                // invisible for a node that renders nothing).
+                const rc: RCss = parseCssNode(m)
+                out = out.concat([rc.n])
+                m = rc.mp
             } else if (foreignLevel(m) >= 0) {
                 if (text != "") {
                     out = out.concat([textNode(m, textStart, text)])
@@ -5477,7 +5485,10 @@ ${
 
     fn parseMarkupItem(mp: MP) -> RMItems {
         const start: int = mp.pos
-        if (atCss(mp)) return { items: [], mp: skipCss(mp) }
+        if (atCss(mp)) {
+            const rc: RCss = parseCssNode(mp)
+            return mItem(rc.mp, start, AItemK.MarkupItem(rc.n))
+        }
         // s452: a `!{ … }` standing in a program body (E-ERROR-014, skipSigil)
         if (chAt(mp, 0) == "!" && chAt(mp, 1) == "{") return { items: [], mp: skipSigil(mp) }
         if (atInterp(mp)) {

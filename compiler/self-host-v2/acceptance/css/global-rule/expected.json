@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-css-global-rule",
+  "description": "a program-level `#{}` compiles (its rules go to `@layer global`) and the page renders.",
+  "language-version": "1.0",
+  "spec": "§9.1 · §65.5",
+  "rationale": "§9.1 DQ-6: top-level / program-level `#{}` SHALL compile and joins the page's global styles.",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#n",
+        "text": "hello"
+      }
+    ]
+  }
+}

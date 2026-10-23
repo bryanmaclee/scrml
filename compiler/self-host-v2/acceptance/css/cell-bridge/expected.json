@@ -1,0 +1,21 @@
+{
+  "id": "acceptance-css-cell-bridge",
+  "description": "a program cell read in CSS compiles and runs; the cell still renders and updates.",
+  "language-version": "1.0",
+  "spec": "§25.7 · §65.3.2",
+  "rationale": "§25.7: `@name` of a declared reactive cell keeps the reactive-CSS-var bridge `var(--scrml-name)`.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#x",
+        "text": "purple"
+      }
+    ]
+  }
+}

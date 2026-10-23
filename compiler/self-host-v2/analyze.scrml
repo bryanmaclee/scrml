@@ -46,12 +46,14 @@ ${
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
              DeclKind, HostCall, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
              SqlKind, SqlTables, SqlColumns, Db, Driver,
+             CssPart, CssDecl, StyleRule, CssImport, ScopeSheet,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, ASql,
-             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, mkSpan, newDiag } from "./ast.scrml"
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc,
+             ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, sqlFacts, slotInLiteral, txControl, txControlAware } from "./sql.scrml"
@@ -414,6 +416,7 @@ ${
         gated: GateInfo[],      // s449: the `<form>` elements that bind a surfaced value (§55.7), and the values that gate each (§55.17.3)
         persists: PersistInfo[], // s451: the program cells' accepted `persist=` (§6.14)
         server: ServerFacts,    // s451 (U1a): route placement + the program's queries and databases (placePass)
+        css: CssFacts,          // s469: the stylesheet the program's `#{}` blocks make (cssPass)
     }
 
     // s451 (U1a) — what route inference and the SQL pass decided (placePass).
@@ -1452,6 +1455,7 @@ ${
             .Text(text: t) :> not
             .Interp(e: x) :> not
             .DeclNode(d: d) :> not
+            .Css(c: c) :> not
             .Effect(w: w) :> not
         }
     }
@@ -3630,6 +3634,7 @@ ${
             .Text(text: t) :> noHandles(st)
             .Interp(e: x) :> noHandles(st)
             .DeclNode(d: d) :> noHandles(st)
+            .Css(c: c) :> noHandles(st)
             .Effect(w: w) :> noHandles(st)
         }
     }
@@ -10861,6 +10866,7 @@ ${
                 .Text(text: t) :> not
                 .Interp(e: x) :> not
                 .DeclNode(d: d) :> not
+                .Css(c: c) :> not
                 .Effect(w: w) :> not
             }
             if (e is given) {
@@ -10868,7 +10874,7 @@ ${
                 st = showHostCheck(env, e, st)
                 st = attrCaseDiags(env, e, st)
                 prev = chainRoleAfter(e)
-            } else if (!blankNode(n)) {
+            } else if (!blankNode(n) && !isCssNode(n)) {
                 prev = 0
             }
         }
@@ -11044,6 +11050,7 @@ ${
             .Text(text: x) :> []
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
+            .Css(c: c) :> []
             .Effect(w: w) :> []
         }
     }
@@ -11206,6 +11213,7 @@ ${
             .Text(text: t) :> st
             .Interp(e: e) :> resolveExpr(env, e, not, st).st
             .DeclNode(d: d) :> addDiag(st, env.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a declaration inside markup is not in bootstrap slice M2")
+            .Css(c: c) :> st
             .Effect(w: w) :> resolveEffect(env, w, st)
         }
     }
@@ -11372,6 +11380,20 @@ ${
         return addElem(st, e.nid, ElemFact.MSlot)
     }
 
+    // s469 — a `#{…}` block renders nothing where it stands: it does not break
+    // an `if=` / `else` chain (lower.scrml blankText agrees).
+    fn isCssNode(n: ANode) -> boolean {
+        const k: ANodeK = n.k
+        return match k {
+            .Css(c: c) :> true
+            .Text(text: t) :> false
+            .Elem(e: e) :> false
+            .Interp(e: e) :> false
+            .DeclNode(d: d) :> false
+            .Effect(w: w) :> false
+        }
+    }
+
     fn blankNode(n: ANode) -> boolean {
         const k: ANodeK = n.k
         return match k {
@@ -11379,6 +11401,7 @@ ${
             .Elem(e: e) :> false
             .Interp(e: e) :> false
             .DeclNode(d: d) :> false
+            .Css(c: c) :> false
             .Effect(w: w) :> false
         }
     }
@@ -12766,6 +12789,7 @@ ${
             .Text(text: t) :> []
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
+            .Css(c: c) :> []
             // s449: an effect body is a block like an inline handler's
             .Effect(w: w) :> blockRedeclares(file, w.body, [], false)
         }
@@ -16282,6 +16306,7 @@ ${
             .Text(text: x) :> ts
             .Interp(e: x) :> typeInterp(env, x, ts)
             .DeclNode(d: d) :> ts
+            .Css(c: c) :> ts
             .Effect(w: w) :> typeEffect(env, w, ts)
         }
     }
@@ -17691,6 +17716,7 @@ ${
             .Interp(e: x) :> [interpPos(x, n.span, file)]
             .Text(text: s) :> []
             .DeclNode(d: d) :> []          // refused where it stands
+            .Css(c: c) :> []
             .Effect(w: w) :> []            // a lifecycle body — the effect rule's (§6.7.4), not a value position
         }
     }
@@ -18258,7 +18284,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = []
         for (const t of g.types) { defs = defs.concat([t.def]) }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not }
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not }
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {
@@ -18350,6 +18376,7 @@ ${
         return match k {
             .Elem(e: e) :> holdInElem(file, e, declared, shadow, st)
             .DeclNode(d: d) :> holdInDecl(file, d, declared, shadow, st)
+            .Css(c: c) :> st
             .Text(text: t) :> st
             .Interp(e: x) :> st
             .Effect(w: w) :> st
@@ -18400,6 +18427,7 @@ ${
             .Text(text: t) :> []
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
+            .Css(c: c) :> []
         }
     }
 
@@ -18963,6 +18991,7 @@ ${
             .Interp(e: x) :> withSites(acc, sqlsInExpr(x), scope)
             .Effect(w: w) :> withSites(acc, sqlsInBlock(w.body), scope)
             .DeclNode(d: d) :> dbsInDecl(g, file, d, scope, acc)
+            .Css(c: c) :> acc
             .Text(text: t) :> acc
         }
     }
@@ -19053,6 +19082,7 @@ ${
             .Text(text: t) :> not
             .Interp(e: x) :> not
             .DeclNode(d: d) :> not
+            .Css(c: c) :> not
             .Effect(w: w) :> not
         }
     }
@@ -19229,6 +19259,7 @@ ${
             .Text(text: s) :> []
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
+            .Css(c: c) :> []
         }
     }
 
@@ -21110,6 +21141,383 @@ ${
     // Entry. `files` in LINK ORDER: every file after the files it imports; the
     // entry (the file with `<program>`) last.
     // =========================================================================
+    // =========================================================================
+    // s469 — THE STYLESHEET PASS (SPEC §9.1, §25.7, §65; s469-boot-css). Every
+    // `#{…}` block the parser read (ANodeK.Css), placed by where it stands:
+    //   - at a file's top level (the entry file, which holds the `<program>`),
+    //     in the program body, or inside any element that is not inside a
+    //     component → PROGRAM-GLOBAL rules (§9.1 DQ-6; R4 S440: "a plain element
+    //     creates no scope"), emitted in `@layer global` (§65.5);
+    //   - anywhere inside a component — a declaration's `renders` (§66.15.1: "A
+    //     declaration with typed attributes and a `renders` clause IS the
+    //     component"), the bodies of its fields' variants, its child fields'
+    //     renders → that component's `@scope ([data-scrml="<name>"]) to
+    //     ([data-scrml])` (§9.1 DQ-7), its root stamped `data-scrml` (lower);
+    //   - a block of ONLY bare declarations written DIRECTLY in a component's
+    //     `renders` root → that root's inline `style="…"` (§9.1 DQ-7; §65.4.1).
+    // A declaration value's `@name` is a declared PROGRAM cell → `var(--scrml-
+    // name)`, its value written to `:root` at run time by the CSS-variable bridge
+    // (§25.7; the runtime's `cssVar` admits only a safe value — the injection
+    // boundary). `<theme>` is refused at parse, so no `@name` is a theme token:
+    // a name that is neither is E-THEME-TOKEN-UNKNOWN (§65.3.2).
+    //
+    // FAIL-CLOSED (E-BOOTSTRAP-UNSUPPORTED — each unruled or not built):
+    //   a flat block anywhere but directly in a component's root (§9.1 ⚑ OPEN);
+    //   a flat block mixed with rules; a flat block on a root that already has
+    //   `style=` (the merge is unruled); `@charset` / `@import` in a component
+    //   (§65.8 hoists the program-global ones); a `#{}` at the top level of a
+    //   file with no `<program>` (DQ-6 does not say whose page a module's
+    //   top-level sheet joins); `@name` of a component's own field (a
+    //   per-instance value has no `:root` home — the bridge is program-level);
+    //   `@name` of a cell that is not an int / number / string.
+    // =========================================================================
+    export type CssInline:struct = { decl: int, decls: CssDecl[] }
+    export type CssBridge:struct = { cell: Sym, idx: int }
+    export type CssFacts:struct = {
+        charsets: string[],
+        imports: CssImport[],
+        global: StyleRule[],
+        scopes: ScopeSheet[],
+        inline: CssInline[],
+        bridges: CssBridge[],
+    }
+
+    export fn noCssFacts() -> CssFacts { return { charsets: [], imports: [], global: [], scopes: [], inline: [], bridges: [] } }
+
+    type CssPlace:struct = { comp: boolean, decl: Sym, name: string, root: boolean, rootStyled: boolean }
+    type CssAcc:struct = { facts: CssFacts, diags: Diag[] }
+
+    fn cssDiag(a: CssAcc, file: string, span: ASpan, code: string, msg: string) -> CssAcc {
+        return { facts: a.facts, diags: a.diags.concat([newDiag(code, msg, file, span)]) }
+    }
+
+    fn cssUnsupported(a: CssAcc, file: string, span: ASpan, msg: string) -> CssAcc {
+        return cssDiag(a, file, span, "E-BOOTSTRAP-UNSUPPORTED", msg)
+    }
+
+    fn cssWithFacts(a: CssAcc, f: CssFacts) -> CssAcc { return { facts: f, diags: a.diags } }
+
+    fn cssPrimitive(t: Type) -> string {
+        return match t {
+            .Int :> ""
+            .Num :> ""
+            .Str :> ""
+            .Bool :> "a bool"
+            .Named(sym: s) :> "a `" + s.hint + "`"
+            .Seq(elem: e) :> "a sequence"
+            .Maybe(inner: i) :> "a `T | not`"
+        }
+    }
+
+    fn hasBridge(bs: CssBridge[], id: int) -> boolean {
+        for (const b of bs) {
+            if (b.cell.id == id) return true
+        }
+        return false
+    }
+
+    type CssPartsR:struct = { parts: CssPart[], acc: CssAcc }
+
+    fn cssValueParts(g: Globals, prog: DeclSrc | not, at: CssPlace, file: string, ps: ACssPart[], a0: CssAcc) -> CssPartsR {
+        let a: CssAcc = a0
+        let out: CssPart[] = []
+        for (const p of ps) {
+            const k: ACssPart = p
+            const text: string | not = match k {
+                .CText(text: t) :> t
+                .CRef(r: r) :> not
+            }
+            const ref: ACssRef | not = match k {
+                .CText(text: t) :> not
+                .CRef(r: r) :> r
+            }
+            if (text is given) out = out.concat([CssPart.CssText(text)])
+            if (ref is given) {
+                const rr: CssPartsR = cssRef(g, prog, at, file, ref, a)
+                a = rr.acc
+                out = out.concat(rr.parts)
+            }
+        }
+        return { parts: out, acc: a }
+    }
+
+    fn cssRef(g: Globals, prog: DeclSrc | not, at: CssPlace, file: string, r: ACssRef, a: CssAcc) -> CssPartsR {
+        // the nearest scope first: inside a component, `@name` is its own field before a program cell
+        if (at.comp) {
+            for (const ds of g.decls) {
+                if (ds.info.sym.id == at.decl.id && fieldIndex(ds.info, r.name) >= 0) {
+                    return { parts: [], acc: cssUnsupported(a, file, r.span, "`@" + r.name + "` is a field of `<" + at.name + ">` — a per-instance value in a component's CSS is not in the bootstrap (the §25.7 bridge writes program cells to `:root`)") }
+                }
+            }
+        }
+        let idx = -1
+        if (prog is given) idx = fieldIndex(prog.info, r.name)
+        if (prog is given && idx >= 0) {
+            const f: FieldInfo = prog.info.fields[idx]
+            const bad: string = cssPrimitive(f.ty)
+            if (bad.length > 0) {
+                return { parts: [], acc: cssUnsupported(a, file, r.span, "`@" + r.name + "` is " + bad + " cell — the bootstrap's CSS-variable bridge (§25.7) carries an int, a number or a string; convert it to a string cell for CSS") }
+            }
+            let bs: CssBridge[] = a.facts.bridges
+            if (!hasBridge(bs, f.sym.id)) bs = bs.concat([{ cell: f.sym, idx: idx }])
+            const nf: CssFacts = { charsets: a.facts.charsets, imports: a.facts.imports, global: a.facts.global, scopes: a.facts.scopes,
+                                   inline: a.facts.inline, bridges: bs }
+            return { parts: [CssPart.CellVar(f.sym)], acc: cssWithFacts(a, nf) }
+        }
+        return { parts: [], acc: cssDiag(a, file, r.span, "E-THEME-TOKEN-UNKNOWN", "`@" + r.name + "` names no theme token and no declared cell (§65.3.2) — declare `<" + r.name + "…/>` in the program, fix the spelling, or drop the `@` for a literal CSS value") }
+    }
+
+    type CssDeclsR:struct = { decls: CssDecl[], acc: CssAcc }
+
+    fn cssDecls(g: Globals, prog: DeclSrc | not, at: CssPlace, file: string, ds: ACssDecl[], a0: CssAcc) -> CssDeclsR {
+        let a: CssAcc = a0
+        let out: CssDecl[] = []
+        for (const d of ds) {
+            const r: CssPartsR = cssValueParts(g, prog, at, file, d.value, a)
+            a = r.acc
+            out = out.concat([{ prop: d.prop, value: r.parts }])
+        }
+        return { decls: out, acc: a }
+    }
+
+    fn addScope(ss: ScopeSheet[], name: string, rs: StyleRule[]) -> ScopeSheet[] {
+        let out: ScopeSheet[] = []
+        let found = false
+        for (const s of ss) {
+            if (s.component == name) {
+                out = out.concat([{ component: s.component, rules: s.rules.concat(rs) }])
+                found = true
+            } else {
+                out = out.concat([s])
+            }
+        }
+        if (!found) out = out.concat([{ component: name, rules: rs }])
+        return out
+    }
+
+    fn addInline(xs: CssInline[], decl: int, ds: CssDecl[]) -> CssInline[] {
+        let out: CssInline[] = []
+        let found = false
+        for (const x of xs) {
+            if (x.decl == decl) {
+                out = out.concat([{ decl: x.decl, decls: x.decls.concat(ds) }])
+                found = true
+            } else {
+                out = out.concat([x])
+            }
+        }
+        if (!found) out = out.concat([{ decl: decl, decls: ds }])
+        return out
+    }
+
+    fn cssWhere(at: CssPlace) -> string {
+        if (at.comp) return "inside `<" + at.name + ">`, below its `renders` root"
+        return "outside any component (the program body, a file's top level, or a plain element)"
+    }
+
+    fn cssBlock(g: Globals, prog: DeclSrc | not, at: CssPlace, file: string, c: ACss, a0: CssAcc) -> CssAcc {
+        let a: CssAcc = a0
+        let flats: ACssDecl[] = []
+        let rules: ACssRule[] = []
+        let statements = 0
+        for (const it of c.items) {
+            const k: ACssItem = it
+            const f: ACssDecl | not = match k {
+                .CssFlat(d: d) :> d
+                .CssRule(r: r) :> not
+                .CssCharset(span: s, encoding: e) :> not
+                .CssImport(span: s, url: u) :> not
+            }
+            const r: ACssRule | not = match k {
+                .CssRule(r: r) :> r
+                .CssFlat(d: d) :> not
+                .CssCharset(span: s, encoding: e) :> not
+                .CssImport(span: s, url: u) :> not
+            }
+            if (f is given) flats = flats.concat([f])
+            if (r is given) rules = rules.concat([r])
+            if (f is not && r is not) statements = statements + 1
+        }
+        if (flats.length > 0) {
+            if (rules.length > 0 || statements > 0) {
+                return cssUnsupported(a, file, c.span, "a `#" + "{…}` block that mixes bare declarations with selector rules or at-rules — its meaning is unruled (§9.1: a flat block holds ONLY `property: value;` pairs); split it into two blocks")
+            }
+            if (!(at.comp && at.root)) {
+                return cssUnsupported(a, file, c.span, "bare declarations with no selector " + cssWhere(at) + " — §9.1 rules a flat block only directly in a component's `renders` root (its inline `style=`; ⚑ OPEN elsewhere); add a selector, or move it into the root element")
+            }
+            if (at.rootStyled) {
+                return cssUnsupported(a, file, c.span, "a flat `#" + "{…}` on `<" + at.name + ">`'s root, which already has `style=` — how the two combine is unruled (§65.1 orders them, but merging into one attribute is not specified); keep one")
+            }
+            const dr: CssDeclsR = cssDecls(g, prog, at, file, flats, a)
+            a = dr.acc
+            const nf: CssFacts = { charsets: a.facts.charsets, imports: a.facts.imports, global: a.facts.global, scopes: a.facts.scopes,
+                                   inline: addInline(a.facts.inline, at.decl.id, dr.decls), bridges: a.facts.bridges }
+            return cssWithFacts(a, nf)
+        }
+        let charsets: string[] = a.facts.charsets
+        let imports: CssImport[] = a.facts.imports
+        for (const it of c.items) {
+            const k: ACssItem = it
+            const cs: string | not = match k {
+                .CssCharset(span: s, encoding: e) :> e
+                .CssImport(span: s, url: u) :> not
+                .CssRule(r: r) :> not
+                .CssFlat(d: d) :> not
+            }
+            const im: CssImport | not = match k {
+                .CssImport(span: s, url: u, conditions: cd) :> cssImportOf(u, cd)
+                .CssCharset(span: s, encoding: e) :> not
+                .CssRule(r: r) :> not
+                .CssFlat(d: d) :> not
+            }
+            const sp: ASpan | not = match k {
+                .CssCharset(span: s, encoding: e) :> s
+                .CssImport(span: s, url: u) :> s
+                .CssRule(r: r) :> not
+                .CssFlat(d: d) :> not
+            }
+            if (at.comp && sp is given) {
+                a = cssUnsupported(a, file, sp, "`@charset` / `@import` in a component's `#" + "{…}` — §65.8 hoists only a program-global one; move it to a program-level block")
+            } else {
+                if (cs is given) charsets = charsets.concat([cs])
+                if (im is given) imports = imports.concat([im])
+            }
+        }
+        let out: StyleRule[] = []
+        for (const r of rules) {
+            const dr: CssDeclsR = cssDecls(g, prog, at, file, r.decls, a)
+            a = dr.acc
+            out = out.concat([{ sel: r.sel, decls: dr.decls }])
+        }
+        let globalRules: StyleRule[] = a.facts.global
+        let scopes: ScopeSheet[] = a.facts.scopes
+        if (at.comp) {
+            if (out.length > 0) scopes = addScope(scopes, at.name, out)
+        } else {
+            globalRules = globalRules.concat(out)
+        }
+        const nf: CssFacts = { charsets: charsets, imports: imports, global: globalRules, scopes: scopes, inline: a.facts.inline, bridges: a.facts.bridges }
+        return cssWithFacts(a, nf)
+    }
+
+    fn cssImportOf(u: string, cd: string) -> CssImport { return { url: u, conditions: cd } }
+
+    // The nodes `ns` stand directly in an element at `at` (`at.root`: that
+    // element is a component's `renders` root).
+    fn cssNodes(g: Globals, prog: DeclSrc | not, at: CssPlace, file: string, ns: ANode[], a0: CssAcc) -> CssAcc {
+        let a: CssAcc = a0
+        const below: CssPlace = { comp: at.comp, decl: at.decl, name: at.name, root: false, rootStyled: false }
+        for (const n of ns) {
+            const k: ANodeK = n.k
+            const c: ACss | not = match k {
+                .Css(c: c) :> c
+                .Elem(e: e) :> not
+                .Text(text: t) :> not
+                .Interp(e: x) :> not
+                .DeclNode(d: d) :> not
+                .Effect(w: w) :> not
+            }
+            const e: AElem | not = match k {
+                .Elem(e: e) :> e
+                .Css(c: c) :> not
+                .Text(text: t) :> not
+                .Interp(e: x) :> not
+                .DeclNode(d: d) :> not
+                .Effect(w: w) :> not
+            }
+            if (c is given) a = cssBlock(g, prog, at, file, c, a)
+            if (e is given) a = cssNodes(g, prog, below, file, e.kids, a)
+        }
+        return a
+    }
+
+    fn cssDeclRenders(d: ADecl) -> AElem[] {
+        const r: AElem | not = d.renders
+        if (r is not) return []
+        return [r]
+    }
+
+    fn cssFieldDeclsOf(ds: DeclSrc) -> ADecl[] {
+        const p: AProgram | not = ds.p
+        if (p is given) {
+            let out: ADecl[] = []
+            for (const it of p.items) {
+                for (const d of declsOfItem(it)) {
+                    if (!isNestedUserDecl(d)) out = out.concat([d])
+                }
+            }
+            return out
+        }
+        const ud: ADecl | not = ds.d
+        if (ud is given) return childFields(ud.body)
+        return []
+    }
+
+    // The markup a declaration owns below its root: its fields' variant bodies
+    // and their renders (§66.4 rule 4, O5 (1i)) — nested to any depth.
+    fn cssFieldMarkup(g: Globals, prog: DeclSrc | not, at: CssPlace, file: string, fds: ADecl[], a0: CssAcc) -> CssAcc {
+        let a: CssAcc = a0
+        for (const fd of fds) {
+            for (const c of fd.body) {
+                for (const sc of stateChildOf(c)) { a = cssNodes(g, prog, at, file, sc.body, a) }
+            }
+            for (const r of cssDeclRenders(fd)) { a = cssNodes(g, prog, at, file, [{ nid: -1, span: r.span, k: ANodeK.Elem(r) }], a) }
+            a = cssFieldMarkup(g, prog, at, file, childFields(fd.body), a)
+        }
+        return a
+    }
+
+    type CssPassR:struct = { facts: CssFacts, diags: Diag[] }
+
+    fn cssPass(g: Globals) -> CssPassR {
+        let prog: DeclSrc | not = not
+        for (const ds of g.decls) {
+            if (ds.isProgram && ds.info.sym.id == g.program.id) prog = ds
+        }
+        let a: CssAcc = { facts: noCssFacts(), diags: [] }
+        const none: Sym = mkSym(0 - 1, "")
+        const globalAt: CssPlace = { comp: false, decl: none, name: "", root: false, rootStyled: false }
+        // a file's top level (outside `<program>`)
+        for (const f of g.files) {
+            let hasProgram = false
+            for (const it of f.items) {
+                if (programOfItem(it) is given) hasProgram = true
+            }
+            for (const it of f.items) {
+                const n: ANode | not = markupOfItem(it)
+                if (n is given) {
+                    if (hasProgram && f.path == g.entry) {
+                        a = cssNodes(g, prog, globalAt, f.path, [n], a)
+                    } else if (isCssNode(n)) {
+                        a = cssUnsupported(a, f.path, n.span, "a `#" + "{…}` at the top level of a file with no `<program>` — §9.1 DQ-6 does not say whose page a module's top-level stylesheet joins; put it in the program, or in a component's `renders`")
+                    }
+                }
+            }
+        }
+        for (const ds of g.decls) {
+            if (ds.isProgram) {
+                const p: AProgram | not = ds.p
+                if (p is given) a = cssNodes(g, prog, globalAt, ds.file, markupNodes(p.items), a)
+                a = cssFieldMarkup(g, prog, globalAt, ds.file, cssFieldDeclsOf(ds), a)
+            } else {
+                const ud: ADecl | not = ds.d
+                if (ud is given) {
+                    for (const r of cssDeclRenders(ud)) {
+                        const rootAt: CssPlace = { comp: true, decl: ds.info.sym, name: ds.info.sym.hint, root: true,
+                                                   rootStyled: attrNamed(r.attrs, "style") is given }
+                        a = cssNodes(g, prog, rootAt, ds.file, r.kids, a)
+                    }
+                    const at: CssPlace = { comp: true, decl: ds.info.sym, name: ds.info.sym.hint, root: false, rootStyled: false }
+                    a = cssFieldMarkup(g, prog, at, ds.file, cssFieldDeclsOf(ds), a)
+                }
+            }
+        }
+        // (one `data-scrml` key per component holds by construction: the linker already refuses two
+        // declarations of one name — "the bootstrap links one namespace" — so no two scopes share a key;
+        // when that slice limit lifts, the key must carry the declaring module, or two `card`s merge)
+        return { facts: a.facts, diags: a.diags }
+    }
+
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram {
         const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [] }
         const ra: RGlobals = phaseA(files, entry, st0)
@@ -21120,6 +21528,8 @@ ${
         st = rr.st
         const rp: RPersists = persistPass(ra.g, files, st)
         st = rp.st
+        // s469: the stylesheet (§9.1, §65) — placed by position, its `@name` references resolved
+        const css: CssPassR = cssPass(ra.g)
         let decls: DeclInfo[] = []
         for (const d of ra.g.decls) { decls = decls.concat([d.info]) }
         let fns: FnInfo[] = []
@@ -21131,7 +21541,7 @@ ${
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
-                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts() }
+                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts(), css: css.facts }
         const scopeDiags: Diag[] = checkScopes(files, bound)
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
         // and the binder's decisions that read it (rulesPass, M3)
@@ -21142,7 +21552,7 @@ ${
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
         const vp: ValPass = validatorPass(ra.g, bound)
         // s468: static executable attribute values (§5.2 S464) and impure `fn` bodies (§48.3.3)
-        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fallOffPass(ra.g, bound))
+        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fallOffPass(ra.g, bound)).concat(css.diags)
         const typed: RTyping = typeProgram(files, bound, st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags))
         // s451 (U1a): route placement, the queries and the databases
         const pp: RPlaced = placePass(ra.g, bound, st, sum)
@@ -21151,14 +21561,14 @@ ${
         const typedT: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                                  names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                                  elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts }
+                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts, css: css.facts }
         const pl: PS = planPass(ra.g, typedT, sum, pp.st)
         const sf: ServerFacts = { servers: pp.facts.servers, sqls: pp.facts.sqls, dbs: pp.facts.dbs, places: pp.facts.places,
                                   inherited: pp.facts.inherited, plan: pl.plan }
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf }
+                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf, css: css.facts }
         const base: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags)
         // s462 (fix round 2): the own-value type reports run LAST, over every
         // other pass's diagnostics — so an Error anywhere inside the
@@ -21274,6 +21684,7 @@ ${
             .Text(text: x) :> []
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
+            .Css(c: c) :> []
             .Effect(w: w) :> []
         }
     }
@@ -21507,6 +21918,7 @@ ${
             .Text(text: x) :> []
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
+            .Css(c: c) :> []
             .Effect(w: w) :> []
         }
     }
@@ -21553,6 +21965,7 @@ ${
             .Text(text: x) :> not
             .Interp(e: x) :> not
             .DeclNode(d: d) :> not
+            .Css(c: c) :> not
             .Effect(w: w) :> not
         }
     }

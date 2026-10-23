@@ -26,7 +26,8 @@ const B3 = "```";
 const B4 = "````";
 const fence = (...body) => [`${B3}scrml`, ...body, B3];
 const GOOD = ["<program>", "    let <count:int=0/>", "    <p>${@count}</p>", "</program>"];
-const AHEAD = ["<program>", "    #{ p { color: red; } }", "    <p>hi</p>", "</program>"];
+// s469-boot-css: a `^{}` meta context (was `#{}`, which the bootstrap now compiles)
+const AHEAD = ["<program>", "    <main>", "        <p>hi</p>", "        ^{ 1 }", "    </main>", "</program>"];
 
 describe("A1 — fence lengths and characters", () => {
   test("a 4-backtick fence that shows ```scrml text opens no block and swallows nothing", () => {
@@ -193,11 +194,11 @@ describe("claim-gate end to end", () => {
   }, 120_000);
 
   test("A3b: a pinned spec-ahead block fails when the codes differ, passes when they match", () => {
-    const wrong = write("pin-wrong.md", ["<!-- dialect: ruled -->", "<!-- gate: spec-ahead [E-PARSE-ARM] — no #{} -->", ...fence(...AHEAD)]);
+    const wrong = write("pin-wrong.md", ["<!-- dialect: ruled -->", "<!-- gate: spec-ahead [E-PARSE-ARM] — no ^{} -->", ...fence(...AHEAD)]);
     const rw = claim(wrong);
     expect(rw.stderr).toContain("spec-ahead pin-mismatch");
     expect(rw.status).toBe(1);
-    const right = write("pin-right.md", ["<!-- dialect: ruled -->", "<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — no #{} -->", ...fence(...AHEAD)]);
+    const right = write("pin-right.md", ["<!-- dialect: ruled -->", "<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — no ^{} -->", ...fence(...AHEAD)]);
     const rr = claim(right);
     expect(rr.stdout).toContain("1 spec-ahead");
     expect(rr.status).toBe(0);
@@ -240,7 +241,7 @@ describe("claim-gate end to end", () => {
 describe("snippet-gate end to end", () => {
   test("A3b: a pinned spec-ahead file fails on a code mismatch", () => {
     const ahead = write("ahead-pin.scrml", AHEAD);
-    const md = write("cites-pin.md", ["<!-- dialect: ruled -->", "<!-- gate: spec-ahead [E-SCOPE-001] — no #{} -->", `<!-- snippet: ${ahead} -->`, ...fence("x")]);
+    const md = write("cites-pin.md", ["<!-- dialect: ruled -->", "<!-- gate: spec-ahead [E-SCOPE-001] — no ^{} -->", `<!-- snippet: ${ahead} -->`, ...fence("x")]);
     const r = snippet(`--docs=${md}`, ahead);
     expect(r.stdout).toContain("spec-ahead pin-mismatch");
     expect(r.status).toBe(1);

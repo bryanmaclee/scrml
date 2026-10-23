@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-css-neg-missing-semicolon",
+  "description": "E-CSS-SYNTAX: a missing `;` between two declarations (the empty span where it goes).",
+  "language-version": "1.0",
+  "spec": "§9.1 · §34",
+  "rationale": "A malformed `#{}` block is a compile error, never silently dropped CSS.",
+  "expect": {
+    "codes": [
+      "E-CSS-SYNTAX"
+    ],
+    "codeCounts": {
+      "E-CSS-SYNTAX": 1
+    }
+  }
+}
