@@ -227,6 +227,9 @@ describe("r3 — a `match` that starts a statement ends at its `}` (F3 (i): bloc
       // (the match is its own statement; what follows is read on its own — `.A` may itself split further)
       expect(r.kinds.length).toBeGreaterThanOrEqual(3);
       expect(r.kinds[r.kinds.length - 1]).toBe("Return");
+      // s469 (§7.2.2 rule 9, RULED "Build both"): the second statement does nothing — E-STMT-NO-EFFECT, no
+      // longer silent (the table row "A pure expression after a block-like `}`")
+      if (what !== ".A") expect(r.codes).toEqual(["E-STMT-NO-EFFECT"]);   // (`.A` there is a parse error, unchanged)
     });
   }
   test("on the SAME line, a continuing token after the `}` is refused (E-PARSE-TRAILING), not glued and not split", () => {

@@ -1,0 +1,17 @@
+{
+  "id": "acceptance-termination-defer-next-line",
+  "description": "§7.2.2 rule 10: `defer⏎@out = …;` is one defer statement — it runs at the block's exit.",
+  "language-version": "1.0",
+  "spec": "§7.2.2 rule 10 (S469), §19.16.1",
+  "rationale": "user-voice-scrml.md S469 \"⭐ RULED — statement termination follow-ups, §7.2.2\" item 3 (\"Keyword at statement start\").",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STMT-MISSING-SEMICOLON", "E-SCOPE-001"],
+    "input": [
+      { "click": "#go" }
+    ],
+    "domAnchored": [
+      { "selector": "#out", "text": "ab1" }
+    ]
+  }
+}

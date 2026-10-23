@@ -1,0 +1,12 @@
+{
+  "id": "acceptance-termination-neg-no-effect-after-if",
+  "description": "§7.2.2 rule 9: `if (…) { … }⏎-1;` — the `-1;` is a statement with no effect (E-STMT-NO-EFFECT), no longer read silently.",
+  "language-version": "1.0",
+  "spec": "§7.2.2 rule 9 (S469), §40.8, §34 E-STMT-NO-EFFECT",
+  "rationale": "user-voice-scrml.md S469 \"⭐ RULED — statement termination follow-ups, §7.2.2\" item 4 (\"Build both\"): \"It applies to a pure expression statement on either line, including after a block-like `}`.\"",
+  "expect": {
+    "codes": ["E-STMT-NO-EFFECT"],
+    "codeCounts": { "E-STMT-NO-EFFECT": 1 },
+    "severity": { "E-STMT-NO-EFFECT": "error" }
+  }
+}

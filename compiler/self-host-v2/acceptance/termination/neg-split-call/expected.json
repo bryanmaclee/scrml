@@ -1,0 +1,13 @@
+{
+  "id": "acceptance-termination-neg-split-call",
+  "description": "§7.2.2 rule 5: `let b = a⏎(a + 1);` is E-STMT-SPLIT-CONTINUATION (\"add `;` to the line above, or join the lines\") — never the call, never a silent split.",
+  "language-version": "1.0",
+  "spec": "§7.2.2 rule 5 (F4 (ii), S469), §34 E-STMT-SPLIT-CONTINUATION",
+  "rationale": "user-voice-scrml.md S469 \"⭐ RULED — statement termination follow-ups, §7.2.2\" item 4 (\"Build both\"): \"Mint E-STMT-SPLIT-CONTINUATION for F4(ii), with the message \\\"add `;` to the line above, or join the lines\\\".\"",
+  "expect": {
+    "codes": ["E-STMT-SPLIT-CONTINUATION"],
+    "codeCounts": { "E-STMT-SPLIT-CONTINUATION": 1 },
+    "notCodes": ["E-STMT-MISSING-SEMICOLON", "E-STMT-NO-EFFECT"],
+    "severity": { "E-STMT-SPLIT-CONTINUATION": "error" }
+  }
+}

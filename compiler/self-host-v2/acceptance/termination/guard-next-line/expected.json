@@ -1,0 +1,17 @@
+{
+  "id": "acceptance-termination-guard-next-line",
+  "description": "§7.2.2 rule 4: `x⏎!{ … }` handles `x` — a line break is whitespace, and `!{ … }` cannot start a statement.",
+  "language-version": "1.0",
+  "spec": "§7.2.2 rule 4 (S469), §19.4.3",
+  "rationale": "user-voice-scrml.md S469 \"⭐ RULED — statement termination follow-ups, §7.2.2\" item 2 (\"Attach to the line above\"): \"`x⏎!{…}` handles `x`\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STMT-MISSING-SEMICOLON", "E-PARSE-ITEM", "E-ERROR-002"],
+    "input": [
+      { "click": "#go" }
+    ],
+    "domAnchored": [
+      { "selector": "#out", "text": "nf:x" }
+    ]
+  }
+}
