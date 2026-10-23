@@ -1209,6 +1209,9 @@ export function emitMatchBodyRenderForFile(
         ...(hasWildcard ? { defaultArmTag: "_" } : {}),
         ...(isInEach ? { itemScopedDispatch: true } : {}),
         ...(rowScopeParams.length > 0 ? { rowScopeParams } : {}),
+        // §17.1.2 (S469) — a row-scoped `<match if=…>`: emit-each gates the per-row
+        // dispatch and calls the dispatcher's teardown when the condition is false.
+        ...(isInEach && (matchBlock as any).ifCond ? { itemScopedTeardown: true } : {}),
       },
     );
     if (out.renderFunctionsJs) renderFunctions.push(out.renderFunctionsJs);

@@ -1364,22 +1364,28 @@ function _rowScopeNames(enclosingIterVar: string | null): Set<string> {
 }
 
 /**
- * Lower the `if=` of a structural `<each>` that sits inside a row to a JS condition
- * evaluated in the row's scope. Returns null when the node carries no `if=`.
+ * Lower the `if=` of a structural `<each>` or `<match>` that sits inside a row to a JS
+ * condition evaluated in the row's scope. Returns null when the node carries no `if=`.
+ * (`element` only names the element in the refusal.)
  *
  * Fails CLOSED: an `if=` value this cannot lower is refused (E-CG-003) and the gate
  * is emitted as `false` — never dropped.
  */
-function lowerRowScopedEachIfGate(node: any, enclosingIterVar: string | null): string | null {
+function lowerRowScopedEachIfGate(
+  node: any,
+  enclosingIterVar: string | null,
+  element: "each" | "match" = "each",
+): string | null {
   const ifVal = node?.ifCond;
   if (!ifVal) return null;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { ifGateConditionFields, lowerMountToggleCondition } = require("./if-gate-condition.ts") as typeof import("./if-gate-condition.ts");
+  const gated = element === "match" ? "dispatched arm" : "list";
   const refuse = (why: string): string => {
     recordRefusedLowering(new CGError(
       "E-CG-003",
-      `E-CG-003: the \`if=\` on this \`<each>\` inside an \`<each>\` row ${why}, so the compiler cannot gate the ` +
-      `list. It is refused rather than emitted ungated (§17.1.2). Write the condition as \`if=@cell\`, ` +
+      `E-CG-003: the \`if=\` on this \`<${element}>\` inside an \`<each>\` row ${why}, so the compiler cannot gate the ` +
+      `${gated}. It is refused rather than emitted ungated (§17.1.2). Write the condition as \`if=@cell\`, ` +
       `\`if=fn(…)\` or \`if=(expression)\`.`,
       ifVal.span ?? node.span ?? { start: 0, end: 0 },
     ), node);
@@ -2106,6 +2112,41 @@ function renderTemplateChildToJs(
     const _rowScope: string[] = Array.isArray((child as any).rowScopeParams) ? (child as any).rowScopeParams : [];
     const _dispatchArgs = [mountVar, discriminant, ..._rowScope].join(", ");
     const _dispatchLine = `${indent}${dispatchFnName}(${_dispatchArgs});`;
+    // §17.1.2 — the match's own `if=` (g-structural-if-inside-each-row-template-fails-open).
+    // A top-level `<match if=…>` is gated by the §17.1 mount controller (a `<template>` +
+    // marker); a row-scoped one has no static HTML, so its gate is the per-row dispatch
+    // effect itself. The condition is lowered by the ONE row-scoped if= lowering (the
+    // nested-each gate's, which calls the top-level controller's `lowerMountToggleCondition`)
+    // in THIS row's scope. True → dispatch; false → the dispatcher's per-mount teardown
+    // (emit-variant-guard `itemScopedTeardown`): the arm's wiring is disposed and its nodes
+    // removed, and the discriminant is not read — no arm is dispatched (§17.1.2.1). The
+    // effect read the condition, so it re-runs whenever it changes, both ways; it is a
+    // render-gate effect (R7-1), so a write that turns the condition false unmounts the arm
+    // before user effects run. An unlowerable `if=` is refused (E-CG-003) and gates false.
+    const _matchGate = lowerRowScopedEachIfGate(child, iterVarName, "match");
+    if (_matchGate !== null) {
+      const teardownFnName = `__scrml_match_match_${nsId(matchId)}_teardown`;
+      const _gated = [
+        `${indent}// §17.1.2 — this match's if=: while false no arm is dispatched and the mounted arm is torn down.`,
+        `${indent}if (!(${_matchGate})) {`,
+        `${indent}  ${teardownFnName}(${mountVar});`,
+        `${indent}} else {`,
+        `  ${_dispatchLine}`,
+        `${indent}}`,
+      ];
+      const _wrapped = maybeWrapEachPerItemEffect(_gated, iterVarName, indent, true);
+      if (_wrapped !== _gated) {
+        for (const l of _wrapped) lines.push(l);
+      } else {
+        // No live-keyed row ctx for this scope (e.g. a match in an `<empty>` body): the
+        // gate still needs its own effect, or it would be evaluated once and never again.
+        lines.push(`${indent}_scrml_mount_track(_scrml_effect(() => {`);
+        for (const l of enclosingResolvePreludeLines(_gated.join("\n"), `${indent}  `)) lines.push(l);
+        for (const l of _gated) lines.push("  " + l);
+        lines.push(`${indent}}, true));`);
+      }
+      return;
+    }
     for (const l of maybeWrapEachPerItemEffect([_dispatchLine], iterVarName, indent)) {
       lines.push(l);
     }
