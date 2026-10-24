@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 5 |
 | MED | 681 | 8 |
-| LOW | 482 | 0 |
+| LOW | 483 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -27835,3 +27835,15 @@ Probe: `let <c:string="color: red"/>` + `<p style=(@c)>x</p>` compiles clean; th
 5. **`-->`** as a selector: `--> p { … }` was read as a type selector `--` (fixed in this change: an element name must start with a letter). The broader class — CSS's `<!--` / `-->` CDO/CDC tokens — needs no rule while every `<` is refused.
 6. **CR-only line endings** (round 3 comment model). The reader ends a `//` comment, a bad (unterminated) string and the `url(` extent bound at `\n` only, so in a file with bare `\r` line breaks a `//` comment runs to the end of the block (silently eating the rules after it) and an unterminated string's recovery skips too far. Fix direction: treat `\r`, `\r\n` and `\f` as line breaks wherever the reader looks for one (CSS Syntax §3.3 preprocessing does exactly that).
 <!-- @gap id=g-bootstrap-css-residuals-s469 sev=LOW status=open locus=compiler/self-host-v2/css-syntax.scrml(parseValue-url;parseCompound-pseudo)+compiler/self-host-v2/lower.scrml(stampAttrs) prov=empirical:S469-boot-css-review-F6 -->
+
+## §S469-lanes — test-infrastructure gaps reported by S469 dispatch lanes (2026-10-23; FILED, not fixed)
+
+### g-reactive-decl-sql-chained-call-flaky-under-load-s469 — `reactive-decl-sql-chained-call.test.js` fails under machine load and passes on retry (three S469 lanes) — `NEW S469; LOW; open`
+
+<!-- @gap id=g-reactive-decl-sql-chained-call-flaky-under-load-s469 sev=LOW status=open locus=compiler/tests/unit/reactive-decl-sql-chained-call.test.js(compileSource~85;§9-batch-planner~454;no-explicit-per-test-timeout) prov=report:s469-three-lanes-local-precommit-flake-passed-on-retry -->
+
+Reported by three S469 lanes: tests in `compiler/tests/unit/reactive-decl-sql-chained-call.test.js` failed during local runs on a loaded machine (the pre-commit full suite with other lanes running) and passed when run again. The failing test names and the failure message were not kept, so the cause is not confirmed.
+
+What the file does: 21 tests, about 0.3 s for the whole file when the machine is idle. None of them sets its own timeout, so each one gets bun's default 5000 ms (`bunfig.toml` says why there is no global key). The §6, §8, §9 and §10 tests run a full `compileScrml` of a small program. `compileSource` (and the §9 test) write each fixture into a fixed-name directory inside the source tree (`compiler/tests/unit/_tmp_rdsql_<tag>/`), not into the per-process temp root (`tmp-root-preload.js`). Project-root discovery from there finds the repo's `scrml.toml`.
+
+A missing explicit timeout is the likely cause (the [[g-windows-executed-db-tests-5s-timeout-s460]] pattern). It is not marked resolved because no failure output shows a "timed out after 5000ms" message. Fix direction: the next time it fails, keep the `(fail)` lines. If they show a timeout, give the full-compile tests an explicit per-test budget (`{ timeout: 30_000 }`, with a comment). Either way, move the fixtures to `mkdtempSync(join(tmpdir(), …))` so the tests stop writing into the source tree.
