@@ -82,12 +82,22 @@ const norm = (x) => {
   try { return /^["']/.test(x) ? JSON.stringify((0, eval)(x)) : String((0, eval)(x)); } catch { return "?" + x; }
 };
 function dispatchTests(js) {
+  return dispatchGroups(js).map((g) => g.seq);
+}
+// S469 r8 — each dispatch group with the variable it compares: a PAYLOAD variant (`Circle`,
+// `Square` — `{ variant, data }` values) must be compared on a TAG variable (`_scrml_tag_N`), never
+// on the subject itself (`_scrml_match_N === "Circle"` is never true for a payload value: the else
+// arm ran silently, g-impl1-text-lowered-match-payload-variant-misdispatch-s469).
+function dispatchGroups(js) {
   const g = {};
   const re = /(_scrml_(?:match|tag)_\d+) === ("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|-?\s*[\d.]+)/g;
   let m;
   while ((m = re.exec(js))) (g[m[1]] ??= []).push(norm(m[2]));
-  return Object.values(g).map((a) => a.filter((x) => x !== '"object"').join(" ")).filter((x) => x);
+  return Object.entries(g)
+    .map(([v, a]) => ({ v, seq: a.filter((x) => x !== '"object"').join(" ") }))
+    .filter((x) => x.seq);
 }
+const PAYLOAD_TAGS = new Set(['"Circle"', '"Square"']);
 
 // Generate the lists up front (the seed fixes them).
 const CASES = [];
@@ -152,9 +162,13 @@ describe(`seeded SERVER / ENGINE arm-list differential (seed ${SEED}, ${LISTS} l
       for (const [sn, r] of clean) expect({ sn, lost: r.lost }).toEqual({ sn, lost: [] });
       for (const [sn, r] of clean) expect({ sn, same: r.out === clean[0][1].out }).toEqual({ sn, same: true });
       for (const [sn, r] of clean) {
-        const seqs = dispatchTests(r.js);
-        expect({ sn, n: seqs.length > 0 }).toEqual({ sn, n: true });
-        for (const q of seqs) expect({ sn, q }).toEqual({ sn, q: c.expected });
+        const groups = dispatchGroups(r.js);
+        expect({ sn, n: groups.length > 0 }).toEqual({ sn, n: true });
+        for (const { v, seq } of groups) {
+          expect({ sn, q: seq }).toEqual({ sn, q: c.expected });
+          // a payload variant is dispatched on its tag, not on the subject value
+          if (seq.split(" ").some((t) => PAYLOAD_TAGS.has(t))) expect({ sn, v, onTag: /^_scrml_tag_/.test(v) }).toEqual({ sn, v, onTag: true });
+        }
       }
     });
   }
