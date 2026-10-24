@@ -22,3 +22,7 @@ export declare function liftForTreeGatePins(forNode: unknown): boolean;
 export declare function liftGroupFnReadsItsBindings(stmts: unknown[]): boolean;
 /** liftGroupFnReadsItsBindings for the outermost block a gate's markup node is built in. */
 export declare function liftGateBlockFnReadsItsBindings(node: unknown): boolean;
+/** True when a loop sits inside a markup element of a row (not among the row's roots). */
+export declare function liftLoopInRowElement(loop: unknown, rowLoop: unknown): boolean;
+/** True when a nested loop of a keyed row can be re-run on its own as a region. */
+export declare function liftRegionSafe(loop: unknown, rowLoop: unknown): boolean;

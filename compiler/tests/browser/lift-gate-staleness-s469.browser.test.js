@@ -227,6 +227,64 @@ describe("an open gate in an inner loop re-runs only that loop (the outer row ke
   });
 });
 
+// Review of b192c63de (HIGH): a region whose nodes are ROOTS of a fragment row was frozen into the row's group
+// arrays, so a reorder re-inserted revoked content (and a region at the group head dropped the row's key). A
+// region is emitted only inside a row ELEMENT; every other shape lowers the row plain. Each shape below is
+// revoked, reordered, re-granted, revoked again.
+describe("an open gate in an inner loop among a row's ROOTS: the row is lowered plain (revoke survives a reorder)", () => {
+  const REG = `for (k of r.kids) { const ok = @role == "admin"\n lift <span><b class="g" if=(ok)>x</b></span> }`;
+  const ROWS = [
+    ["the inner loop is the group head", REG],
+    ["a sibling root before it", `lift <i>h</i>\n ${REG}`],
+    ["a sibling root after it", `${REG}\n lift <i>t</i>`],
+    ["a sibling gated root", `lift <em if=(@role == "admin")>e</em>\n ${REG}`],
+    ["inside an if arm with a sibling", `if (r.ok) { lift <i>h</i>\n ${REG} }`],
+    ["two such loops", `${REG}\n ${REG}`],
+  ];
+  const ORDER = (ids) => ids.map((id) => ({ id, ok: true, kids: [1] }));
+  for (const [name, row] of ROWS) {
+    test(`${name}`, async () => {
+      const app = compileAndMount(`<role> = "admin"
+<xs> = ${JSON.stringify(ORDER([1, 2])).replace(/"(\w+)":/g, "$1: ")}
+<div id="out">\${ for (r of @xs) { ${row} } }</div>
+`);
+      expect(app.errors).toEqual([]);
+      await flush();
+      const per = count("#out b.g") / 2;
+      expect(per).toBeGreaterThan(0);
+      await set("role", "user");
+      expect(count("#out b.g")).toBe(0);
+      await set("xs", ORDER([2, 1]));
+      expect(count("#out b.g")).toBe(0);
+      await set("xs", ORDER([1]));
+      expect(count("#out b.g")).toBe(0);
+      await set("role", "admin");
+      expect(count("#out b.g")).toBe(per);
+      await set("xs", ORDER([3, 1, 2]));
+      expect(count("#out b.g")).toBe(3 * per);
+      await set("role", "user");
+      expect(count("#out b.g")).toBe(0);
+      await set("xs", ORDER([2, 3, 1]));
+      expect(count("#out b.g")).toBe(0);
+    });
+  }
+  test("inside a row ELEMENT it stays a region (keyed row; reorder after revoke shows nothing)", async () => {
+    const app = compileAndMount(`<role> = "admin"
+<xs> = ${JSON.stringify(ORDER([1, 2])).replace(/"(\w+)":/g, "$1: ")}
+<div id="out">\${ for (r of @xs) { lift <i>h</i>\n lift <p>\${ ${REG} }</p> } }</div>
+`);
+    expect(app.errors).toEqual([]);
+    expect(app.clientJs).toMatch(/_scrml_reconcile_list\(/);
+    expect(app.clientJs).toMatch(/scrml-region/);
+    await flush();
+    await set("role", "user");
+    await set("xs", ORDER([2, 1]));
+    expect(count("#out b.g")).toBe(0);
+    await set("role", "admin");
+    expect(count("#out b.g")).toBe(2);
+  });
+});
+
 describe("the value-indexed row side follows the LIVE row's field", () => {
   for (const keyed of [true, false]) {
     for (const [nname, nest] of [["sole root", (b) => b], ["nested", (b) => `<span>${b}</span>`]]) {

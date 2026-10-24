@@ -533,8 +533,36 @@ function _subtreeNames(root, out) {
  * the row's binder (re-resolved live). A value the row's render computes outside the loop would be
  * read late by a re-run, so such a loop is not a region (the row is lowered plain instead).
  */
+/**
+ * True when `loop` sits inside a markup ELEMENT of `rowLoop`'s row (`lift <div>${ for … }</div>`), not
+ * among the row's roots. A region's nodes must live inside one element of the row: the reconciler
+ * records a row's ROOT nodes (`_scrml_group` / `_scrml_group_of`, the group head's key and owner
+ * scope) when the row is built and moves / removes exactly those, so a region that rebuilt roots would
+ * put revoked content back on a reorder (review of b192c63de) and drop the head that carries the key.
+ * Structural: decided by the row body's shape, the element ancestry of the loop node.
+ */
+export function liftLoopInRowElement(loop, rowLoop) {
+  let found = null;
+  const seen = new WeakSet();
+  const visit = (n, inElement) => {
+    if (found !== null || !n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (n === loop) { found = inElement; return; }
+    if (Array.isArray(n)) { for (const c of n) visit(c, inElement); return; }
+    const el = inElement || (n.kind === "markup" && typeof n.tag === "string" && n.tag !== "");
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v, el);
+    }
+  };
+  visit(Array.isArray(rowLoop && rowLoop.body) ? rowLoop.body : [], false);
+  return found === true;
+}
+
 export function liftRegionSafe(loop, rowLoop) {
   if (!loop || !rowLoop) return false;
+  if (!liftLoopInRowElement(loop, rowLoop)) return false;
   // A `while` body's lift goes to the ambient target, not the region's (g-while-lift-in-reconciled-
   // row-escapes-the-row-s469): no region holds it.
   if (JSON.stringify(loop, (k, v) => (k === "span" ? undefined : v)).includes('"kind":"while-stmt"')) return false;

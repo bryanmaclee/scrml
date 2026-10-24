@@ -291,4 +291,21 @@ shapes.push(["inner-loop local in a region of a keyed row", `<pw> = "secret"
 <div id="out">\${ for (r of @xs) { lift <div>\${ for (c of r.kids) { let t = c.ok
  lift <b if=(t && @pw == "secret")>LOGGED IN</b> } }</div> } }</div>
 `]);
+// Review of b192c63de (HIGH) — an inner loop with an open gate among a FRAGMENT row roots (the group head,
+// beside sibling roots, inside an arm with a sibling): the row is lowered plain. "wrong" revokes, then
+// REORDERS the rows (the move that re-inserted frozen region nodes).
+const FRAG_REG = `for (k of r.kids) { const ok = @pw == "secret"\n lift <span><b if=(ok && r.id == 1)>LOGGED IN</b></span> }`;
+for (const [n, row] of [
+  ["group head", FRAG_REG],
+  ["sibling root before", `lift <i></i>\n ${FRAG_REG}`],
+  ["sibling gated root", `lift <em if=(@pw == "secret")></em>\n ${FRAG_REG}`],
+  ["if arm with a sibling", `if (r.ok) { lift <i></i>\n ${FRAG_REG} }`],
+]) {
+  shapes.push([`inner-loop local among fragment row roots (${n}), revoke + reorder`, `<pw> = "secret"
+<xs> = [{ id: 1, ok: true, kids: [1] }, { id: 2, ok: true, kids: [1] }]
+<button id="wrong" onclick=\${ @pw = "wrong"\n @xs = [{ id: 2, ok: true, kids: [1] }, { id: 1, ok: true, kids: [1] }] }>go</button>
+<button id="right" onclick=\${ @pw = "secret" }>go</button>
+<div id="out">\${ for (r of @xs) { ${row} } }</div>
+`]);
+}
 export default shapes;

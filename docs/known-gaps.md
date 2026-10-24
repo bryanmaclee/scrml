@@ -26860,7 +26860,11 @@ read tracking (`_scrml_effect` records every cell read at any call depth). The d
   still TEXT in the AST pins on any `if=` / `show=` in it) — except when the gate sits in a loop nested directly in
   the row and reads only what that loop declares: that loop alone becomes a REGION of the keyed row, re-run by its
   own live-keyed tracked effect (`emitForStmtWithContainer`, `liftRegionSafe`), so the row's other nodes keep their
-  state (round 2, review MED-1).
+  state (round 2, review MED-1) — only when that loop sits inside an ELEMENT of the row (`liftLoopInRowElement`):
+  among a fragment row's roots its nodes would be frozen into the row's group arrays, and a reorder re-inserted
+  revoked content (round 3, review of b192c63de); there the row is lowered plain.
+- **known restriction** — a function returning markup gated on a local or parameter
+  (`function pill(q) { return <b if=(q)>x</b> }`) is refused, although on main the caller's `${}` re-ran it.
 - **refused, E-IMPL1-LIFT-GATE-UNTRACKED** (new, provisional name, §34) — an open gate no render re-runs: markup
   built in a function body, a run-once `${}` block that declares a function reading its own bindings (forcing the
   re-render would move them out of the hoisted function's reach — M1a's ReferenceError), a lift escaping its row
@@ -26895,18 +26899,21 @@ act on detached elements. Fix direction: make a re-rendering group an owner of w
 `own(mkEffect)` shape, client code only) so the next render disposes the previous one's effects — without pulling the
 `owner` chunk into list-free pages (runtime-size ratchet §4).
 
-### g-keyed-row-control-flow-if-not-reevaluated-s469 — (security) a control-flow `if` inside a keyed `for … lift` row is evaluated once, when the row is built: `for (r of @xs) { if (r.ok) { lift <b>x</b> } }` stays visible after a same-key replace with `ok: false` (and after an in-place write) — a guard that stays open — `NEW S469 (review of b57d697a9); HIGH; open (pre-existing, identical on main)`
+### g-keyed-row-control-flow-if-not-reevaluated-s469 — (security) a control-flow `if` inside a keyed `for … lift` row is evaluated once, when the row is built: `for (r of @xs) { if (@role == "admin") { lift <b>x</b> } }` — the most direct authorization shape — keeps both rows' `<b>` after `@role` is revoked (2, want 0), and `for (r of @xs) { if (r.ok) { lift <b>x</b> } }` stays visible after a same-key replace with `ok: false` (and after an in-place write) — a guard that stays open — `NEW S469 (review of b57d697a9); HIGH; open (pre-existing, identical on main)`
 <!-- @gap id=g-keyed-row-control-flow-if-not-reevaluated-s469 sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts(the keyed row factory emits the body's if-stmt inline; nothing re-runs it)+compiler/src/codegen/emit-lift.js(emitIfStmtWithContainer) prov=review:s469-lift-gate-staleness-round-2;empirical:S469(main 14a788227 and branch: off=2 want 0, in-place off=2 want 0) -->
 
 Found by the review of `b57d697a9`; reproduced on main and the branch (happy-dom): two rows granted, a same-key
-replace with `ok: false` → 2 `b` still in the page; an in-place `ok = false` → still 2. The row-binder sibling of
+replace with `ok: false` → 2 `b` still in the page; an in-place `ok = false` → still 2. Widened by the review of
+`b192c63de`: the direct-cell form `if (@role == "admin") { lift … }` in a keyed row stays 2 after the revoke (want 0). The row-binder sibling of
 [[g-for-lift-item-does-not-rerender-on-body-condition-cell-s465]] (a cell read there). The lifted-gate machinery
 of [[g-lift-gate-placement-inherits-main-staleness-s469]] does not cover it: an `if` STATEMENT is not a gate attribute.
 Not fixed in that lane because neither cheap structural option is free: (a) lowering every keyed row whose body
 holds an `if` as the plain loop costs every filtered list its keying (row identity, input state, perf); (b) re-running
 the `if` as a REGION of the row (the shape that lane added for an inner loop) does not work at a row's TOP level —
 the arm's nodes are the row's roots, which the reconciler moves and removes as a group (`_scrml_group`), so the
-region would need reconciler support for a row whose root set changes. Fix direction: (b) with a stable anchor
+region would need reconciler support for a row whose root set changes (measured: a region among a fragment row's
+roots re-inserted revoked content on a reorder — review of `b192c63de` — so regions are emitted only inside a row
+element). Fix direction: (b) with a stable anchor
 root per row, or (a) for the rows whose `if` reads the row or a cell, measured against the corpus.
 
 ### g-lift-group-and-arm-call-reads-not-reactive-s469 — a `${ … lift … }` group or an `if … lift` arm condition that reads a cell only through a called function is never re-rendered: `${ lift <i>${isAdmin() ? "ADMIN" : "no"}</i> }` keeps "ADMIN", and `${ if (isAdmin()) { lift <b>x</b> } }` keeps `<b>` after the cell is revoked — `NEW S469 (review of b57d697a9); HIGH; open (pre-existing, identical on main)`
