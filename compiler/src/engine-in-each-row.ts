@@ -57,6 +57,66 @@ export function engineInEachEmptyMessage(governedType: unknown): string {
   );
 }
 
+/**
+ * An `<engine>` anywhere under a branch of a §17.1.1 `if=` / `else-if=` / `else` chain
+ * (gap g-engine-in-if-else-chain-branch-renders-nothing-s469). A chain branch is a
+ * SINGLETON position — the language allows an engine there (§17.1.1 places no limit on a
+ * branch's content; §51.0.D: declaration is mount) — but impl#1's chain renderer
+ * (emit-html.ts, the `if-chain` branch `<template>`s) has no engine lowering: the engine
+ * compiled at exit 0 and rendered nothing in ANY branch. A lone `if=` (not a chain) renders
+ * an engine and is not affected. Refused as an unsupported emission (E-CG-003, fail closed),
+ * not as a language rule; rendering it is owed to the bootstrap.
+ */
+export function engineInIfChainMessage(governedType: unknown, branchForm: string): string {
+  const type = typeof governedType === "string" && governedType.length > 0 ? governedType : "Type";
+  return (
+    `E-CG-003: \`<engine for=${type} ...>\` inside the \`${branchForm}\` branch of an ` +
+    `\`if=\` / \`else-if=\` / \`else\` chain cannot be emitted by impl#1 — its chain renderer has ` +
+    `no engine lowering, so the engine would render nothing. The language allows an engine ` +
+    `here (§17.1.1, §51.0.D); impl#1 refuses it rather than dropping it. Workaround: declare ` +
+    `the engine outside the chain and gate its contents — e.g. \`<engine if=COND for=${type} ...>\` ` +
+    `beside the chain, or replace the chain with separate \`if=\` elements whose conditions ` +
+    `exclude each other (an engine under a lone \`if=\` renders).`
+  );
+}
+
+/** Marker set on an `engine-decl` refused by the if-chain check (reported once). */
+export const ENGINE_IN_IF_CHAIN_REFUSED = "_engineInIfChainRefused";
+
+/**
+ * Every `engine-decl` under `root` that the if-chain check owns, outermost first. Total
+ * descent over object-valued keys (not a list of container keys — an if-chain keeps its
+ * branches under `branches[].element` / `elseBranch`, which a key list misses). It does NOT
+ * descend into:
+ *   - an `engine-decl` (an engine nested in a refused engine is reported once, the outer);
+ *   - an `each-block` — its row and `<empty>` positions carry their own refusals
+ *     (E-COMPONENT-ENGINE-SCOPE / E-CG-003, `engineInEachRowMessage` / `engineInEachEmptyMessage`);
+ *   - a `match-block` — an engine in a `<match>` arm is its own drop
+ *     (g-engine-in-match-arm-emits-nothing-s469), independent of the chain.
+ * Engines already refused by the row rule (`ENGINE_IN_ROW_REFUSED`) are skipped.
+ */
+export function collectEnginesUnderIfChainBranch(root: unknown): any[] {
+  const out: any[] = [];
+  const seen = new WeakSet<object>();
+  const visit = (n: any): void => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const x of n) visit(x); return; }
+    if (n.kind === "engine-decl") {
+      if (n[ENGINE_IN_ROW_REFUSED] !== true) out.push(n);
+      return;
+    }
+    if (n.kind === "each-block" || n.kind === "match-block") return;
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k === "parent" || k === ENGINE_HOST_SPAN) continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v);
+    }
+  };
+  visit(root);
+  return out;
+}
+
 export function engineInEachRowMessage(governedType: unknown): string {
   const type = typeof governedType === "string" && governedType.length > 0 ? governedType : "Type";
   return (

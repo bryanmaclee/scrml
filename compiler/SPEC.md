@@ -17116,6 +17116,23 @@ condition is not referenced in any other branch (standard linear branching rule,
 
 **Interaction with iteration (§17.4):** An `if=` chain MAY appear inside a `for` loop body.
 
+**Interaction with `<engine>` (§51.0):** a chain branch is a singleton position — it renders at most once, in
+place — so an `<engine>` MAY appear anywhere inside an `if=`, `else-if=` or `else` branch (§51.0.D: the declaration
+is the mount). This subsection places no limit on what a branch contains.
+
+> **impl#1 divergence — an `<engine>` under a chain branch is refused (S469).** impl#1's chain renderer (one
+> `<template>` per branch under a `data-scrml-if-chain` host) has no engine lowering: an engine under
+> `branches[].element` / `elseBranch` is never hoisted into the file's engine list, so before S469 it compiled at
+> exit 0 and rendered nothing in ANY branch, at any depth. impl#1 now refuses it as an unsupported emission —
+> **E-CG-003**, emitted at `compiler/src/codegen/emit-html.ts:964` (`refuseEnginesUnderIfChain`, decided from the
+> AST: every `engine-decl` under every branch element) — never a silent drop. This is NOT a language rule: the
+> construct is valid scrml and the bootstrap owes rendering it. The message names the workaround — declare the
+> engine outside the chain and gate its contents (`<engine if=COND …>` beside the chain), or replace the chain with
+> separate `if=` elements whose conditions exclude each other: an engine under a lone `if=` (no `else-if=` /
+> `else` sibling) is not a chain and renders. In a component body the engine is refused by the language rule
+> instead, `E-COMPONENT-ENGINE-SCOPE` (§51.0.K). A `<match>` in a chain branch renders. Gap
+> [[g-engine-in-if-else-chain-branch-renders-nothing-s469]].
+
 ---
 
 ### 17.1.2 `if=` on scrml-defined structural elements
@@ -18176,7 +18193,7 @@ When the empty-state condition does NOT hold, the `<empty>` body is NOT rendered
 > NOT in a row the row rule does not reach it — the fallback renders once — but impl#1's list renderer has no engine
 > lowering (it dropped the engine at exit 0), so impl#1 refuses it as an unsupported emission, **E-CG-003**, rather
 > than drop it. ⚑ **OPEN** — whether an engine there renders (as one under a lone `if=` does — an `if=` with no
-> `else`; in a branch of an `if=` / `else` chain impl#1 drops it today,
+> `else`; in a branch of an `if=` / `else` chain impl#1 also refuses it with E-CG-003, §17.1.1,
 > [[g-engine-in-if-else-chain-branch-renders-nothing-s469]]) or is refused by the language is the owner's call; the
 > refusal is reversible.
 
@@ -37825,6 +37842,10 @@ mount-site location update the same underlying cell.
 > deliver the "fully-handled state machine" promise. Component bodies that try to
 > instantiate an engine (`<engine>` inside a component decl) emit
 > `E-COMPONENT-ENGINE-SCOPE` (§34, §51.0.K).
+
+> **impl#1 — a declaration under an `if=` / `else-if=` / `else` chain branch (S469).** A chain branch is a valid
+> mount position (§17.1.1). impl#1 cannot lower an engine declared there and refuses it with **E-CG-003** rather than
+> render nothing (§17.1.1, impl#1 divergence note). Under a lone `if=` the engine renders, gated per §17.1.2.
 
 **Render-only mount with no body:** `<MarioMachine/>` is self-closing at the use-site —
 the body lives at the declaration site. Adding a body at the use-site is a parse error
