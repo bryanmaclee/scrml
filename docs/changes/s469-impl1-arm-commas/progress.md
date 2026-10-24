@@ -115,3 +115,12 @@ already ending in `,` is skipped); an arm ending in `;` is NOT rewritten and is 
       n24 engine derived= (6) = 607 shapes.
 - [x] fuzz5 / fuzz6 / fuzz7 seeds 91–100 (100 lists each): 0 BAD-SEQ, 0 SPLIT-BAD-SEQ, 0 DIFF-OUT, 0 SPLIT-DIFF-OUT,
       0 PIPE-NOT-REFUSED. Corpus emit diff: 171, all `_scrml_project_root`.
+
+## Round 8 (final review of 45208d9c7 — FIX)
+- [x] F1 HIGH: text-lowered matches dispatch payload variants on the TAG and bind `.data` (unit-only matches keep
+      the direct comparison — output unchanged). Execution test (server route called with `{variant, data}`
+      values) + the server differential now asserts tag dispatch. Pack: s3 +6, n24 +3 → 746 (main 597 merged).
+      Gap filed resolved: g-impl1-text-lowered-match-payload-variant-misdispatch-s469.
+- [x] F2: TYPES-BASELINE.json rewritten (`types-gate.ts --write`; `--check` OK).
+- [x] Every blocking CI command run locally: all exit 0 except `facts.ts --check` (exit 1 = stale, WARN-only in CI).
+- [x] Corpus emit diff (r8 vs the same tree with the pre-r8 rewrite.ts): 171, all `_scrml_project_root`.
