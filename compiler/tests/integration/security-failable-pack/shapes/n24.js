@@ -258,4 +258,46 @@ for (const [hn, h] of Object.entries(BARE_HANDLERS)) {
     }
   }
 }
+
+// S469 r7 (final review of 6c9f99474, F2) — an engine `derived=match`, lowered from text by
+// `rewriteMatchExpr`, whose private arm splitter / parser dropped a literal alternate (`"denied" |
+// "locked" :>` lost `"denied"`) and number arms. The access state is derived from the login status,
+// default-ALLOW, so a dropped alternate logs the wrong password in. Now read by the one canonical arm
+// reader. Measured on 6c9f99474: all 6 shapes FAIL (the wrong password logs in); all 6 PASS after.
+const ENGINE_PAGE = (deny, armsText) => `type AuthErr:enum = { Denied }
+type Access:enum = { Granted, Rejected }
+<st>: number | string = "init"
+\${
+    function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied
+        return true
+    }
+    function login(p) {
+        const good = check(p) !{ .Denied :> false }
+        @st = good == true ? "ok" : ${deny}
+    }
+}
+<engine for=Access derived=match @st {
+${armsText}
+}>
+  <Granted/>
+  <Rejected/>
+</>
+<button id="wrong" onclick=login("wrong")>go</button>
+<button id="right" onclick=login("secret")>go</button>
+<p id="out">\${match @access { .Granted :> "LOGGED IN", else :> "rejected" }}</p>
+`;
+const ENGINE_LISTS = {
+  string: [`"denied"`, [`"denied" | "locked" :> .Rejected`, `"init" :> .Rejected`, `_ :> .Granted`]],
+  number: ["401", [`401 | 403 :> .Rejected`, `"init" :> .Rejected`, `_ :> .Granted`]],
+};
+for (const [ln, [deny, arms]] of Object.entries(ENGINE_LISTS)) {
+  for (const [sn, f] of [
+    ["newline", (a) => a.map((l) => "  " + l).join("\n")],
+    ["comma", (a) => a.map((l) => "  " + l + ",").join("\n")],
+    ["one-line", (a) => "  " + a.join(", ")],
+  ]) {
+    shapes.push([`engine derived=match ${ln} alternation deny-list (${sn} arms)`, ENGINE_PAGE(deny, f(arms))]);
+  }
+}
 export default shapes;
