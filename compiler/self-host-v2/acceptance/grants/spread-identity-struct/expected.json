@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-grants-spread-identity-struct",
+  "description": "`@o = { ...@o, inner: @o.inner }` keeps the tape inside `inner`: accepted, and runs.",
+  "language-version": "1.0",
+  "spec": "§66.11.3 rule 1 · §66.12.6 rule 4",
+  "rationale": "The value IS the place, so no tape in it is replaced; it was over-refused with E-WRITE-NOT-GRANTED (review F4).",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "u:1"
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+// the payload tape grants `replace`: a whole-value write of the enum is granted, and runs.
+<program>
+    type E:enum = { Dot, A(xs: int[free, append, replace]) }
+    let <e:E=.Dot/>
+    let <shown:string=""/>
+    function mk()! E {
+        fail .A([1, 2, 3]);
+    }
+    function label() -> string {
+        return match @e {
+            .Dot :> "dot",
+            .A(xs) :> "a"
+        };
+    }
+    function grow() {
+        mk() !{ _ x :> @e = x };
+        @shown = label();
+    }
+    <main>
+        <button id="go" onclick=grow()>go</button>
+        <p id="out">${@shown}</p>
+    </main>
+</program>

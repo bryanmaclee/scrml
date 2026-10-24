@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-grants-neg-enum-payload-write",
+  "description": "`@e = x` on an enum whose variant payload holds a `replace`-less tape: refused, fail closed.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rules 1 and 4",
+  "rationale": "A payload is a tape position (\"wherever the tape is held\"); whether writing a variant is a fresh value or a `replace` of the payload tape is an owner question, so the bootstrap refuses rather than guess (review F1).",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

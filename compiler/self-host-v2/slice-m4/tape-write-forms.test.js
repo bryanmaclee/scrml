@@ -12,15 +12,17 @@
 //      spelling must be refused (pinned codes), and its GRANTED spelling (where
 //      the bootstrap can lower one) must be clean — so the refusal is the grant
 //      check, not an accident of the form.
-//   2. The source of analyze.scrml is scanned: no write path reads a grant
-//      outside the reader (`x.grants.replace || …`, `hasEditKind(x.grants.edits`,
-//      the retired `shrinkGranted`).
+//   2. The source of analyze.scrml is scanned by grant-scan.js (s469 F2:
+//      structural, on tokens): outside the reader no GrantSet is named, held or
+//      read — every spelling the round-2 review planted is a must-fail control,
+//      run through the REAL scan function.
 // A new write form added to the bootstrap belongs in FORMS.
 
 import { describe, test, expect, beforeAll } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadM2, frontEnd } from "./harness.js";
+import { grantReadsOutsideReader, READER_START, READER_END } from "./grant-scan.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
@@ -149,35 +151,21 @@ describe("Core check C3 judges a tape field's grants (the defence in depth, §66
   });
 });
 
-describe("no write path reads a grant outside the reader (analyze.scrml source)", () => {
+describe("no write path reads a grant outside the reader (analyze.scrml source; s469 F2: structural)", () => {
   const src = readFileSync(join(import.meta.dir, "..", "analyze.scrml"), "utf8");
-  const START = src.indexOf("THE TAPE GRANT READER (§66.12.3");
-  const END = src.indexOf("---- END OF THE TAPE GRANT READER");
-  // A read of a GrantSet's fields that is NOT inside the reader is allowed only in a
-  // function named here, with the reason. Every ADMISSION decision goes through the
-  // reader (grantsAdmit / grantsAny / grantsHasEdits / grantsEditOnly / tapeGrants);
-  // today nothing needs an exception.
-  const ALLOW = {
-    // "fnName": "one-line reason (message text / capability minting only)",
-  };
-  const GRANT_READ = /\.grants\.|\bgrants\.replace\b|\bgrants\.edits\b|\bgs\.replace\b|\bgs\.edits\b/g;
-  const enclosingFn = (at) => {
-    const head = src.slice(0, at);
-    const m = [...head.matchAll(/\n\s*(?:export\s+)?fn\s+(\w+)\s*\(/g)];
-    return m.length ? m[m.length - 1][1] : "?";
+  const core = readFileSync(join(import.meta.dir, "..", "core.scrml"), "utf8");
+  const scan = (s) => grantReadsOutsideReader(s, [core]);
+  const AT = "fn persistCellProblem(";
+  const plant = (code) => {
+    expect(src.includes(AT)).toBe(true);
+    return src.replace(AT, code + "\n    " + AT);
   };
   test("the reader's range is marked", () => {
-    expect(START).toBeGreaterThan(0);
-    expect(END).toBeGreaterThan(START);
+    expect(src.indexOf(READER_START)).toBeGreaterThan(0);
+    expect(src.indexOf(READER_END)).toBeGreaterThan(src.indexOf(READER_START));
   });
-  test("every grant read outside the reader is allow-listed by name (none today)", () => {
-    const outside = [];
-    for (const m of src.matchAll(GRANT_READ)) {
-      if (m.index > START && m.index < END) continue;
-      const fn = enclosingFn(m.index);
-      if (!(fn in ALLOW)) outside.push(`${fn} @${src.slice(0, m.index).split("\n").length}: ${m[0]}`);
-    }
-    expect(outside).toEqual([]);
+  test("outside the reader, no GrantSet is named, held or read (no allow-list)", () => {
+    expect(scan(src).map((v) => `${v.line} ${v.rule}: ${v.text}`)).toEqual([]);
   });
   test("the retired `shrinkGranted` / `grantsEdit` readers are gone", () => {
     expect(src.includes("fn shrinkGranted")).toBe(false);
@@ -187,12 +175,42 @@ describe("no write path reads a grant outside the reader (analyze.scrml source)"
     expect(src).toContain("fn grantsAdmit(gs: GrantSet, edit: EditKind) -> boolean");
     expect((src.match(/grantsAdmit\(/g) || []).length).toBeGreaterThanOrEqual(15);
   });
-  test("the scan bites: a grant read planted outside the reader is reported", () => {
-    const planted = src.replace("fn persistCellProblem(", "fn plantedRead(f: FieldInfo) -> boolean { return f.grants.replace }\n    fn persistCellProblem(");
-    let hits = 0;
-    const s0 = planted.indexOf("THE TAPE GRANT READER (§66.12.3");
-    const e0 = planted.indexOf("---- END OF THE TAPE GRANT READER");
-    for (const m of planted.matchAll(GRANT_READ)) { if (!(m.index > s0 && m.index < e0)) hits++; }
-    expect(hits).toBe(1);
+  // Must-fail controls: each spelling the round-2 review planted (and scored 0
+  // hits against the old regex) must be reported by the REAL scan function.
+  const PLANTS = {
+    "member read": "fn plantedRead(f: FieldInfo) -> boolean { return f.grants.replace }",
+    "typed alias": "fn plantedRead(f: FieldInfo) -> boolean {\n        const g: GrantSet = f.grants\n        return g.replace\n    }",
+    "untyped alias": "fn plantedRead(f: FieldInfo) -> boolean {\n        const g = f.grants\n        return g.replace\n    }",
+    "helper outside the range": "fn isRep(x: GrantSet) -> boolean { return x.replace }\n    fn plantedRead(f: FieldInfo) -> boolean { return isRep(f.grants) }",
+    "untyped helper outside the range": "fn isRep(x) -> boolean { return x.replace }\n    fn plantedRead(f: FieldInfo) -> boolean { return isRep(f.grants) }",
+    "destructure `{ replace } = f.grants`": "fn plantedRead(f: FieldInfo) -> boolean {\n        const { replace } = f.grants\n        return replace\n    }",
+    "destructure `{ grants } = f`": "fn plantedRead(f: FieldInfo) -> boolean {\n        const { grants } = f\n        return grants.replace\n    }",
+    "destructure `{ grants: q } = f`": "fn plantedRead(f: FieldInfo) -> boolean {\n        const { grants: q } = f\n        return q.replace\n    }",
+    "bracket `f[\"grants\"][\"replace\"]`": "fn plantedRead(f: FieldInfo) -> boolean { return f[\"grants\"][\"replace\"] }",
+    "spaced `f.grants .replace`": "fn plantedRead(f: FieldInfo) -> boolean { return f.grants .replace }",
+    "`g.edits.length`": "fn plantedRead(f: FieldInfo) -> boolean {\n        const g: GrantSet = f.grants\n        return g.edits.length > 0\n    }",
+    "hasEditKind over an alias": "fn plantedRead(f: FieldInfo) -> boolean {\n        const gg: GrantSet = f.grants\n        return gg.replace || hasEditKind(gg.edits, EditKind.Append)\n    }",
+    "a reader's GrantSet result held": "fn plantedRead(f: FieldInfo) -> boolean {\n        const tg = tapeGrants(f.ty)\n        if (tg is not) return false\n        return grantsAdmit(tg, EditKind.Replace)\n    }",
+    "a reader's GrantSet result read": "fn plantedRead(f: FieldInfo) -> boolean { return noGrants().replace }",
+    "a SeqGrants `replace` read off the type": "fn plantedRead(t: Type) -> boolean {\n        return match t {\n            .Seq(elem: e, grants: g) :> g.replace\n            .Int :> false\n        }\n    }",
+    "a GrantSet-returning helper outside the range": "fn myGrants(f: FieldInfo) -> GrantSet { return noGrants() }",
+  };
+  for (const [name, code] of Object.entries(PLANTS)) {
+    test(`must-fail control: ${name}`, () => {
+      expect(scan(plant(code)).length).toBeGreaterThan(0);
+    });
+  }
+  test("must-fail control, END TO END: a helper outside the reader decides the `persist=\"local\"` admission (the round-2 hole)", () => {
+    const decide = "(f.graph is given || !grantsAdmit(f.grants, EditKind.Replace))) {";
+    expect(src.includes(decide)).toBe(true);
+    const s = plant("fn plantedRep(x: GrantSet) -> boolean { return x.replace || true }")
+      .replace(decide, "(f.graph is given || !plantedRep(f.grants))) {");
+    const hits = scan(s);
+    expect(hits.length).toBeGreaterThanOrEqual(2);
+    expect(hits.some((h) => h.text.includes("plantedRep(f.grants)"))).toBe(true);
+  });
+  test("a construction outside the reader is not a read (copy into a `grants:` slot; a reader call's argument)", () => {
+    const ok = plant("fn plantedCopy(f: FieldInfo) -> FieldDef { return { sym: f.sym, ty: f.ty, grants: f.grants } }\n    fn plantedAsk(f: FieldInfo) -> boolean { return grantsAdmit(f.grants, EditKind.Replace) }\n    fn plantedNew(f: FieldInfo) -> FieldDef { return { sym: f.sym, ty: f.ty, grants: noGrants() } }");
+    expect(scan(ok)).toEqual([]);
   });
 });

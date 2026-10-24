@@ -1,0 +1,12 @@
+// the payload holds a STRUCT whose field is an append-only tape; `@e = .Dot` may drop it (review F1).
+<program>
+    type Box:struct = { xs: int[free, append] }
+    type E:enum = { Dot, A(b: Box) }
+    let <e:E=.Dot/>
+    function clear() {
+        @e = .Dot;
+    }
+    <main>
+        <button id="go" onclick=clear()>clear</button>
+    </main>
+</program>

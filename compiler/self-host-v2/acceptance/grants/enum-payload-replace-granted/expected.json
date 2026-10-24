@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-grants-enum-payload-replace-granted",
+  "description": "An enum whose payload tape grants `replace`: the whole-value write is granted and runs.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rules 1 and 4",
+  "rationale": "The refusal of review F1 is the payload tape's grant check, not an accident of the form: with `replace` granted the same program runs.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "a"
+      }
+    ]
+  }
+}

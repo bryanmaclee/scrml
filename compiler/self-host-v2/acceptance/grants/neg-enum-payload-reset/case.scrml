@@ -1,0 +1,8 @@
+// `reset(@e)` of an enum whose payload holds an append-only tape (review F1).
+<program>
+    type E:enum = { Dot, A(xs: int[free, append]) }
+    let <e:E=.Dot/>
+    <main>
+        <button id="go" onclick=(reset(@e))>reset</button>
+    </main>
+</program>

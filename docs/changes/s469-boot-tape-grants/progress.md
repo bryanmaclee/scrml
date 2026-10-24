@@ -72,6 +72,11 @@ Gaps: `g-bootstrap-whole-struct-write-bypasses-tape-field-grants-s469` (MED),
       reads the same place). Four planted-Core tests in `tape-write-forms.test.js`, each failing on the old logic.
 - [x] L2 — noted in the call-site gap entry (typed binding launders grants; with Q3).
 
+## Final review of #1528 — follow-ups in `s469-boot-tape-grants-2`
+
+F1 (enum payload tapes, HIGH), F2 (structural scan), F3 (Core snapshot keep), F4 (identity overrides) and three new
+owner questions (Q8–Q10: enum payloads and the snapshot keep): `docs/changes/s469-boot-tape-grants-2/progress.md`.
+
 ## Owner questions (not invented — refused fail-closed where the SPEC does not settle)
 
 1. **`reset(@b)` / `reset-on=` of a struct with a `replace`-less tape field.** §66.12.6 rule 4 says the reset is a
@@ -89,5 +94,7 @@ Gaps: `g-bootstrap-whole-struct-write-bypasses-tape-field-grants-s469` (MED),
    not a program write). Confirm it is out of rule 4's "server reload".
 6. **Tape elements**: replacing a tape of structs (`@gs = [...]`) is the outer tape's write; the elements' own tape
    fields are not judged. Confirm.
+   *(Final review of #1528: `@rows = [{ ys: [] }]` on `Row[free, append, replace]` with an append-only `ys` compiles
+   clean — the question stands; expanded with a recommendation in `docs/changes/s469-boot-tape-grants-2/progress.md` Q6.)*
 7. **`const` / parameter rebinding of a tape** reports E-ASSIGN-CONST and (when the type grants nothing) also
    E-WRITE-NOT-GRANTED — both rules apply per §66.11.5 / rule 4. Acceptable, or suppress the second?

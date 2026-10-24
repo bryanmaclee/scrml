@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-grants-neg-enum-payload-persist-local",
+  "description": "`persist=\"local\"` on an enum whose variant payload holds a `replace`-less tape: refused, fail closed.",
+  "language-version": "1.0",
+  "spec": "§6.14.2 · §66.12.6 rules 1 and 4",
+  "rationale": "Another tab's value is one whole-value write of the enum; it may replace the append-only payload tape (review F1, the cross-tab repro).",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

@@ -2929,7 +2929,14 @@ ${
     // owner's `replace` (O58 = (b) is authoritative over graphs and lifecycles,
     // not over a tape's grants). A tape field is kept only when the new value is
     // a StructOf whose entry for it reads that same field of the same place;
-    // any other value (a Local, a call, InitOf for a reset) replaces it.
+    // any other value (a call, InitOf for a reset) replaces it. s469 F3: a Local
+    // bound ONCE (one Let, never Assigned) stands for its init, and a read
+    // through a snapshot Local (`Let before = Read(@o)`; `before.inner.ys`) is a
+    // read of the place it snapshots — the spread-override lowering. s469 F4: a
+    // value that reads the written place itself keeps every tape in it. s469
+    // F1: an ENUM's variant payloads are tape positions — a whole enum value
+    // replaces each payload tape (no payload is "kept"), judged by the tape
+    // TYPE's `replace`; a Transition writes the enum whole too.
     // The analyzer's twin is analyze.scrml `structTapeWrites`.
     // -------------------------------------------------------------------------
     fn tapeReplaceProblem(p: CoreProgram, d: Sym, idx: int, inst: InstRef, f: Field, edit: EditKind, value: Expr) -> string {
@@ -2938,11 +2945,11 @@ ${
             .Replace :> structTapeKept(p, f.ty, value, d, inst, base, f.sym.hint, [])
             .FieldAt(path: path) :> fieldAtTapeKept(p, f.ty, value, d, inst, base, path, f.sym.hint)
             .ElemAt(index: ix, path: path) :> elemAtTapeKept(p, f, value, path)
+            .Transition :> structTapeKept(p, f.ty, value, d, inst, base, f.sym.hint, [])
             .Append :> ""
             .Prepend :> ""
             .Anywhere :> ""
             .PositionWrite :> ""
-            .Transition :> ""
             .RemoveEnd :> ""
             .RemoveFront :> ""
             .RemoveAnywhere :> ""
@@ -2989,14 +2996,20 @@ ${
 
     // "" when every tape field the value replaces grants `replace`, else why.
     // `path` empty: the value has no place (nothing is kept).
-    fn structTapeKept(p: CoreProgram, ty: Type, v: Expr | not, d: Sym, inst: InstRef, path: FieldRef[], label: string, seen: int[]) -> string {
+    fn structTapeKept(p: CoreProgram, ty: Type, v0: Expr | not, d: Sym, inst: InstRef, path: FieldRef[], label: string, seen: int[]) -> string {
         const s: Sym | not = namedSym(unMaybeC(ty))
         if (s is not) return ""
         if (seen.indexOf(s.id) >= 0) return ""
+        let v: Expr | not = not
+        if (v0 is given) v = boundValue(p, v0, 0)
+        // s469 F4: the value IS the written place — nothing in it is replaced
+        if (v is given && path.length > 0) {
+            if (keepKey(p, v) == placeKeyOf(d, inst, path)) return ""
+        }
         const td: TypeDef | not = findTypeDef(p, s)
         if (td is not) return ""
         const fs: FieldDef[] | not = structFields(td)
-        if (fs is not) return ""
+        if (fs is not) return payloadTapeKept(p, td, label, seen.concat([s.id]))
         let vals: Expr[] | not = not
         if (v is given) vals = structOfFields(v)
         let i = 0
@@ -3008,7 +3021,7 @@ ${
             }
             let kept = false
             if (fv is given && path.length > 0) {
-                if (readKey(fv) == placeKeyOf(d, inst, sub)) kept = true
+                if (keepKey(p, boundValue(p, fv, 0)) == placeKeyOf(d, inst, sub)) kept = true
             }
             if (!kept) {
                 if (isTapeType(fd.ty)) {
@@ -3025,6 +3038,188 @@ ${
 
     fn isTapeType(t: Type) -> boolean {
         return seqElemOf(unMaybeC(t)) is given
+    }
+
+    // s469 F1: every tape a variant payload holds (directly, or in a payload
+    // struct / enum) — a whole enum value may hold any variant, so each is
+    // replaced. A payload FieldDef carries no grants (no `let` on a payload):
+    // the tape TYPE's `replace` judges it.
+    fn payloadTapeKept(p: CoreProgram, td: TypeDef, label: string, seen: int[]) -> string {
+        for (const vd of enumVariantsC(td)) {
+            for (const fd of vd.fields) {
+                const at: string = label + "." + vd.sym.hint + "(" + fd.sym.hint + ")"
+                if (isTapeType(fd.ty)) {
+                    if (!fd.grants.replace && !tapeTypeReplace(fd.ty)) return "the write replaces the tape `" + at + "` held in a variant payload, whose type grants no `replace` — an enum payload is a tape position (§66.12.6 rule 1), and a whole enum value never gets around its grants"
+                } else {
+                    const r: string = structTapeKept(p, fd.ty, not, fd.sym, InstRef.Lexical(0), [], at, seen)
+                    if (r != "") return r
+                }
+            }
+        }
+        return ""
+    }
+
+    fn enumVariantsC(td: TypeDef) -> VariantDef[] {
+        return match td {
+            .EnumDef(sym: s, variants: vs) :> vs
+            .StructDef(sym: s) :> []
+        }
+    }
+
+    fn tapeTypeReplace(t: Type) -> boolean {
+        const u: Type = unMaybeC(t)
+        return match u {
+            .Seq(elem: e, grants: g) :> g.replace
+            .Int :> false
+            .Num :> false
+            .Str :> false
+            .Bool :> false
+            .Named(sym: s) :> false
+            .Maybe(inner: i) :> false
+        }
+    }
+
+    // s469 F3: the identity a kept value reads — a cell read's place key, or a
+    // read through a snapshot Local (`Let before = Read(Cell(…))`, then
+    // `Read(LocalPath(before, path))`) as the place it snapshots, extended by
+    // the path. Anything else is not a cell read (readKey).
+    fn keepKey(p: CoreProgram, e: Expr) -> string {
+        const pm: Place | not = cellReadOf(e)
+        if (pm is not) return readKey(e)
+        const pl: Place = pm
+        return match pl {
+            .Cell(decl: d, inst: i, path: path) :> placeKeyOf(d, i, path)
+            .LocalPath(sym: s, path: path) :> snapshotKey(p, s, path)
+        }
+    }
+
+    fn snapshotKey(p: CoreProgram, s: Sym, path: FieldRef[]) -> string {
+        const init: Expr | not = onceBoundInit(p, s)
+        if (init is not) return "(a local path)"
+        const cm: Place | not = cellReadOf(init)
+        if (cm is not) return "(a local path)"
+        const c: Place = cm
+        return match c {
+            .Cell(decl: d, inst: i, path: base) :> placeKeyOf(d, i, base.concat(path))
+            .LocalPath(sym: x) :> "(a local path)"
+        }
+    }
+
+    fn cellReadOf(e: Expr) -> Place | not {
+        return match e {
+            .Read(place: pl) :> pl
+            .Lit(lit: x) :> not
+            .Local(sym: x) :> not
+            .Call(callee: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+            .Handle(inst: x) :> not
+            .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
+            .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
+            .Query(q: x) :> not
+        }
+    }
+
+    // s469 F3: a Local the program binds ONCE stands for its init (the spread
+    // lowering's `Let tmp = StructOf(…)`, a Commit's value), followed a few
+    // steps; any other value is itself.
+    fn boundValue(p: CoreProgram, e: Expr, depth: int) -> Expr {
+        if (depth > 8) return e
+        const s: Sym | not = localSymOf(e)
+        if (s is not) return e
+        const init: Expr | not = onceBoundInit(p, s)
+        if (init is not) return e
+        return boundValue(p, init, depth + 1)
+    }
+
+    fn localSymOf(e: Expr) -> Sym | not {
+        return match e {
+            .Local(sym: s) :> s
+            .Lit(lit: x) :> not
+            .Read(place: x) :> not
+            .Call(callee: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+            .Handle(inst: x) :> not
+            .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
+            .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
+            .Query(q: x) :> not
+        }
+    }
+
+    // The init of the ONE Let binding `s`, when nothing Assigns `s` (else not):
+    // only then is the Local's value its init wherever it is read.
+    fn onceBoundInit(p: CoreProgram, s: Sym) -> Expr | not {
+        let found: Expr | not = not
+        let lets = 0
+        for (const n of allNodes(Node.NProgram(p))) {
+            const b: LetBind | not = nodeLetBind(n)
+            if (b is given) {
+                if (b.sym.id == s.id) {
+                    if (!b.isLet) return not
+                    lets = lets + 1
+                    found = b.init
+                }
+            }
+        }
+        if (lets != 1) return not
+        return found
+    }
+
+    type LetBind:struct = { sym: Sym, init: Expr, isLet: boolean }
+
+    fn nodeLetBind(n: Node) -> LetBind | not {
+        return match n {
+            .NStmt(s: s) :> stmtLetBind(s)
+            .NExpr(e: x) :> not
+            .NProgram(p: x) :> not
+            .NDecl(d: x) :> not
+            .NField(f: x) :> not
+            .NFn(f: x) :> not
+            .NServerFn(f: x) :> not
+            .NBlock(b: x) :> not
+            .NPlace(pl: x) :> not
+            .NInst(i: x) :> not
+            .NPattern(pat: x) :> not
+            .NEdit(k: x) :> not
+            .NView(v: x) :> not
+            .NAttr(a: x) :> not
+        }
+    }
+
+    fn stmtLetBind(s: Stmt) -> LetBind | not {
+        return match s {
+            .Let(sym: sy, init: i) :> { sym: sy, init: i, isLet: true }
+            .Assign(local: l, value: v) :> { sym: l, init: v, isLet: false }
+            .Suspend(bind: x) :> not
+            .If(cond: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
+            .Attempt(result: x) :> not
+            .Defer(body: x) :> not
+            .Commit(writes: x) :> not
+            .Write(cap: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .ResetSurface(of: x) :> not
+            .Unpersist(decl: x) :> not
+            .Fail(err: x) :> not
+        }
     }
 
     fn unMaybeC(t: Type) -> Type {

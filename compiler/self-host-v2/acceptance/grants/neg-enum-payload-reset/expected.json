@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-grants-neg-enum-payload-reset",
+  "description": "`reset(@e)` on an enum whose variant payload holds a `replace`-less tape: refused, fail closed.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rules 1 and 4",
+  "rationale": "A reset is a whole-value write; it replaces the payload tape whenever the cell holds that variant (review F1).",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

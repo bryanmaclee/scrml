@@ -1,0 +1,13 @@
+// a spread override rebuilds a struct field and keeps the append-only tape inside it (review F3).
+<program>
+    type In:struct = { ys: int[free, append] }
+    type O:struct = { title: string, let inner: In }
+    let <o:O=({ title: "t", inner: { ys: [1, 2] } })/>
+    function go() {
+        @o = { ...@o, title: "u", inner: { ys: @o.inner.ys } };
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@o.title}:${@o.inner.ys.length}</p>
+    </main>
+</program>
