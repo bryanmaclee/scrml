@@ -66,7 +66,12 @@ ${
 
     // A sequence type with no grants is fully constrained (§66.12.1).
     fn fixedSeq(elem: Type) -> Type {
-        return Type.Seq(elem, { length: LengthGrant.Fixed, at: [], shrink: [], positionsWritable: false })
+        return Type.Seq(elem, { length: LengthGrant.Fixed, at: [], shrink: [], positionsWritable: false, replace: false })
+    }
+
+    // `T[replace]` — the grant is on the TYPE (§66.12.3; s469-boot-tape-grants put it in SeqGrants).
+    fn replaceSeq(elem: Type) -> Type {
+        return Type.Seq(elem, { length: LengthGrant.Fixed, at: [], shrink: [], positionsWritable: false, replace: true })
     }
 
     fn strList(xs: string[]) -> Expr {
@@ -238,7 +243,7 @@ ${
         }
         if (reorderable) {
             fLines = {
-                sym: sLines, ty: fixedSeq(Type.Named(sLine)), init: initLines,
+                sym: sLines, ty: replaceSeq(Type.Named(sLine)), init: initLines,
                 mode: FieldMode.Locked, role: FieldRole.Child, grants: replaceGrant(),
                 graph: not, exported: false, wcap: wLines, vals: [], persist: not,
             }

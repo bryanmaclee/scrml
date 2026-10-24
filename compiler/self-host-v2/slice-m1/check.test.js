@@ -37,7 +37,7 @@ function pointCore(ptGrants) {
     { sym: sX, ty: C.Type.Int, grants: C.replaceGrant() },
     { sym: sY, ty: C.Type.Int, grants: C.noGrants() },
     { sym: sZ, ty: C.Type.Int, grants: { replace: false, edits: [C.EditKind.Transition] } },
-    { sym: C.mkSym(110, "w"), ty: C.Type.Seq(C.Type.Str, { length: C.LengthGrant.Free, at: [C.SeqAt.End], shrink: [], positionsWritable: false }),
+    { sym: C.mkSym(110, "w"), ty: C.Type.Seq(C.Type.Str, { length: C.LengthGrant.Free, at: [C.SeqAt.End], shrink: [], positionsWritable: false, replace: false }),
       grants: { replace: false, edits: [C.EditKind.Append] } },
   ]);
   const fPt = {
@@ -237,10 +237,20 @@ describe("O58 (b) — a genuine `.Replace` is authoritative (not bounded by sub-
   // The spread spelling `@x = { ...@x, f: v }` is lowered by the FRONT END to
   // field writes judged by f's own contract (slice-m2/front.test.js); in Core a
   // whole-value `.Replace` is checked only against the field's own `replace`.
-  test("a Replace of `pt` rewriting the contracted sub-fields `z` / `w` is accepted", () => {
+  test("a Replace of `pt` rewriting the contracted sub-field `z` is accepted (the tape `w` kept)", () => {
+    const { core, sPoint, wPt, shared } = pointCore(C.replaceGrant());
+    const prog = core.decls[0];
+    const keepW = C.Expr.Read(C.Place.Cell(prog.sym, shared, [{ owner: prog.sym, idx: prog.fields.length - 1 }, { owner: sPoint, idx: 3 }]));
+    const any = C.Expr.StructOf(sPoint, [C.litInt(1), C.litInt(2), C.litInt(3), keepW]);
+    expect(check(withStmts(core, [C.Stmt.Write(wPt, shared, C.EditKind.Replace, any, C.Check.Static)]))).toEqual([]);
+  });
+  // s469-boot-tape-grants (S469 limit on O58 (b), §66.12.6 rule 4): a genuine replace is
+  // authoritative over graphs and lifecycles, NOT over a tape field's grants
+  test("a Replace that rewrites the append-only tape `w`, or an opaque value, is refused (C3)", () => {
     const { core, sPoint, wPt, shared } = pointCore(C.replaceGrant());
     const any = C.Expr.StructOf(sPoint, [C.litInt(1), C.litInt(2), C.litInt(3), C.Expr.ArrayOf([C.litStr("x")])]);
-    expect(check(withStmts(core, [C.Stmt.Write(wPt, shared, C.EditKind.Replace, any, C.Check.Static)]))).toEqual([]);
-    expect(check(withStmts(core, [C.Stmt.Write(wPt, shared, C.EditKind.Replace, C.Expr.Call(C.mkSym(5, "bump"), []), C.Check.Static)]))).toEqual([]);
+    const tapeRefusal = (ms) => ms.some((m) => m.startsWith("C3:") && m.includes("tape field `pt.w`"));
+    expect(tapeRefusal(check(withStmts(core, [C.Stmt.Write(wPt, shared, C.EditKind.Replace, any, C.Check.Static)])))).toBe(true);
+    expect(tapeRefusal(check(withStmts(core, [C.Stmt.Write(wPt, shared, C.EditKind.Replace, C.Expr.Call(C.mkSym(5, "bump"), []), C.Check.Static)])))).toBe(true);
   });
 });

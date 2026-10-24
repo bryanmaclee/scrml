@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-grants-neg-local-sort",
+  "description": "`out = out.sort()` on a local tape without `write`.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rule 4 · §66.12.6 rule 3 · §66.20 E-WRITE-NOT-GRANTED",
+  "rationale": "Writing the sorted tape back is a position write.",
+  "expect": {
+    "codes": [
+      "E-WRITE-NOT-GRANTED"
+    ],
+    "codeCounts": {
+      "E-WRITE-NOT-GRANTED": 1
+    }
+  }
+}

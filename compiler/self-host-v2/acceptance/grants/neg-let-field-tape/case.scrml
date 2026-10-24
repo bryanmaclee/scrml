@@ -1,0 +1,12 @@
+// `let xs: int[]` is `let` on a sequence.
+<program>
+    type LBox:struct = { title: string, let xs: int[] }
+    let <lb:LBox=({ title: "l", xs: [] })/>
+    function go() {
+        @lb.title = "t";
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@lb.title}</p>
+    </main>
+</program>

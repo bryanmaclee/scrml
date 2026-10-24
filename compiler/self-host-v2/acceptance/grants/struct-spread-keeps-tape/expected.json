@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-grants-struct-spread-keeps-tape",
+  "description": "The spread shape `@b = { ...@b, title: t }` edits `title` and keeps the append-only tape field.",
+  "language-version": "1.0",
+  "spec": "§66.11.3 rule 1 · §66.12.6 rule 4",
+  "rationale": "A field the new value leaves as it was is not written.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "renamed"
+      }
+    ]
+  }
+}

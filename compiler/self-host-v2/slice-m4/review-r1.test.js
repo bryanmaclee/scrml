@@ -26,13 +26,20 @@ const P = (decls, main) => `<program>\n    type Phase:enum = { Idle, Loading, Do
 // ---------------------------------------------------------------------------
 describe("F1 — a sequence shape / edit call on a LOCAL is never deleted", () => {
   test("`s = [...s, e]` on a `let` local: refused (Core has no spread value), never compiled to nothing", () => {
-    expect(codes(withFn(`function lp() -> int {\n let s = @audit;\n s = [...s, ${E}];\n return s.length;\n }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // s469-boot-tape-grants: and the rebinding is an end-append of an INFERRED tape, which carries no
+    // grant (§66.12.6 rules 1 and 4) — E-WRITE-NOT-GRANTED as well
+    expect(codes(withFn(`function lp() -> int {\n let s = @audit;\n s = [...s, ${E}];\n return s.length;\n }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-WRITE-NOT-GRANTED"]);
+    // with the grant written in the local's type, only the Core limit remains
+    expect(codes(withFn(`function lp() -> int {\n let s: Entry[free, append] = @audit;\n s = [...s, ${E}];\n return s.length;\n }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("the same on a `const` local keeps E-ASSIGN-CONST", () => {
     expect(codes(withFn(`function lp() -> int {\n const s = @audit;\n s = [...s, ${E}];\n return s.length;\n }`))).toContain("E-ASSIGN-CONST");
   });
   test("`s = s.filter(…)` on a `let` local is a local REBINDING to a new value (s444: `.filter` is a Core value) — kept, never deleted", async () => {
-    const r = run(withFn(`function lp() -> int {\n let s = @audit;\n s = s.filter(e => e.action != "b");\n return s.length;\n }`));
+    // s469-boot-tape-grants: the rebinding is a shrink-anywhere, judged by the local's TYPE (§66.12.6
+    // rule 4) — an inferred `let s = @audit` grants nothing, so the local's type names `remove`
+    expect(codes(withFn(`function lp() -> int {\n let s = @audit;\n s = s.filter(e => e.action != "b");\n return s.length;\n }`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    const r = run(withFn(`function lp() -> int {\n let s: Entry[free, remove] = @audit;\n s = s.filter(e => e.action != "b");\n return s.length;\n }`));
     expect(r.diags).toEqual([]);
     expect(mods.check.checkCore(r.core)).toEqual([]);
     const { program } = await loadProgram(r.core, "r1-f1-local-filter", ["lp", "record"]);

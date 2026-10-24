@@ -26,7 +26,7 @@ const T = {
   Bool: "Bool",
   Named: (sym) => ({ variant: "Named", data: { sym } }),
   Maybe: (inner) => ({ variant: "Maybe", data: { inner } }),
-  Seq: (elem, length = "Free") => ({ variant: "Seq", data: { elem, grants: { length, at: [], shrink: [], positionsWritable: false } } }),
+  Seq: (elem, length = "Free") => ({ variant: "Seq", data: { elem, grants: { length, at: [], shrink: [], positionsWritable: false, replace: false } } }),
   Bounded: (min, max) => ({ variant: "Bounded", data: { min, max } }),
 };
 

@@ -1,0 +1,13 @@
+// the local's type grants `replace`.
+<program>
+    let <shown:string=""/>
+    function go() {
+        let out: string[replace] = ["a"];
+        out = ["b", "c"];
+        @shown = out.join(",");
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@shown}</p>
+    </main>
+</program>

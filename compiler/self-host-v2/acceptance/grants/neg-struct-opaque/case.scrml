@@ -1,0 +1,14 @@
+// `@b = nb` (a name, not a literal) replaces `xs`.
+<program>
+    type Entry:struct = { at: int, action: string }
+    type Box:struct = { title: string, xs: Entry[free, append] }
+    let <b:Box=({ title: "log", xs: [] })/>
+        function go() {
+        const nb: Box = { title: "f", xs: [] };
+        @b = nb;
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@b.title}</p>
+    </main>
+</program>

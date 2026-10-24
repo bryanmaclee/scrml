@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-grants-neg-field-ungranted-tape",
+  "description": "A field write to an UNGRANTED tape field under a `let` struct.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rules 1 and 4 · §66.20 E-WRITE-NOT-GRANTED",
+  "rationale": "A tape with no grants is immutable; the owner's `let` does not grant it `replace` (S469 limit on O57).",
+  "expect": {
+    "codes": [
+      "E-WRITE-NOT-GRANTED"
+    ],
+    "codeCounts": {
+      "E-WRITE-NOT-GRANTED": 1
+    }
+  }
+}

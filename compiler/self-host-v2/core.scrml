@@ -54,7 +54,10 @@ ${
     // `at` = the places the sequence may GROW, `shrink` = the places it may
     // SHRINK (RULED S442 grow/shrink split: `append`/`pop`, `prepend`/`shift`,
     // `insert`/`remove`; s444: shrink joined Core when removals became edits).
-    export type SeqGrants:struct = { length: LengthGrant, at: SeqAt[], shrink: SeqAt[], positionsWritable: boolean }
+    // `replace` (s469-boot-tape-grants): the type's own `replace` token —
+    // §66.12.3 "Permissions live on the TYPE", so a tape held by a local or a
+    // parameter carries it too (before, only a declaration field's GrantSet did).
+    export type SeqGrants:struct = { length: LengthGrant, at: SeqAt[], shrink: SeqAt[], positionsWritable: boolean, replace: boolean }
 
     export type Type:enum = {
         Int,

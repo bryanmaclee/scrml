@@ -1,0 +1,13 @@
+// a position write; `int[]` grants none.
+<program>
+    let <shown:string=""/>
+    function go() {
+        let out: string[] = ["b", "a"];
+        out = out.sort();
+        @shown = out.join(",");
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@shown}</p>
+    </main>
+</program>

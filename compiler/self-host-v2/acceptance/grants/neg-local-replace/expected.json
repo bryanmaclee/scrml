@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-grants-neg-local-replace",
+  "description": "Rebinding a local tape whose type grants nothing (`let` grants no `replace`).",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rule 4 · O63 · §66.20 E-WRITE-NOT-GRANTED",
+  "rationale": "On a local, `let` makes only the name rebindable.",
+  "expect": {
+    "codes": [
+      "E-WRITE-NOT-GRANTED"
+    ],
+    "codeCounts": {
+      "E-WRITE-NOT-GRANTED": 1
+    }
+  }
+}

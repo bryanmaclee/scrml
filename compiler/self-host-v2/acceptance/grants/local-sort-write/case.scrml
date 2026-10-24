@@ -1,0 +1,13 @@
+// `out = out.sort()` is a position write; the type grants `write`.
+<program>
+    let <shown:string=""/>
+    function go() {
+        let out: string[write] = ["c", "a", "b"];
+        out = out.sort();
+        @shown = out.join(",");
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@shown}</p>
+    </main>
+</program>

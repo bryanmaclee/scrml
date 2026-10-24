@@ -1,0 +1,12 @@
+// `session` restores only (no cross-tab write): accepted (owner Q5).
+<program>
+    type Box:struct = { title: string, xs: int[free, append] }
+    let <b:Box=({ title: "t", xs: [1, 2, 3] }) persist="session" key="acc.h1.s"/>
+    function go() {
+        @b = { ...@b, title: "u" };
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@b.title}:${@b.xs.length}</p>
+    </main>
+</program>

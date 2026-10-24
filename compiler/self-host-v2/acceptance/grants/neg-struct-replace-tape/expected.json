@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-grants-neg-struct-replace-tape",
+  "description": "A genuine whole-struct replace that changes an append-only tape field.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rule 4 · §66.20 E-WRITE-NOT-GRANTED",
+  "rationale": "The struct's `let` admits replacing the struct, never a tape field whose type grants no `replace`.",
+  "expect": {
+    "codes": [
+      "E-WRITE-NOT-GRANTED"
+    ],
+    "codeCounts": {
+      "E-WRITE-NOT-GRANTED": 1
+    }
+  }
+}

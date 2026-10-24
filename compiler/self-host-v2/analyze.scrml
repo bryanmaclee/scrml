@@ -974,6 +974,7 @@ ${
         let where: SeqAt[] = []
         let shrinks: SeqAt[] = []
         let write = false
+        let rep = false
         let seen: string[] = []
         for (const g of gs) {
             const ax: GrantAxis = grantAxis(g)
@@ -988,7 +989,9 @@ ${
             } else if (ax == GrantAxis.GWrite) {
                 write = true
             } else if (ax == GrantAxis.GReplace) {
-                // carried on the field's grant set (seqReplace), not on SeqGrants
+                // s469-boot-tape-grants: on the TYPE too (§66.12.3), so a local's or a
+                // parameter's tape carries it; a field's GrantSet reads it as well (seqReplace)
+                rep = true
             } else {
                 const gp: SeqAt | not = growAt(ax)
                 const sp: SeqAt | not = shrinkAt(ax)
@@ -1001,7 +1004,7 @@ ${
                 }
             }
         }
-        return { t: Type.Seq(re.t, { length: length, at: where, shrink: shrinks, positionsWritable: write }), st: st, unresolved: re.unresolved }
+        return { t: Type.Seq(re.t, { length: length, at: where, shrink: shrinks, replace: rep, positionsWritable: write }), st: st, unresolved: re.unresolved }
     }
 
     fn growAt(ax: GrantAxis) -> SeqAt | not {
@@ -1067,13 +1070,9 @@ ${
         return out
     }
 
-    // A removal at `place` is granted by a shrink grant there or `remove` (anywhere covers end / front).
-    fn shrinkGranted(shrink: SeqAt[], place: SeqAt) -> boolean {
-        for (const a of shrink) {
-            if (a == place || a == SeqAt.Anywhere) return true
-        }
-        return false
-    }
+    // (s469-boot-tape-grants: a removal is judged by `grantsAdmit` over the
+    // GrantSet's RemoveEnd / RemoveFront / RemoveAnywhere edits — seqEdits puts
+    // them there from the shrink grants, `remove` covering end and front.)
 
     // Does a sequence type expression grant `replace` in its brackets?
     fn seqReplace(at: AType) -> boolean {
@@ -1081,7 +1080,7 @@ ${
         return match k {
             .TSeq(elem: e, grants: gs) :> gs.indexOf("replace") >= 0
             .TName(name: n) :> false
-            .TMaybe(inner: i) :> false
+            .TMaybe(inner: i) :> seqReplace(i)      // s469-boot-tape-grants: `T[replace] | not` grants `replace` (resolveSeqType puts it on the type the same way)
         }
     }
 
@@ -1194,6 +1193,13 @@ ${
             st = rt.st
             let grants: GrantSet = noGrants()
             if (!payload) grants = { replace: f.isLet || seqReplace(f.ty), edits: typeEdits(rt.t) }
+            // s469-boot-tape-grants (g-bootstrap-let-struct-field-tape-no-let-on-sequence-s469):
+            // a struct field whose type is a tape is a rule-1 position (§66.12.6) — `let` on it
+            // is `let` on a sequence, exactly as on a cell (fieldOf; through `| not` too). The
+            // `replace` the `let` reads as stays as error recovery (no cascade of refusals).
+            if (!payload && f.isLet && seqElem(unMaybe(rt.t)) is given) {
+                st = addDiag(st, te.file, f.span, "E-GRANT-LET-ON-SEQUENCE", "`let` on the tape field `" + f.name + "` — a struct field of tape type takes its grants from its type: write `replace` in the type's grants (`" + f.name + ": T[replace, …]`), not `let` (O3 ruled; §66.12.6 rule 1)")
+            }
             let fsym: Sym = mkSym(0, f.name)
             if (i < syms.length) {
                 fsym = syms[i]
@@ -2083,7 +2089,7 @@ ${
     }
 
     // A sequence type with no grant (`T[]`, §66.12.1 — omission is fully constrained).
-    fn fixedSeq() -> SeqGrants { return { length: LengthGrant.Fixed, at: [], shrink: [], positionsWritable: false } }
+    fn fixedSeq() -> SeqGrants { return { length: LengthGrant.Fixed, at: [], shrink: [], positionsWritable: false, replace: false } }
 
     // Two members' shared base type: the same type, or `number` for two numbers.
     fn joinBase(a: Type, b: Type) -> Type | not {
@@ -3081,7 +3087,7 @@ ${
             mode = FieldMode.Derived
         }
         let wcap: Sym | not = not
-        if (grants.replace || grants.edits.length > 0) {
+        if (grantsAny(grants)) {
             const rw: RSym = mint(st, name)
             wcap = rw.s
             st = rw.st
@@ -3441,7 +3447,7 @@ ${
         let out: EditKind[] = []
         let i = 0
         for (const fd of fs) {
-            if (fd.grants.replace) out = out.concat([EditKind.FieldAt([{ owner: s, idx: i }])])
+            if (grantsAdmit(fd.grants, EditKind.Replace)) out = out.concat([EditKind.FieldAt([{ owner: s, idx: i }])])
             i = i + 1
         }
         return out
@@ -6899,6 +6905,9 @@ ${
             // lowering it as `p = v` replaced the whole value. Refused, never approximated.
             if (exprName(target) == "") return addDiag(resolveExpr(env, value, not, st).st, env.file, target.span, "E-BOOTSTRAP-UNSUPPORTED", "a write to a part of the local `" + l.name + "` (`" + placeKey(target) + " = …`) is not in the bootstrap yet — Core rebinds a local only as a whole; " + partWriteFix(l))
             if (!l.mutable) st = addDiag(st, env.file, target.span, "E-ASSIGN-CONST", "`" + l.name + "` is not a `let` local")
+            // s469-boot-tape-grants: §50 decides whether the name may be rebound (above);
+            // whether the tape write the rebinding performs is granted (§66.12.6 rule 4) is
+            // the typer's (typeAssign → localTapeProblems), where an inferred type is known
             st = addEffect(st, e.nid, EffectFact.EAssignLocal(l.s))
             return resolveExpr(env, value, l.ty, st).st
         }
@@ -6907,9 +6916,9 @@ ${
         st = writeGuards(env, p, target.span, st)
         const f: FieldInfo = p.decl.fields[p.idx]
         if (p.path.length == 0 && isSelfSpread(target, value)) return resolveSpread(env, e, p, f, value, st)
-        if (p.path.length > 0) return resolveFieldAt(env, e, p, f, value, st)
+        if (p.path.length > 0) return resolveFieldAt(env, e, p, f, value, placeKey(target), st)
         const rv: RX = resolveExpr(env, value, f.ty, st)
-        const rw: RWriteFact = wholeFieldWrite(env, p, f, value, rv.st, e.span)
+        const rw: RWriteFact = wholeFieldWrite(env, p, f, value, placeKey(target), rv.st, e.span)
         const w: WriteFact | not = rw.w
         if (w is given) return addEffect(rw.st, e.nid, EffectFact.EWrite(w))
         return rw.st
@@ -6926,21 +6935,27 @@ ${
     // `replace`, or refused — E-DERIVED-WRITE for a derived field (its message
     // names the `let`-seeding trade-off, §66.9 rule 5), E-WRITE-NOT-GRANTED
     // for a locked one (its message names `let`).
-    fn wholeFieldWrite(env: Env, p: WPlace, f: FieldInfo, value: AExpr, st: AS, span: ASpan) -> RWriteFact {
+    // `key` is the written place's spelling (`@b`, `@h.f`; "" when the value is
+    // not a source expression, as for `bind:`): a whole-STRUCT write replaces
+    // the struct's tape fields, each judged by its own grants (structTapeWrites,
+    // §66.12.6 rule 4), unless the value keeps it (`xs: @b.xs`).
+    fn wholeFieldWrite(env: Env, p: WPlace, f: FieldInfo, value: AExpr, key: string, st: AS, span: ASpan) -> RWriteFact {
         const g: TransitionGraph | not = f.graph
         const cap: Sym | not = f.wcap
         if (g is given && cap is given) {
             const rc: RCheck = transitionCheck(env, g, value, initialVariant(env, g, f.init), st)
             return { w: { cap: cap, inst: p.inst, edit: EditKind.Transition, check: rc.check }, st: rc.st }
         }
-        if (f.grants.replace && cap is given) {
-            return { w: { cap: cap, inst: p.inst, edit: EditKind.Replace, check: Check.Static }, st: st }
+        if (grantsAdmit(f.grants, EditKind.Replace) && cap is given) {
+            const st2: AS = checkStructTapes(env, f.ty, value, key, writtenLabel(key, f.sym.hint), span, st)
+            if (st2.diags.length > st.diags.length) return { w: not, st: st2 }
+            return { w: { cap: cap, inst: p.inst, edit: EditKind.Replace, check: Check.Static }, st: st2 }
         }
         const isDerived: boolean = f.mode == FieldMode.Derived
         if (isDerived) return { w: not, st: addDiag(st, env.file, span, "E-DERIVED-WRITE", derivedMessage(p, f)) }
         // r2 F6: a field whose contract grants edits but not `replace` is not
         // locked — say which grant this whole-value write needs
-        if (f.grants.edits.length > 0) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", replaceNotGrantedMsg(f)) }
+        if (grantsHasEdits(f.grants)) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", replaceNotGrantedMsg(f)) }
         // s469 review: a SEQUENCE is never made writable by `let` (E-GRANT-LET-ON-SEQUENCE,
         // §66.12.3) — its whole-value write is the `replace` grant in its type
         if (seqElem(unMaybe(f.ty)) is given) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "` is a sequence whose type grants nothing — this whole-value write needs `replace` in the type's grants (`T[replace]`, §66.12.2); its grants live on the type, and `let` on a sequence is E-GRANT-LET-ON-SEQUENCE (§66.12.3)") }
@@ -6950,17 +6965,11 @@ ${
     fn replaceNotGrantedMsg(f: FieldInfo) -> string {
         const n: string = f.sym.hint
         let msg: string = "`@" + n + " = …` is a whole-value replace of `@" + n + "`, and its contract does not grant `replace` — it grants edits only (§66.11.2: a whole-value write is checked against the grants, whatever the spelling)"
-        if (grantsEdit(f.grants.edits, EditKind.RemoveAnywhere)) msg = msg + ". A removal is `@" + n + " = @" + n + ".filter(x => …)` of its OWN value (`remove`)"
+        if (grantsEditOnly(f.grants, EditKind.RemoveAnywhere)) msg = msg + ". A removal is `@" + n + " = @" + n + ".filter(x => …)` of its OWN value (`remove`)"
         if (seqElem(f.ty) is given) msg = msg + "; to write any value, add `replace` to the type's grants (§66.12.2)"
         return msg
     }
 
-    fn grantsEdit(es: EditKind[], k: EditKind) -> boolean {
-        for (const e of es) {
-            if (e == k) return true
-        }
-        return false
-    }
 
     // `@h = { ...@h, f: v, … }` over an instance: one field write per override,
     // each judged by that field's own contract exactly as `@h.f = v` is.
@@ -6987,7 +6996,7 @@ ${
                 const p: WPlace = { decl: d.info, inst: inst, idx: i, path: [], ty: f.ty, maybe: maybe }
                 st = writeGuards(env, p, pr.span, st)
                 st = resolveExpr(env, pr.value, f.ty, st).st
-                const rw: RWriteFact = wholeFieldWrite(env, p, f, pr.value, st, pr.span)
+                const rw: RWriteFact = wholeFieldWrite(env, p, f, pr.value, memberKey(placeKey(ps[0].value), pr.name), st, pr.span)
                 st = rw.st
                 const w: WriteFact | not = rw.w
                 if (w is given) {
@@ -7056,10 +7065,10 @@ ${
     }
 
     // A write at a struct path (`@o.s = v`): the TARGET sub-field's own contract.
-    fn resolveFieldAt(env: Env, e: AExpr, p: WPlace, f: FieldInfo, value: AExpr, st0: AS) -> AS {
+    fn resolveFieldAt(env: Env, e: AExpr, p: WPlace, f: FieldInfo, value: AExpr, key: string, st0: AS) -> AS {
         const rv: RX = resolveExpr(env, value, p.ty, st0)
         let st: AS = rv.st
-        const r: RWriteFact = fieldAtWrite(env, p, f, value, st, e.span)
+        const r: RWriteFact = fieldAtWrite(env, p, f, value, key, st, e.span)
         st = r.st
         const w: WriteFact | not = r.w
         if (w is given) st = addEffect(st, e.nid, EffectFact.EWrite(w))
@@ -7068,16 +7077,43 @@ ${
 
     type RWriteFact:struct = { w: WriteFact | not, st: AS }
 
-    fn fieldAtWrite(env: Env, p: WPlace, f: FieldInfo, value: AExpr, st: AS, span: ASpan) -> RWriteFact {
+    // `key`: the written place's spelling (`@b.xs`; "" when there is none).
+    fn fieldAtWrite(env: Env, p: WPlace, f: FieldInfo, value: AExpr, key: string, st: AS, span: ASpan) -> RWriteFact {
         const cap: Sym | not = f.wcap
         const target: FieldDef | not = pathTarget(env, p)
         if (target is not || cap is not) {
             return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "` grants no write") }
         }
         const edit: EditKind = EditKind.FieldAt(p.path)
-        if (target.grants.replace) return { w: { cap: cap, inst: p.inst, edit: edit, check: Check.Static }, st: st }
-        if (f.grants.replace && target.grants.edits.length == 0) return { w: { cap: cap, inst: p.inst, edit: edit, check: Check.Static }, st: st }
-        return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`" + target.sym.hint + "` is not writable here — its contract grants no replace (§66.11.4)") }
+        const label: string = writtenLabel(key, f.sym.hint + "." + target.sym.hint)
+        // s469-boot-tape-grants: a TAPE field is judged by its own grants alone —
+        // the owning struct's `replace` never admits replacing it (§66.12.6
+        // rules 1 and 4; S469 limit on O57). The write is classified first.
+        if (tapeGrants(target.ty) is given) {
+            const shape: int = seqEditShapeKey(key, value)
+            let tedit: EditKind = EditKind.Replace
+            let what: string = "a `replace` of it (an unclassified whole-value write, §66.11.2)"
+            if (shape > 0) {
+                tedit = shapeEdit(shape)
+                what = shapeWhat(shape)
+            }
+            if (!grantsAdmit(target.grants, tedit)) {
+                return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`" + label + " = …` writes the tape field `" + target.sym.hint + "` (`" + tapeTypeName(target.ty) + "`): it is " + what + ", which the field's type does not grant — a tape field is judged by its OWN grants, never by the struct's `replace` (§66.12.6 rules 1 and 4)") }
+            }
+            if (!grantsAdmit(target.grants, EditKind.Replace)) {
+                return { w: not, st: addDiag(st, env.file, span, "E-BOOTSTRAP-UNSUPPORTED", "`" + label + " = …` is " + what + " of a sub-field tape, which its grants allow — but Core writes a struct field only as a whole (`replace`), so an edit of a sub-field tape is not in the bootstrap yet") }
+            }
+            return { w: { cap: cap, inst: p.inst, edit: edit, check: Check.Static }, st: st }
+        }
+        let granted = false
+        if (grantsAdmit(target.grants, EditKind.Replace)) granted = true
+        // O57 = no: a contract-free (non-tape) sub-field is written under the owner's `replace`
+        if (grantsAdmit(f.grants, EditKind.Replace) && !grantsHasEdits(target.grants)) granted = true
+        if (!granted) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`" + target.sym.hint + "` is not writable here — its contract grants no replace (§66.11.4)") }
+        // a struct-typed field: its own tape fields are judged as a whole-struct write's are
+        const st2: AS = checkStructTapes(env, target.ty, value, key, label, span, st)
+        if (st2.diags.length > st.diags.length) return { w: not, st: st2 }
+        return { w: { cap: cap, inst: p.inst, edit: edit, check: Check.Static }, st: st2 }
     }
 
     // `@x = { ...@x, f: v, … }` — the spread of the SAME place with named
@@ -7194,7 +7230,7 @@ ${
             } else {
                 const sub: WPlace = { decl: p.decl, inst: p.inst, idx: p.idx, path: [{ owner: s, idx: idx }], ty: fs[idx].ty, maybe: p.maybe }
                 const rv: RX = resolveExpr(env, pr.value, fs[idx].ty, st)
-                const rw: RWriteFact = fieldAtWrite(env, sub, f, pr.value, rv.st, pr.span)
+                const rw: RWriteFact = fieldAtWrite(env, sub, f, pr.value, memberKey(placeKey(ps[0].value), pr.name), rv.st, pr.span)
                 st = rw.st
                 const w: WriteFact | not = rw.w
                 if (w is given) {
@@ -7258,9 +7294,15 @@ ${
         const f: FieldInfo = p.decl.fields[p.idx]
         const cap: Sym | not = f.wcap
         if (p.path.length > 0) return addDiag(st, env.file, e.span, "E-RESET-ARG", "`reset` takes a whole cell, not a sub-field")
-        if (!f.grants.replace || cap is not) {
+        if (!grantsAdmit(f.grants, EditKind.Replace) || cap is not) {
             return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`reset(@" + f.sym.hint + ")` is a replace (§66.11.2) and `" + f.sym.hint + "` does not grant `replace` — declare it `let`")
         }
+        // s469-boot-tape-grants: a reset replaces a tape field that has changed since
+        // construction, and that is a `replace` of the FIELD (§66.12.6 rule 4, reset
+        // included) — whether it has changed is known only at run time
+        const tp: string = resetTapeProblem(env.g.types, f.ty, "@" + f.sym.hint)
+        if (tp != "") return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", resetTapeMessage("`reset(@" + f.sym.hint + ")`", tp))
+
         return addEffect(st, e.nid, EffectFact.EReset({ cap: cap, inst: p.inst, edit: EditKind.Replace, check: Check.Static }, p.decl.sym, p.idx))
     }
 
@@ -7381,7 +7423,7 @@ ${
             what = "a front-prepend"
         }
         const cap: Sym | not = f.wcap
-        const granted: boolean = f.grants.replace || f.grants.edits.indexOf(edit) >= 0 || hasEditKind(f.grants.edits, edit)
+        const granted: boolean = grantsAdmit(f.grants, edit)
         // r1 F7: a granted edit that GROWS a fixed-length sequence breaks its length invariant
         if (granted && growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedLengthMessage(f.sym.hint, what))
         if (granted && cap is given) {
@@ -7400,6 +7442,356 @@ ${
     }
 
     // =========================================================================
+    // s469-boot-tape-grants — THE TAPE GRANT READER (§66.12.3 "Permissions live
+    // on the TYPE"; §66.12.6 "No position escapes the grants").
+    //
+    // `grantsAdmit` is the ONE predicate every write to a tape-typed place is
+    // judged by, and `tapeGrants` the one place a tape type's grants are read:
+    //   - a cell / declaration field: resolveEditCall, resolveRemoveCall,
+    //     resolveSeqShape, wholeFieldWrite (the field's GrantSet, built from its
+    //     type in fieldOf);
+    //   - a struct field written directly or as a spread override: fieldAtWrite;
+    //     an element field: resolveElemFieldWrite (the FieldDef's GrantSet,
+    //     built from its type in fieldDefsOf);
+    //   - every tape field a WHOLE-STRUCT write replaces (structTapeWrites,
+    //     §66.12.6 rule 4) — a cell, a field, an instance-spread override, an
+    //     element field, a struct local's rebinding; `reset` / `reset-on=` of
+    //     one is refused (the reset's effect on a tape is not static);
+    //   - a LOCAL rebinding (localTapeProblems, run by the typer; rule 4 / O63 — `let` gives the tape
+    //     nothing);
+    //   - a place passed as an argument (argTapeProblem, §66.12.3 subset).
+    // `replace` subsumes the edits (§66.11.3). A form that writes a tape and is
+    // not judged here is refused (E-BOOTSTRAP-UNSUPPORTED: in-place edits of a
+    // local, a parameter or a sub-field tape), never let through.
+    // slice-m4/tape-write-forms.test.js enumerates the write forms.
+    // =========================================================================
+    fn grantsAdmit(gs: GrantSet, edit: EditKind) -> boolean {
+        return gs.replace || hasEditKind(gs.edits, edit)
+    }
+
+    // Does the set grant ANY write (`replace` or an edit)? — who gets a write
+    // capability minted (fieldOf), and whether a sub-field is "fixed".
+    fn grantsAny(gs: GrantSet) -> boolean {
+        return gs.replace || gs.edits.length > 0
+    }
+
+    // Does the set grant some EDIT (a contract other than `replace`)? O57: a
+    // sub-field with one is not written under its owner's `replace`.
+    fn grantsHasEdits(gs: GrantSet) -> boolean {
+        return gs.edits.length > 0
+    }
+
+    // Does the set name edit `k` itself (not through `replace`)? — message advice only.
+    fn grantsEditOnly(gs: GrantSet, k: EditKind) -> boolean {
+        return hasEditKind(gs.edits, k)
+    }
+
+    // A tape type's grants, read off the TYPE (through `| not`); `not` for a
+    // type that is not a tape.
+    fn tapeGrants(t: Type) -> GrantSet | not {
+        const u: Type = unMaybe(t)
+        return match u {
+            .Seq(elem: e, grants: g) :> tapeGrantSet(g)
+            .Int :> not
+            .Num :> not
+            .Str :> not
+            .Bool :> not
+            .Named(sym: s) :> not
+            .Maybe(inner: i) :> not
+        }
+    }
+
+    fn tapeGrantSet(g: SeqGrants) -> GrantSet {
+        return { replace: g.replace, edits: seqEdits(g) }
+    }
+
+    // One tape field a whole-struct write replaces: where it is (for the
+    // message), its type, and its OWN grants (the FieldDef's — never the
+    // owning struct's `replace`).
+    type TapeHit:struct = { path: string, ty: Type, grants: GrantSet }
+
+    // §66.12.6 rule 4: the tape fields a whole value `v` of type `ty`, written
+    // at the place spelled `key` ("" when it has no spelling), REPLACES. Every
+    // tape field reached through struct fields is written, except one the new
+    // value leaves as it was — `xs: @b.xs`, or a spread of the place itself
+    // that does not override it (§66.11.3 rule 1). A value that is not an
+    // object literal (`loadBox()`, a name, …) replaces every tape field. The
+    // elements of a tape are not walked: replacing a tape is that tape's own
+    // write, judged where it is written. `seen` stops a recursive struct.
+    fn structTapeWrites(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string, seen: int[]) -> TapeHit[] {
+        const s: Sym | not = namedOf(unMaybe(ty))
+        if (s is not) return []
+        if (seen.indexOf(s.id) >= 0) return []
+        const ti: TypeInfo | not = typeInfoOf(types, s)
+        if (ti is not) return []
+        const fs: FieldDef[] | not = structFieldDefs(ti.def)
+        if (fs is not) return []
+        let props: AProp[] = []
+        if (v is given) props = propsOf(v)
+        // a spread of the place itself keeps the fields no LATER property names —
+        // only when it is the last spread (`{ ...@b, ...other }`: `other` may override)
+        let selfSpread = false
+        for (const pr of props) {
+            if (pr.spread) selfSpread = key != "" && placeKey(pr.value) == key
+        }
+        let out: TapeHit[] = []
+        for (const fd of fs) {
+            const name: string = fd.sym.hint
+            const sub: string = memberKey(key, name)
+            const at: string = label + "." + name
+            let fv: AExpr | not = not
+            let kept = false
+            const pr: AProp | not = namedProp(props, name)
+            if (pr is given) {
+                fv = pr.value
+                if (sub != "" && placeKey(pr.value) == sub) kept = true
+            } else if (selfSpread) {
+                kept = true
+            }
+            if (!kept) {
+                if (tapeGrants(fd.ty) is given) {
+                    out = out.concat([{ path: at, ty: fd.ty, grants: fd.grants }])
+                } else {
+                    out = out.concat(structTapeWrites(types, fd.ty, fv, sub, at, seen.concat([s.id])))
+                }
+            }
+        }
+        return out
+    }
+
+    // The (last) non-spread property named `name` of an object literal.
+    fn namedProp(ps: AProp[], name: string) -> AProp | not {
+        let found: AProp | not = not
+        for (const p of ps) {
+            if (!p.spread && p.name == name) found = p
+        }
+        return found
+    }
+
+    // A refusal the reader produces, before it is attached to a pass's state
+    // (the resolver's AS, the typer's TypeState).
+    type TapeDiag:struct = { code: string, msg: string }
+
+    // Each tape field a whole-struct write of `v` at `key` replaces, judged by
+    // its own grants (`grantsAdmit(…, Replace)`): E-WRITE-NOT-GRANTED.
+    fn structTapeProblems(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string) -> TapeDiag[] {
+        let out: TapeDiag[] = []
+        for (const h of structTapeWrites(types, ty, v, key, label, [])) {
+            if (!grantsAdmit(h.grants, EditKind.Replace)) {
+                out = out.concat([{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` replaces the tape field `" + h.path + "` (`" + tapeTypeName(h.ty) + "`), whose type does not grant `replace` — a whole-struct write that changes a tape field is a `replace` of THAT field, judged by the field's own grants, not the struct's (§66.12.6 rule 4). Keep the field as it was (`" + lastSegment(h.path) + ": " + h.path + "`), or spread the struct (`{ ..." + label + ", f: v }`)" }])
+            }
+        }
+        return out
+    }
+
+    fn checkStructTapes(env: Env, ty: Type, v: AExpr | not, key: string, label: string, span: ASpan, st0: AS) -> AS {
+        let st: AS = st0
+        for (const d of structTapeProblems(env.g.types, ty, v, key, label)) { st = addDiag(st, env.file, span, d.code, d.msg) }
+        return st
+    }
+
+    // A tape type as written, grants included (`Entry[free, append]`) —
+    // typeName prints the element only.
+    fn tapeTypeName(t: Type) -> string {
+        const i: Type | not = maybeInner(t)
+        if (i is given) return tapeTypeName(i) + " | not"
+        const u: Type = t
+        return match u {
+            .Seq(elem: e, grants: g) :> elemName(e) + "[" + grantWords(g).join(", ") + "]"
+            .Int :> typeName(t)
+            .Num :> typeName(t)
+            .Str :> typeName(t)
+            .Bool :> typeName(t)
+            .Named(sym: s) :> typeName(t)
+            .Maybe(inner: x) :> typeName(t)
+        }
+    }
+
+    fn grantWords(g: SeqGrants) -> string[] {
+        let out: string[] = []
+        const len: LengthGrant = g.length
+        const lw: string = match len {
+            .Free :> "free"
+            .Bounded(min: a, max: b) :> "" + a + "..=" + b
+            .Fixed :> ""
+        }
+        if (lw != "") out = out.concat([lw])
+        for (const a of g.at) { out = out.concat([growWord(a)]) }
+        for (const a of g.shrink) { out = out.concat([shrinkWord(a)]) }
+        if (g.positionsWritable) out = out.concat(["write"])
+        if (g.replace) out = out.concat(["replace"])
+        return out
+    }
+
+    fn growWord(a: SeqAt) -> string {
+        return match a {
+            .End :> "append"
+            .Front :> "prepend"
+            .Anywhere :> "insert"
+        }
+    }
+
+    fn shrinkWord(a: SeqAt) -> string {
+        return match a {
+            .End :> "pop"
+            .Front :> "shift"
+            .Anywhere :> "remove"
+        }
+    }
+
+    fn resetTapeMessage(what: string, path: string) -> string {
+        return what + " replaces the tape field `" + path + "` whenever it has changed since construction, and that field's type does not grant `replace` (§66.12.6 rule 4: a reset does not waive a tape field's grants). Whether the reset changes it is known only at run time, and the bootstrap has no run-time grant check — refused, not approximated (grant `replace` on the field's type, or reset the other fields by name)"
+    }
+
+    // The written place as a message names it: its spelling, else `@name`.
+    fn writtenLabel(key: string, hint: string) -> string {
+        if (key != "") return key
+        return "@" + hint
+    }
+
+    fn lastSegment(path: string) -> string {
+        const i: int = path.lastIndexOf(".")
+        if (i < 0) return path
+        return path.substring(i + 1)
+    }
+
+    // A whole-value write to a struct with a tape field it cannot judge
+    // statically (`reset`, `reset-on=`: whether the reset changes a tape field
+    // depends on its value at run time) — the first such field, or "".
+    fn resetTapeProblem(types: TypeInfo[], ty: Type, label: string) -> string {
+        for (const h of structTapeWrites(types, ty, not, "", label, [])) {
+            if (!grantsAdmit(h.grants, EditKind.Replace)) return h.path
+        }
+        return ""
+    }
+
+    // §66.12.6 rule 4 / O63 (RULED S469): rebinding a local whose type is a
+    // tape IS a tape write — classified by the §66.11.2 shapes (`out = [...out,
+    // e]` an end-append, `out = out.filter(…)` a shrink-anywhere, `out =
+    // out.map(…)` / `.sort()` / `.reverse()` a position write) or else a
+    // `replace`, and judged by the TYPE's grants: a local `let` grants nothing,
+    // and an un-annotated local's inferred type carries none (rule 1: inference
+    // never invents a grant). A struct local's rebinding replaces its tape
+    // fields (structTapeWrites). Run by the TYPER (typeAssign), where an
+    // un-annotated local's type is known; a local of unknown type is not judged.
+    fn localTapeProblems(types: TypeInfo[], name: string, lt: Type, value: AExpr) -> TapeDiag[] {
+        const tg: GrantSet | not = tapeGrants(lt)
+        if (tg is not) return structTapeProblems(types, lt, value, name, name)
+        return localTapeEdit(name, tapeTypeName(lt), tg, growsFixed(lt), value)
+    }
+
+    // The written type of the parameter `s` binds, if `s` is a parameter.
+    fn paramTypeOfSym(t: Tables, s: Sym) -> Type | not {
+        for (const f of t.binds.facts) {
+            const bs: Sym | not = bindSym(f)
+            if (bs is given) {
+                if (bs.id == s.id) return boundParamType(f)
+            }
+        }
+        return not
+    }
+
+    // An un-annotated local's type as §66.12.6 rule 1 reads it: a tape (or a
+    // `T | not` of one) with its grants dropped — "inference never invents a grant".
+    fn inferredTape(t: Type) -> Type {
+        const i: Type | not = maybeInner(t)
+        if (i is given) return Type.Maybe(inferredTape(i))
+        return ungranted(t)
+    }
+
+    // An un-annotated local whose inferred type the typer could not settle
+    // (`let ws = s.split(","); ws = [];` joins to unknown) but which the write
+    // shows is a tape (an array literal, a recognized shape, a tape value):
+    // inferred, so it carries no grant (§66.12.6 rule 1) — fail closed.
+    fn inferredTapeProblems(name: string, value: AExpr, vt: Type | not) -> TapeDiag[] {
+        let tapeVal: boolean = isArrayLit(value) || seqEditShapeKey(name, value) > 0
+        if (vt is given) {
+            if (tapeGrants(vt) is given) tapeVal = true
+        }
+        if (!tapeVal) return []
+        return localTapeEdit(name, "inferred: no grants", noGrants(), false, value)
+    }
+
+    fn isArrayLit(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .ArrayLit(elems: es) :> true
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: x) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps) :> false
+            .Sql(q: q) :> false
+            .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
+        }
+    }
+
+    fn localTapeEdit(name: string, tyText: string, tg: GrantSet, fixed: boolean, value: AExpr) -> TapeDiag[] {
+        const shape: int = seqEditShapeKey(name, value)
+        let edit: EditKind = EditKind.Replace
+        let what: string = "a `replace` (an unclassified whole-value write, §66.11.2)"
+        if (shape > 0) {
+            edit = shapeEdit(shape)
+            what = shapeWhat(shape)
+        }
+        if (!grantsAdmit(tg, edit)) {
+            return [{ code: "E-WRITE-NOT-GRANTED", msg: "`" + name + " = …` rebinds the local tape `" + name + "` (`" + tyText + "`): it is " + what + ", which its type does not grant — on a local, `let` makes only the NAME rebindable and grants the tape nothing, not even `replace`, and an inferred type carries no grant (§66.12.6 rules 1 and 4, O63 ruled S469); write the grant in the type (`let " + name + ": T[…] = …`)" }]
+        }
+        // the invariants are checked on every write (§66.11.2): a fixed length never grows or shrinks
+        if (fixed && shape > 0 && shape < 4) {
+            return [{ code: "E-WRITE-INVARIANT", msg: "`" + name + "`: " + what + " changes the length of the local tape, and its type fixes the length (no `free` grant, §66.12.1–§66.12.2) — the write provably breaks the length invariant (§66.11.2)" }]
+        }
+        return []
+    }
+
+    // §66.12.3: a callee can do only what its parameter type grants, so a PLACE
+    // passed to a tape parameter must grant at least what the parameter does
+    // (a more-permissive argument is accepted; ruled S435 "type"). "" when it
+    // does, else the first grant it lacks.
+    fn argTapeProblem(arg: Type, param: Type) -> string {
+        const pg: GrantSet | not = tapeGrants(param)
+        const ag: GrantSet | not = tapeGrants(arg)
+        if (pg is not || ag is not) return ""
+        if (pg.replace && !ag.replace) return "`replace`"
+        for (const e of pg.edits) {
+            if (!grantsAdmit(ag, e)) return editWord(e)
+        }
+        return ""
+    }
+
+    fn editWord(e: EditKind) -> string {
+        return match e {
+            .Replace :> "`replace`"
+            .Append :> "`append`"
+            .Prepend :> "`prepend`"
+            .Anywhere :> "`insert`"
+            .PositionWrite :> "`write`"
+            .RemoveEnd :> "`pop`"
+            .RemoveFront :> "`shift`"
+            .RemoveAnywhere :> "`remove`"
+            .FieldAt(path: p) :> "a field write"
+            .Transition :> "a transition"
+            .ElemAt(index: i) :> "an element-field write"
+        }
+    }
+    // ---- END OF THE TAPE GRANT READER (tape-write-forms.test.js: no grant is read outside it) ----
+
+    // =========================================================================
     // s442 — recognized sequence edit shapes (§66.11.2: "Edits … are classified
     // at compile time, from mutating method calls AND from recognized
     // reassignment shapes").
@@ -7410,24 +7802,31 @@ ${
     // 0 = not a recognized shape (an unclassifiable reassignment is a replace).
     // =========================================================================
     fn seqEditShape(target: AExpr, value: AExpr) -> int {
-        if (placeKey(target) == "") return 0
+        return seqEditShapeKey(placeKey(target), value)
+    }
+
+    // s469-boot-tape-grants: the classifier over the written place's SPELLING
+    // (`@x`, `@b.xs`, a local `out`), so a field write and a local rebinding
+    // classify exactly as a cell write does (§66.12.6 rule 4).
+    fn seqEditShapeKey(key: string, value: AExpr) -> int {
+        if (key == "") return 0
         const es: AExpr[] = arrayElems(value)
         if (es.length >= 2) {
             const first: AExpr | not = spreadInner(es[0])
             const last: AExpr | not = spreadInner(es[es.length - 1])
             if (countSpreads(es) == 1) {
                 if (first is given) {
-                    if (samePlaceSyntax(target, first)) return 1
+                    if (placeKey(first) == key) return 1
                 }
                 if (last is given) {
-                    if (samePlaceSyntax(target, last)) return 2
+                    if (placeKey(last) == key) return 2
                 }
             }
             return 0
         }
         const m: MethodCall | not = callMethod(value)
         if (m is given) {
-            if (samePlaceSyntax(target, m.obj)) {
+            if (placeKey(m.obj) == key) {
                 if (m.method == "filter") return 3
                 if (m.method == "map" || m.method == "sort" || m.method == "reverse") return 4      // s469: sort / reverse keep the length and move positions (§66.12.6 rule 3)
             }
@@ -7565,12 +7964,12 @@ ${
     fn shapeEdit(shape: int) -> EditKind {
         if (shape == 1) return EditKind.Append
         if (shape == 2) return EditKind.Prepend
-        if (shape == 3) return EditKind.Anywhere
+        if (shape == 3) return EditKind.RemoveAnywhere      // RULED S442: `filter` SHRINKS anywhere — the `remove` grant
         return EditKind.PositionWrite
     }
 
     fn shapeWhat(shape: int) -> string {
-        if (shape == 1) return "an end-append (§66.11.2: `@x = [...@x, e]` is the same edit as `@x.push(e)`)"
+        if (shape == 1) return "an end-append (§66.11.2: `@x = [...@x, e]` is the same edit as `@x.append(e)`)"
         if (shape == 2) return "a front-prepend (`@x = [e, ...@x]`)"
         if (shape == 3) return "a shrink-anywhere (§66.11.2: `@x = @x.filter(…)`; the `remove` grant)"
         return "a position-write (§66.11.2: `@x = @x.map(…)`, `.sort(…)`, `.reverse()`)"
@@ -7593,9 +7992,8 @@ ${
         }
         const edit: EditKind = shapeEdit(shape)
         const cap: Sym | not = f.wcap
-        let isGranted: boolean = f.grants.replace || hasEditKind(f.grants.edits, edit)
-        // RULED S442: `filter` SHRINKS anywhere — the `remove` grant, not `insert`
-        if (shape == 3) isGranted = f.grants.replace || shrinkGranted(f.shrink, SeqAt.Anywhere)
+        // RULED S442: `filter` SHRINKS anywhere — the `remove` grant, not `insert` (shapeEdit)
+        const isGranted: boolean = grantsAdmit(f.grants, edit)
         // s444: every granted shape lowers, so a granted field always has a
         // write capability (its grants list the edit — seqEdits)
         if (!isGranted || cap is not) {
@@ -7760,7 +8158,9 @@ ${
             what = "a removal at the end (the `pop` grant)"
         }
         // RULED S442: a removal needs a SHRINK grant there (or `remove`), never the grow grant
-        const isGranted: boolean = f.grants.replace || shrinkGranted(f.shrink, place)
+        let redit: EditKind = EditKind.RemoveFront
+        if (m.method == "pop") redit = EditKind.RemoveEnd
+        const isGranted: boolean = grantsAdmit(f.grants, redit)
         // r3 nit: messages name the place written (`@r.xs`), not only its field (`@r`)
         const at: string = placeKey(m.obj)
         if (!isGranted) {
@@ -7881,13 +8281,17 @@ ${
         if (owner == "") return addDiag(st, env.file, e.span, "E-ASSIGN-TARGET", "`@" + f.sym.hint + "[…]." + ef.field + "` — the elements of `@" + f.sym.hint + "` are not structs")
         if (target is not) return addDiag(st, env.file, e.span, "E-SCOPE-001", "`" + owner + "` has no field `" + ef.field + "`")
         st = resolveExpr(env, value, target.ty, st).st
-        if (!target.grants.replace && target.grants.edits.length == 0) {
+        if (!grantsAny(target.grants)) {
             return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "[…]." + ef.field + " = …` is an edit of `" + owner + "." + ef.field + "`, which carries no contract — it is fixed (§66.11.4; an element-field write is judged by that field's own contract, dpa-052 Q3)")
         }
         // s444: `= v` REPLACES the element field — its contract must grant `replace`
-        if (!target.grants.replace) {
+        // (s469-boot-tape-grants: a tape element field by its own grants, the one reader)
+        if (!grantsAdmit(target.grants, EditKind.Replace)) {
             return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "[…]." + ef.field + " = …` replaces `" + owner + "." + ef.field + "`, whose contract grants edits but no `replace` (§66.11.4, dpa-052 Q3)")
         }
+        // a struct-typed element field: its tape fields are replaced with it (§66.12.6 rule 4)
+        const stt: AS = checkStructTapes(env, target.ty, value, "", "@" + f.sym.hint + "[…]." + ef.field, e.span, st)
+        if (stt.diags.length > st.diags.length) return stt
         const cap: Sym | not = f.wcap
         if (cap is not || elemSym is not) return noCapability(env, e, st)
         return addEffect(st, e.nid, EffectFact.EElemAt(cap, p.inst, ef.index, [{ owner: elemSym, idx: targetIdx }]))
@@ -11939,9 +12343,9 @@ ${
         }
         let rw: RWriteFact = { w: not, st: st }
         if (p.path.length == 0) {
-            rw = wholeFieldWrite(env, p, f, x, st, a.span)
+            rw = wholeFieldWrite(env, p, f, x, "", st, a.span)
         } else {
-            rw = fieldAtWrite(env, p, f, x, st, a.span)
+            rw = fieldAtWrite(env, p, f, x, "", st, a.span)
         }
         st = rw.st
         const w: WriteFact | not = rw.w
@@ -13673,7 +14077,7 @@ ${
     // ---- types as values ------------------------------------------------------
     fn known(ty: Type) -> VType { return VType.Known(ty) }
 
-    fn anySeqGrants() -> SeqGrants { return { length: LengthGrant.Free, at: [], shrink: [], positionsWritable: false } }
+    fn anySeqGrants() -> SeqGrants { return { length: LengthGrant.Free, at: [], shrink: [], positionsWritable: false, replace: false } }
 
     fn maybeInner(ty: Type) -> Type | not {
         return match ty {
@@ -15445,10 +15849,27 @@ ${
                 // r7 A: full assignability for EVERY parameter type (§7.5.1 position 3)
                 ts = checkValue(env, exprType0(ts, args[i].nid), pt, args[i].span, what, ts)
                 ts = checkNotElems(env, args[i], pt, ts)
+                ts = checkArgTape(env, args[i], pt, what, ts)
             }
             i = i + 1
         }
         return ts
+    }
+
+    // s469-boot-tape-grants (g-bootstrap-callsite-grant-subset-unchecked-s469): §66.12.3
+    // "permission sets need a subset check at every call" — a PLACE (a cell, a field, a
+    // local, a parameter) passed to a tape parameter must grant at least what the
+    // parameter does (argTapeProblem, the one reader). The direction is ruled (S435
+    // "type"); the CODE is not (the gap's owed ruling), so the refusal is
+    // E-BOOTSTRAP-UNSUPPORTED, fail closed. A fresh value (a literal, a call's result)
+    // is not checked: it is given the parameter's type as a typed binding is (rule 1).
+    fn checkArgTape(env: TEnv, arg: AExpr, pt: Type, what: string, ts: TypeState) -> TypeState {
+        if (placeKey(arg) == "") return ts
+        const at: Type | not = knownOf(exprType0(ts, arg.nid))
+        if (at is not) return ts
+        const lack: string = argTapeProblem(at, pt)
+        if (lack == "") return ts
+        return report(ts, env, arg.span, "E-BOOTSTRAP-UNSUPPORTED", what + " is the tape `" + placeKey(arg) + "`, whose type does not grant " + lack + ", which the parameter's type `" + tapeTypeName(pt) + "` does — a callee can do what its parameter grants, so an argument must grant at least as much (§66.12.3). Which code reports this is not ruled yet; refused, not let through")
     }
 
     // `return v` against the declared `-> T` (§7.5.1 position 4; every type since r7 A — pa-ruled widening, measured-zero corpus).
@@ -16064,6 +16485,22 @@ ${
                     ts1 = checkLitFields(env, value, checkValue(env, r.vt, la, value.span, placeLabel(target), ts1))
                 } else if (la is not && bareLocal) {
                     ts1 = contribute(ts1, ls, r.vt)
+                }
+                // s469-boot-tape-grants (g-bootstrap-local-tape-rebinding-not-grant-checked-s469):
+                // the tape write a local rebinding performs, judged by the local's TYPE grants —
+                // its annotation, else its inferred type (which carries none, §66.12.6 rule 1)
+                if (bareLocal) {
+                    let lt: Type | not = la
+                    if (lt is not) lt = paramTypeOfSym(env.t, ls)      // a parameter's type is written, not inferred
+                    if (lt is not) {
+                        // inferred: the tape the local holds carries NO grant, whatever
+                        // value it was given (`let s = @audit`, §66.12.6 rule 1)
+                        const inf: Type | not = knownOf(tLocal(env, ls))
+                        if (inf is given) lt = inferredTape(inf)
+                    }
+                    let tds: TapeDiag[] = inferredTapeProblems(exprName(target), value, knownOf(r.vt))
+                    if (lt is given) tds = localTapeProblems(env.t.types, exprName(target), lt, value)
+                    for (const d of tds) { ts1 = report(ts1, env, target.span, d.code, d.msg) }
                 }
             }
         }
@@ -17929,9 +18366,17 @@ ${
                 st = addDiag(st, prog.file, a.span, "E-RESET-ON-ENGINE-REFUSED", "`reset-on=` on `@" + d.name + "` resets it along its `rule=` graph, and every state other than the reset target must admit the target: " + refused + " (§6.8.4 rule 6) — add the target to those states' `rule=`")
                 ok = false
             }
-        } else if (!f.grants.replace) {
+        } else if (!grantsAdmit(f.grants, EditKind.Replace)) {
             st = addDiag(st, prog.file, a.span, "E-RESET-ON-NOT-WRITABLE", notWritableMessage(d.name, f.mode))
             ok = false
+        } else {
+            // s469-boot-tape-grants: as `reset(@x)` — a reset of a struct with an
+            // ungranted tape field is not judged statically (resetTapeMessage)
+            const tp: string = resetTapeProblem(g.types, f.ty, "@" + d.name)
+            if (tp != "") {
+                st = addDiag(st, prog.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", resetTapeMessage("`reset-on=` on `@" + d.name + "`", tp))
+                ok = false
+            }
         }
         if (!ok) return { e: not, st: st }
         return { e: { target: target, triggers: triggers, span: a.span }, st: st }
@@ -18270,8 +18715,16 @@ ${
                 .Seeded :> "a cell whose contract grants no write"
             }
         }
-        if (store is given && store == PersistStore.Local && (f.graph is given || !f.grants.replace)) {
+        if (store is given && store == PersistStore.Local && (f.graph is given || !grantsAdmit(f.grants, EditKind.Replace))) {
             return "another tab's value reaches a `persist=\"local\"` cell as one whole-value write, and this cell's contract refuses one (" + contractText(f) + ") — whether its contract judges that write or it is applied like a restore is OPEN (O-061-5); use `persist=\"" + sessionWord() + "\"` (no cross-tab sync)"
+        }
+        // s469-boot-tape-grants (review r2 H1): the cross-tab value is a whole-value write of a
+        // STRUCT too, so it replaces each tape field it changes (§66.12.6 rule 4) — a struct
+        // must not carry an append-only tape past the check above. Which fields change is known
+        // only at run time: refused, as `reset` is (resetTapeProblem, the one reader).
+        if (store is given && store == PersistStore.Local) {
+            const tp: string = resetTapeProblem(g.types, f.ty, "@" + f.sym.hint)
+            if (tp != "") return "another tab's value reaches a `persist=\"local\"` cell as one whole-value write, and it would replace the tape field `" + tp + "`, whose type does not grant `replace` (§66.12.6 rule 4: no spelling — a struct around the tape included — gets around a tape's grants); the bootstrap has no run-time grant check, so this is refused, not approximated — use `persist=\"" + sessionWord() + "\"` (no cross-tab sync), or grant `replace` on the field's type"
         }
         // r8: an unresolved type is never checked against
         if (st.bad.fields.indexOf(f.sym.id) >= 0) return ""
