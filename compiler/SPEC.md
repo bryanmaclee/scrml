@@ -17224,10 +17224,11 @@ element nested at any depth below a root, a nested `<each>`'s row, and an `<each
 > A markup `if=` inside Tier-0 lifted markup (`${ … lift … }`) is honoured the same way (§17.1; S469,
 > [[g-lift-row-if-is-display-toggle-not-a-render-gate-s462]] — emit-lift.js `emitLiftIfGate`, the same
 > `_scrml_ifrow_apply` swap), and an `<each>` that is itself the lifted node is lowered as an `<each>`
-> (it was built as a literal `<each>` element). **And `<engine>` in a row:** an `<engine>`
-> inside an `<each>` row renders NOTHING on impl#1 today — no state body, `if=` or not, no diagnostic —
-> so it fails closed and "honoured" does not yet apply to it; whether an engine may sit in a row at all
-> (§51.0.A singleton) is ruling-gated, tracked as [[g-engine-inside-each-row-renders-nothing]].
+> (it was built as a literal `<each>` element). **And `<engine>` in a row:** "honoured" does
+> not apply — an `<engine>` may not sit in an `<each>` row at all, `if=` or not: it is refused with
+> **E-COMPONENT-ENGINE-SCOPE** (§51.0.K, S439 ruling #10). impl#1 emits it since S469
+> (`s469-engine-in-row`; before, the engine rendered nothing at exit 0 — fail-closed, no diagnostic),
+> resolving [[g-engine-inside-each-row-renders-nothing]].
 >
 > ~~**`if=` on a structural element positioned INSIDE an `<each>` row template is NOT honored, and this
 > subsection's SHALL does not reach there.** Stated as a carve-out rather than left implicit because the
@@ -18169,6 +18170,15 @@ When the empty-state condition does NOT hold, the `<empty>` body is NOT rendered
 - An `<each>` body MAY contain at most ONE `<empty>` sub-element. Multiple `<empty>` sub-elements within the same `<each>` body is `E-EACH-EMPTY-DUPLICATE` (§34, queued).
 - The `<empty>` body SHALL NOT reference `@.` (the contextual sigil is not in scope — the empty branch executes when no item exists). Use of `@.` inside `<empty>` is `E-SYNTAX-064` per §17.7.3.
 - An `<each>` MAY omit `<empty>` entirely. When omitted and the iteration source is empty, the `<each>` renders nothing (no DOM element produced for the iteration; no error).
+
+> **impl#1 — an `<engine>` in an `<empty>` body (S469).** An `<engine>` in the `<empty>` body of an `<each>` that is
+> inside a row is in that row and is **E-COMPONENT-ENGINE-SCOPE** (§51.0.K). In the `<empty>` body of a list that is
+> NOT in a row the row rule does not reach it — the fallback renders once — but impl#1's list renderer has no engine
+> lowering (it dropped the engine at exit 0), so impl#1 refuses it as an unsupported emission, **E-CG-003**, rather
+> than drop it. ⚑ **OPEN** — whether an engine there renders (as one under a lone `if=` does — an `if=` with no
+> `else`; in a branch of an `if=` / `else` chain impl#1 drops it today,
+> [[g-engine-in-if-else-chain-branch-renders-nothing-s469]]) or is refused by the language is the owner's call; the
+> refusal is reversible.
 
 #### 17.7.5 `key=` inference + the `W-EACH-KEY-001` info-lint
 
@@ -28085,7 +28095,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-DERIVED-ENGINE-NO-WRITE | §51.0.J | Direct write to the auto-declared variable of a derived engine. Derived-engine variables are read-only. | Error |
 | E-DERIVED-ENGINE-INITIAL-ABSENT | §51.0.J | (S90 rename — M-7C-D-12 Track 4 / OQ-6) `derived=expr` returns scrml-absence (`not`) when the source is in its initial state. The derived engine has no initial variant to enter. Add a default arm or use a wildcard arm in the derivation. **Pre-S90 name:** `E-DERIVED-ENGINE-INITIAL-UNDEFINED` (renamed for §42.8 "No scrml program SHALL directly emit JavaScript `undefined`" alignment; the runtime condition is scrml-absence, not JS-`undefined`). | Error |
 | E-DERIVED-ENGINE-CIRCULAR | §51.0.J | Chained derivation (engine A → engine B → engine A) forms a cycle. Detected at compile time by the dependency-graph machinery (§31). Break the cycle. | Error |
-| E-COMPONENT-ENGINE-SCOPE | §51.0.K | A component declaration body contains an `<engine>` element. Engines are singletons; instantiating a component multiple times would produce multiple "singletons", violating the invariant. Use plain reactive cells inside components, or define the engine outside the component. ALSO (S439 ruling #10): an `<engine>` inside an `<each>` row template (a row is a multi-instance context); the message names the per-row form — an ordinary declaration, keyed per row (§66.7.3). **Nominal for the `<each>`-row case — not yet emitted** (impl#1 compiles it at exit 0 and drops the body). | Error |
+| E-COMPONENT-ENGINE-SCOPE | §51.0.K | A component declaration body contains an `<engine>` element. Engines are singletons; instantiating a component multiple times would produce multiple "singletons", violating the invariant. Use plain reactive cells inside components, or define the engine outside the component. ALSO (S439 ruling #10): an `<engine>` inside an `<each>` row template (a row is a multi-instance context); the message names the per-row form — an ordinary declaration, keyed per row (§66.7.3). Emitted by impl#1 for the `<each>`-row case since S469 (component-body case emitted at `compiler/src/symbol-table.ts:9182`; `<each>`-row case emitted at `compiler/src/symbol-table.ts:9307`). | Error |
 | E-ENGINE-MOUNT-NOT-ENGINE | §51.0.D, §21.8 | A self-closing tag `<EngineName/>` mounts an imported binding whose source export is NOT an engine (e.g., a component, channel, type, function, or arbitrary const). Cross-file engine mount via `<EngineName/>` requires the imported name to be the variable of an exported `<engine>` declaration. Either import an engine binding from the source file, or use the appropriate mount form for the imported kind (e.g., component instantiation for components, expression read for const values). (Catalog addition S68 — A1b B14.) | Error |
 | E-ENGINE-STATE-CHILD-MISSING | §51.0.B, §51.0.F | A variant of the engine's `for=Type` has no matching state-child tag in the engine body. Per §51.0.F, every variant must have a corresponding state-child (`<Variant>...</>`) — exhaustiveness over the variant set is what gives `<engine>` its compile-time guarantees. Add the missing `<Variant>` state-child(ren). (Catalog addition S68 — A1b B15.) | Error |
 | E-ENGINE-STATE-CHILD-INVALID-VARIANT | §51.0.B | A state-child tag in the engine body does not match any variant of the engine's `for=Type`. State-child tags are PascalCase variant names; `<UnknownTag>` inside an `<engine for=MarioState>` is rejected because `UnknownTag` is not a `MarioState` variant. Either rename the tag to a valid variant or add the variant to the type. (Catalog addition S68 — A1b B15.) | Error |
@@ -38534,11 +38544,19 @@ template (§17.7) is a multi-instance context — the many-instances argument ab
 a row word for word — so an `<engine>` declared inside an `<each>` row template SHALL be
 refused with `E-COMPONENT-ENGINE-SCOPE` (§34). The message SHALL name the per-row form:
 per-row state is spelled as an ordinary declaration, which gets a keyed instance per row
-(§66.7.3). **Nominal for this case on impl#1** — impl#1 does not yet emit it (measured
-S439: the program compiles at exit 0 and the engine's body is silently dropped from the
-row).
+(§66.7.3). "Inside an `<each>` row template" is the WHOLE row subtree: a row root, any
+element under it (with or without `if=`), any root of a multi-root row, a `<match>` arm in
+the row, the row of a nested `<each>` (and that list's `<empty>` fallback), an engine
+state-child body in the row. One diagnostic per outermost engine — an engine nested in a
+refused engine is not reported again. The `<empty>` fallback of an `<each>` that is not
+itself in a row is not a row position (§17.7.4).
 > **Provenance:** ruling:user-voice-scrml.md S439 #10 "all recs" (Rec: refuse it) ·
-> supersedes: nothing (the SPEC was silent; impl#1 silently dropped the body).
+> supersedes: nothing (the SPEC was silent; impl#1 silently dropped the body). impl#1 emits
+> it since S469 (`s469-engine-in-row`: symbol-table PASS 13.B over every row the parser
+> materialises, plus codegen backstops for the rows only codegen parses — a `<match>` arm
+> holding an `<each>`); before, the engine was dropped from the row at exit 0. **Direction of
+> change:** newly-rejecting, on a program that rendered no engine — no working program
+> regresses (corpus: 0 sources).
 
 **Conversely:** an engine body MAY instantiate components. That direction is fine —
 components are presentation factories that engines can use to render variant bodies.
