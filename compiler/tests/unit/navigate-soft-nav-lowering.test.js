@@ -118,7 +118,13 @@ describe("§4 — runtime soft-nav engine present", () => {
   test("SCRML_RUNTIME defines the region teardown + rebind + same-chunk surface (S239 re-review)", () => {
     expect(SCRML_RUNTIME).toContain("function _scrml_region_track(");
     expect(SCRML_RUNTIME).toContain("function _scrml_teardown_region(");
-    expect(SCRML_RUNTIME).toContain("function _scrml_nav_same_chunk(");
+    // RETIRED S469 (s469-softnav-build-guard): `_scrml_nav_same_chunk` — superseded by
+    // Wave-1c and never called — matched chunks by name, the very key that cannot tell
+    // two builds apart (g-soft-nav-cross-build-handler-id-collision-s469). The build
+    // identity check (`data-scrml-build`, §20.8.2 step 0) is what decides "same build".
+    expect(SCRML_RUNTIME).not.toContain("function _scrml_nav_same_chunk(");
+    expect(SCRML_RUNTIME).toContain("function _scrml_build_admit(");
+    expect(SCRML_RUNTIME).toContain('getAttribute("data-scrml-build")');
     expect(SCRML_RUNTIME).toContain("_scrml_nav_token");
   });
 });

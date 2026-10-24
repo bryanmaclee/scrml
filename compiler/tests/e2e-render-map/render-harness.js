@@ -667,6 +667,12 @@ function mountAndObserve(artifacts) {
   let getFn = null;
 
   try {
+    // A fresh page load, as a browser would have it: one program per document. The page's
+    // `<html data-scrml-build>` stamp (SPEC §20.8.2 step 0) reaches the ROOT through this innerHTML
+    // only when the root has none (a body-mode `<html>` start tag merges only MISSING attributes),
+    // so the PREVIOUS app's stamp would survive and claim this app's document — its chunk then
+    // refused as another build's. Reset the root first.
+    document.documentElement.removeAttribute("data-scrml-build");
     document.documentElement.innerHTML = artifacts.html || "<body></body>";
     if (typeof window.addEventListener === "function") {
       window.addEventListener("error", onWindowError);

@@ -92,6 +92,9 @@ function runOrderOf(clientJs) {
     _scrml_init_set: () => {},
     _scrml_effect: (fn) => { try { fn(); } catch { /* stub effect */ } return () => {}; },
     _scrml_channel_open: (name) => { order.push(`channel:${name}`); },
+    // §20.8.2 step 0 — the chunk admits its build first (an inert no-op stub would refuse it).
+    _scrml_build_admit: () => true,
+    _scrml_build_owns: () => true,
     setTimeout: (_fn, ms) => { order.push(`timeout:${ms}`); return 0; },
     document: {
       readyState: "loading",

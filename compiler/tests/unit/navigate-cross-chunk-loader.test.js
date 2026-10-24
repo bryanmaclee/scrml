@@ -69,11 +69,16 @@ function fetchedDoc(srcs) {
   return { querySelectorAll: (sel) => (sel === "script[src]" ? scripts : []), querySelector: () => null };
 }
 
-/** Real classic `async=false`: execute in insertion order; each executes, THEN its load fires. */
-function drainAsyncFalse(queue, flag) {
+/**
+ * Real classic `async=false`: execute in insertion order; each executes, THEN its load fires.
+ * "Executes" = what an emitted chunk's first statement does: admit its build (§20.8.2 step 0).
+ * `gated: false` models a chunk with no gate (a pre-identity build's bytes).
+ */
+function drainAsyncFalse(queue, flag, ctx, { gated = true } = {}) {
   const flagAtExec = {};
   while (queue.length) {
     const el = queue.shift();
+    if (gated) vm.runInContext('_scrml_build_admit("0testbld")', ctx);
     flagAtExec[el._src] = flag();     // the chunk's boot dispatch reads the flag HERE
     if (el.onload) el.onload();       // then load fires -> settle()
   }
@@ -133,7 +138,7 @@ describe("navigate-wave1c cross-chunk loader — g-nav-chunk-loading-flag-race",
       '_scrml_nav_token=2;_scrml_nav_load_chunks(["http://x/b.client.js"],2,' +
       'function(){__done.push("nav2")},"/b");', ctx);
 
-    const flagAtExec = drainAsyncFalse(queue, flag);
+    const flagAtExec = drainAsyncFalse(queue, flag, ctx);
 
     // chunkA executes first and fires load; its settle() must NOT disarm chunkB.
     expect(flagAtExec["http://x/a.client.js"]).toBeTruthy();
@@ -151,7 +156,7 @@ describe("navigate-wave1c cross-chunk loader — g-nav-chunk-loading-flag-race",
     vm.runInContext(
       '_scrml_nav_token=2;_scrml_nav_load_chunks(["http://x/b.client.js"],2,' +
       'function(){__done.push("nav2")},"/b");', ctx);
-    drainAsyncFalse(queue, flag);
+    drainAsyncFalse(queue, flag, ctx);
     expect(flag()).toBe(0);
   });
 
@@ -166,8 +171,29 @@ describe("navigate-wave1c cross-chunk loader — g-nav-chunk-loading-flag-race",
     vm.runInContext(
       '_scrml_nav_token=1;_scrml_nav_load_chunks(["http://x/a.client.js"],1,' +
       'function(){__done.push("nav1")},"/a");', ctx);
-    const flagAtExec = drainAsyncFalse(queue, flag);
+    const flagAtExec = drainAsyncFalse(queue, flag, ctx);
     expect(flagAtExec["http://x/a.client.js"]).toBeTruthy();
     expect(ctx.__done).toEqual(["nav1"]);
+  });
+});
+
+describe("navigate cross-chunk loader — §20.8.2 step 0 review F1 (a chunk must admit a build)", () => {
+  test("a loaded chunk that admits NO build is unverified: no swap, hard navigation", () => {
+    const { ctx, queue, flag } = makeRuntimeContext(["/index.client.js"], "http://x/");
+    ctx.__done = [];
+    ctx.__hard = [];
+    vm.runInContext("_scrml_navigate = function (p) { __hard.push(p); };", ctx);
+    const info = console.info;
+    console.info = () => {};
+    try {
+      vm.runInContext(
+        '_scrml_nav_token=1;_scrml_nav_load_chunks(["http://x/a.client.js"],1,' +
+        'function(){__done.push("nav1")},"/a");', ctx);
+      drainAsyncFalse(queue, flag, ctx, { gated: false });
+    } finally {
+      console.info = info;
+    }
+    expect(ctx.__done).toEqual([]);
+    expect(ctx.__hard).toEqual(["/a"]);
   });
 });

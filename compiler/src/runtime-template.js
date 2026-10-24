@@ -1174,6 +1174,37 @@ function _scrml_reactive_derived(name, fn) {
   );
 }
 
+// §20.8.2 step 0 — build identity (g-soft-nav-cross-build-handler-id-collision-s469).
+// Every compile stamps its pages <html data-scrml-build="ID"> and opens each client
+// chunk with _scrml_build_admit("ID"). Handler / placeholder ids restart per compile,
+// so code from two builds must never share a document: the document's build is its
+// <html> stamp (the FIRST chunk's id only on an unstamped host page — so a stale
+// cached chunk running first cannot claim the page), a chunk of any other build is
+// refused before it runs (fail closed), and the soft-nav engine swaps in only a page
+// stamped with the same id. _scrml_build_admits counts admissions: a chunk the soft
+// nav loads must advance it, or it carried no gate and is unverified.
+var _scrml_build_id = null;
+var _scrml_build_rejected = null;
+var _scrml_build_admits = 0;
+function _scrml_build_admit(id) {
+  if (_scrml_build_id === null) {
+    var h = typeof document !== "undefined" && document.documentElement;
+    _scrml_build_id = (h && h.getAttribute && h.getAttribute("data-scrml-build")) || id;
+  }
+  if (id === _scrml_build_id) { _scrml_build_admits++; return true; }
+  _scrml_build_rejected = id;
+  console.error("[scrml] E-CHUNK-BUILD-MISMATCH", id, _scrml_build_id);
+  return false;
+}
+// Defence in depth: an element is a build's to wire only if its nearest stamped
+// region (<html>, or an outlet the soft-nav swap stamped) carries that build's id.
+// An unstamped tree (a host page embedding the program) belongs to whoever booted.
+function _scrml_build_owns(el, id) {
+  if (el && el.nodeType !== 1) el = el.parentElement;
+  var r = el && el.closest ? el.closest("[data-scrml-build]") : null;
+  return !r || r.getAttribute("data-scrml-build") === id;
+}
+
 // ---------------------------------------------------------------------------
 // §51.12 / §51.14 machine temporal-transition runtime (chunk: 'machine')
 // ---------------------------------------------------------------------------
@@ -1566,6 +1597,37 @@ function _scrml_lift(factoryOrElement) {
 // a bare _scrml_lift_target = ... (emit-reactive-wiring.ts); _scrml_lift reads it by
 // closure at call-time (after module init, so no TDZ issue).
 let _scrml_lift_target = null;
+
+// ---------------------------------------------------------------------------
+// §17.1 if= render-gate swap (chunk: 'ifrow') — its own chunk (S469): shipped only when the
+// emitted code calls it, so neither a list-free lift page nor a gate-free list pays for it.
+/**
+ * §17.1 if= render gate (<each> rows and lifted markup): put \`el\` (on) or the placeholder
+ * comment \`ph\` (off) where \`cur\` is, returning the node now in the DOM. A list row's
+ * tracking (\`_scrml_key\`, group membership, owner scope) moves with it, so reorder /
+ * delete act on the live node. A no-op while \`cur\` already matches (the first run inside
+ * a row factory, before the key is assigned).
+ */
+function _scrml_ifrow_apply(cur, el, ph, on) {
+  const want = on ? el : ph;
+  if (cur === want) return cur;
+  want._scrml_key = cur._scrml_key;
+  if (cur._scrml_group_member) want._scrml_group_member = true;
+  // S469 — the row's owner scope rides on the group head: move it with the head.
+  if (cur._scrml_row_scope !== undefined) { want._scrml_row_scope = cur._scrml_row_scope; cur._scrml_row_scope = undefined; }
+  // S469 — a root of a MULTI-root item: replace the node in its group's array (and,
+  // for the head, move the array itself), so a later reorder / delete / replace of
+  // the group acts on the node that is actually in the DOM.
+  const grp = cur._scrml_group_of;
+  if (grp) {
+    const i = grp.indexOf(cur);
+    if (i >= 0) grp[i] = want;
+    want._scrml_group_of = grp;
+    if (cur._scrml_group) { want._scrml_group = cur._scrml_group; cur._scrml_group = undefined; }
+  }
+  if (cur.parentNode) cur.parentNode.replaceChild(want, cur);
+  return want;
+}
 
 // ---------------------------------------------------------------------------
 // §6.7.3 Scope-aware cleanup registry
@@ -2835,43 +2897,6 @@ function _scrml_resolve_item(container, key) {
 }
 
 /**
- * Tier-1 <each> per-row \`if=\` STRUCTURAL reactivity (SPEC §17.1). For an
- * if-gated per-item ROOT, the reconcile-tracked node is ALWAYS present: EITHER
- * the real element (cond true) OR a placeholder COMMENT node (cond false). This
- * swaps one for the other IN PLACE, transplanting \`_scrml_key\` (and, for a
- * multi-root group member, \`_scrml_group_member\`) so the reconciler keeps
- * discovering the tracked node by reading \`_scrml_key\` off the live DOM —
- * keying / ordering / reorder / delete keep working with no reconcile-core
- * change. Called from a per-item effect (\`maybeWrapEachPerItemEffect\`), so it
- * re-fires on the item-field change AND every reconcile pass.
- *
- * NO-OP when \`cur\` already equals the wanted node — this is the FIRST-RUN
- * guard: the effect runs once synchronously inside createFn BEFORE the
- * reconciler has set \`_scrml_key\`, and there \`cur\` already matches the initial
- * condition, so we must not transplant a not-yet-assigned key.
- */
-function _scrml_ifrow_apply(cur, el, ph, on) {
-  const want = on ? el : ph;
-  if (cur === want) return cur;
-  want._scrml_key = cur._scrml_key;
-  if (cur._scrml_group_member) want._scrml_group_member = true;
-  // S469 — the row's owner scope rides on the group head: move it with the head.
-  if (cur._scrml_row_scope !== undefined) { want._scrml_row_scope = cur._scrml_row_scope; cur._scrml_row_scope = undefined; }
-  // S469 — a root of a MULTI-root item: replace the node in its group's array (and,
-  // for the head, move the array itself), so a later reorder / delete / replace of
-  // the group acts on the node that is actually in the DOM.
-  const grp = cur._scrml_group_of;
-  if (grp) {
-    const i = grp.indexOf(cur);
-    if (i >= 0) grp[i] = want;
-    want._scrml_group_of = grp;
-    if (cur._scrml_group) { want._scrml_group = cur._scrml_group; cur._scrml_group = undefined; }
-  }
-  if (cur.parentNode) cur.parentNode.replaceChild(want, cur);
-  return want;
-}
-
-/**
  * Compute the indices of the Longest Increasing Subsequence.
  * Used by reconcile_list to minimize DOM moves.
  * Ignores -1 values (new nodes with no old position).
@@ -3361,24 +3386,6 @@ function _scrml_nav_client_chunks(d, baseHref) {
 // Matches a .client.js OR a content-hashed .client.HASH.js script src (§47.9.8).
 var _SCRML_CLIENT_CHUNK_RE = /\\.client\\.(?:[0-9a-z]+\\.)?js(\\?|$)/i;
 
-// Finding #4 — same-chunk iff every client chunk the target references is ALREADY
-// loaded in the current document.
-//
-// ⚠️ SUPERSEDED BY WAVE-1C AND NO LONGER CALLED. Its former comment ended "Cross-route
-// chunk-loading is Wave-1c; until then, cross-route hard-navigates" — that sentence
-// described the PRE-Wave-1c world and is false here: the hard-nav bail it gated has
-// been replaced by _scrml_nav_missing_chunks + _scrml_nav_load_chunks, which LOAD
-// the missing chunk instead of bailing. Retained (not deleted) only because
-// navigate-soft-nav-lowering.test.js:121 pins its presence in the runtime text;
-// retiring it is a separate change that updates that assertion. Do NOT re-wire it —
-// it would reinstate the cross-route hard-nav Wave-1c exists to remove.
-function _scrml_nav_same_chunk(doc) {
-  var have = _scrml_nav_client_chunks(document);
-  var need = _scrml_nav_client_chunks(doc);
-  for (var k in need) { if (Object.prototype.hasOwnProperty.call(need, k) && !have[k]) return false; }
-  return true;
-}
-
 // Finding #9 — sync a pragmatic head subset across a soft nav: <title>,
 // <meta name="description">, <link rel="canonical">. Fuller head-diffing
 // (arbitrary meta/link/preload) is a noted follow-on.
@@ -3515,6 +3522,11 @@ function _scrml_nav_load_chunks(urls, token, onDone, path) {
     s.onload = function () {
       if (settled) return;
       settle();
+      // The chunk refused to run (_scrml_build_admit): its URL now serves another
+      // build (replaced between the page fetch and this load) → hard nav, no swap.
+      if (_scrml_build_rejected !== null) { _scrml_nav_chunk_failed(path, token, url, "build mismatch"); return; }
+      // ...or it never admitted at all (no gate: a pre-identity build's chunk) → unverified.
+      if (_scrml_build_admits === admitsBefore) { _scrml_nav_chunk_failed(path, token, url, "build unverified"); return; }
       loadNext();
     };
     s.onerror = function () {
@@ -3525,6 +3537,7 @@ function _scrml_nav_load_chunks(urls, token, onDone, path) {
     // Mark the injection window so the chunk's module-init boots eagerly (its IIFE
     // runs between this appendChild and the onload below), then clear it on settle.
     _scrml_chunk_loading++;
+    var admitsBefore = _scrml_build_admits;
     // A synchronous append failure (CSP block / a host that rejects dynamic
     // script insertion) is a load failure too → hard-nav fallback.
     try {
@@ -3547,6 +3560,16 @@ function _scrml_nav_apply_html(html, path, restore, token) {
   var doc;
   try { doc = new DOMParser().parseFromString(html, "text/html"); }
   catch (e) { _scrml_navigate(path); return; }
+  // §20.8.2 step 0 — same-build check, BEFORE any of the fetched page is applied
+  // (seed, head, chunks, swap). A page of another build (a tab left open across a
+  // deploy) or an unstamped page hard-navigates: its handler ids may collide with
+  // the running build's, so a soft swap could run the WRONG handler on a click.
+  var fetchedBuild = doc.documentElement && doc.documentElement.getAttribute("data-scrml-build");
+  if (!fetchedBuild || fetchedBuild !== _scrml_build_id || _scrml_build_rejected !== null) {
+    console.info("[scrml] W-NAV-BUILD-MISMATCH: hard navigation to", path);
+    _scrml_navigate(path);
+    return;
+  }
   var fetchedOutlet = doc.querySelector("[data-scrml-outlet]");
   if (!fetchedOutlet) { _scrml_navigate(path); return; } // target isn't a shell page → hard nav
 
@@ -3572,6 +3595,9 @@ function _scrml_nav_apply_html(html, path, restore, token) {
     // Tear down the OUTGOING region's reactive effects/subscriptions/timers
     // before replacing it (finding #2 — no leak).
     _scrml_teardown_region(liveOutlet);
+    // Stamp the region with the page's build (== the running build, checked above)
+    // so _scrml_build_owns scopes every listener to its own build's markup.
+    liveOutlet.setAttribute("data-scrml-build", fetchedBuild);
     liveOutlet.innerHTML = newHtml;
     // Re-hydrate the swapped-in region (seed + scoped re-wiring incl. reactive
     // display) without re-booting the shell (finding #1). For a cross-chunk nav
@@ -3644,6 +3670,8 @@ function _scrml_nav_scroll(restore) {
 // so the NEXT nav can tear them down (finding #1 + #2). Reuses the ordinary boot
 // helpers (_scrml_ssr_seed_apply + the per-file wiring the rehydrators close over).
 function _scrml_rehydrate_region(root) {
+  // Defence in depth (§20.8.2 step 0): never wire a region stamped by another build.
+  if (!_scrml_build_owns(root, _scrml_build_id)) return;
   // #5 — REHYDRATE seed-apply skips the persistent shell's cells (skipShell=true)
   // so a mutated shell cell survives the nav; route cells still re-seed.
   if (typeof _scrml_ssr_seed_apply === "function") _scrml_ssr_seed_apply(true);

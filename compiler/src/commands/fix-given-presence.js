@@ -95,8 +95,9 @@ import { captureTrailingContentWarnings, parseExprToNode } from "../expression-p
 import { isUserComponentMarkup } from "../component-expander.ts";
 import { isExecutableEventHandlerAttrName } from "../attr-injection-sink.ts";
 import { compileScrml } from "../api.js";
-import { LIFT_BRANCH_RUN_BANNER, LIFT_BRANCH_RUN_HELPER } from "../codegen/emit-reactive-wiring.ts";
+import { LIFT_BRANCH_RUN_BANNER, LIFT_BRANCH_RUN_HELPER, LIFT_BRANCH_RUN_HELPER_SCOPED } from "../codegen/emit-reactive-wiring.ts";
 import { errorSeverityCodes, scratchRefusalReason, writeScratchProject } from "./fix-verify-shared.js";
+import { foldBuildIdentity } from "../codegen/build-identity.ts";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "node:path";
@@ -407,7 +408,9 @@ export function normalizePresenceParens(js) {
  * backtick is compared with its indentation intact (fail closed).
  */
 export function normalizeForCompare(js) {
-  const t = normalizePresenceParens(js);
+  // The §20.8.2 build identity hashes the whole build, so it differs whenever the
+  // client delta this compare tolerates exists — fold it (build-identity.ts).
+  const t = normalizePresenceParens(typeof js === "string" ? foldBuildIdentity(js) : js);
   return t.includes("`") ? t : t.replace(/^[ \t]+/gm, "");
 }
 
@@ -532,9 +535,13 @@ export function compareMarkupClientJs(before, after, markupSites) {
     if (!was || !now || was.join(",") !== now.join(",")) return `the group for ${c.id} tests a different condition after the rewrite`;
   }
   // The arm-run appendix: emitted once per file that has a selector group.
-  const appendix = `\n\n${LIFT_BRANCH_RUN_BANNER}\n${LIFT_BRANCH_RUN_HELPER.join("\n")}`;
+  // Either form impl#1 emits: the plain helper, or (a file with owner-tracked content) the
+  // owner-scoped one (S469).
+  const appendices = [LIFT_BRANCH_RUN_HELPER, LIFT_BRANCH_RUN_HELPER_SCOPED]
+    .map((h) => `\n\n${LIFT_BRANCH_RUN_BANNER}\n${h.join("\n")}`);
   if (!before.includes(LIFT_BRANCH_RUN_BANNER)) {
-    if (!afterRest.includes(appendix)) return "the arm-run appendix after the rewrite is not the one impl#1 emits";
+    const appendix = appendices.find((a) => afterRest.includes(a));
+    if (!appendix) return "the arm-run appendix after the rewrite is not the one impl#1 emits";
     afterRest = afterRest.replace(appendix, "");
   }
   const a = normalizeForCompare(renumberGenerated(cut.rest));

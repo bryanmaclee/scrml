@@ -30,6 +30,7 @@ import { deferredBoundaryChecks } from "./emit-boundary-logic.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { lowerDisplayToggleCondition, lowerMountToggleCondition, type IfGateConditionFields, type IfGateLoweringEnv } from "./if-gate-condition.ts";
 import { CGError } from "./errors.ts";
+import { buildOwnsExpr } from "./build-identity.ts";
 
 /** An event binding recorded by HTML gen and consumed by client JS gen. */
 interface EventBinding {
@@ -1380,6 +1381,9 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
 
       // Emit a single document.addEventListener with ancestor walk
       lines.push(`  _scrml_g.document.addEventListener(${JSON.stringify(domEvent)}, function(event) {`);
+      // §20.8.2 step 0 (defence in depth) — ids restart per compile, so resolve
+      // them only inside a region stamped with THIS chunk's build.
+      lines.push(`    if (!${buildOwnsExpr("event.target")}) return;`);
       lines.push(`    let t = event.target;`);
       lines.push(`    while (t && t !== _scrml_g.document) {`);
       lines.push(`      const id = t.getAttribute(${JSON.stringify("data-scrml-bind-" + eventName)});`);
@@ -2694,6 +2698,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     lines.push("");
     lines.push("  // --- element-scoped wiring (non-delegable handlers + reactive display); re-run on soft-nav ---");
     lines.push("  function _scrml_nav_rewire(_scrml_root) {");
+    // §20.8.2 step 0 (defence in depth) — never wire a region of another build.
+    lines.push(`    if (!${buildOwnsExpr("_scrml_root")}) return;`);
     for (const l of nonDelegatedRewire) lines.push(l);
     for (const l of reactiveRewire) lines.push(l);
     lines.push("  }");

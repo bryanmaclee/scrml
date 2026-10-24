@@ -45,7 +45,13 @@ function compileInline(src) {
 }
 
 // --- mount runtime + client + boot, exposing the soft-nav surface ----------
+// The build identity (§20.8.2 step 0) of the program last mounted. ssrDoc stamps
+// its synthetic target pages with it: they model pages of the SAME build, which is
+// the only kind the soft-nav engine swaps in (a foreign/unstamped page hard-navs).
+let LIVE_BUILD = null;
+
 function mount(html, clientJs) {
+  LIVE_BUILD = (/<html\b[^>]*\bdata-scrml-build="([^"]*)"/.exec(html) || [])[1] ?? null;
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
   const bodyHtml = bodyMatch ? bodyMatch[1] : html;
   const cleanHtml = bodyHtml.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
@@ -122,7 +128,7 @@ function ssrDoc(outletInner, seed, clientScript) {
     : "";
   const scriptTag = clientScript ? '<script src="' + clientScript + '"></script>' : "";
   return (
-    "<!DOCTYPE html><html><head><title>Route</title>" + seedTag + "</head>" +
+    "<!DOCTYPE html><html" + (LIVE_BUILD ? ' data-scrml-build="' + LIVE_BUILD + '"' : "") + "><head><title>Route</title>" + seedTag + "</head>" +
     "<body><div data-scrml-outlet tabindex=\"-1\">" + outletInner + "</div>" + scriptTag + "</body></html>"
   );
 }
@@ -735,7 +741,7 @@ describe("finding #9 — deduped head sync applies description + canonical on a 
       '<meta name="description" content="old desc"><link rel="canonical" href="/old">';
     // The fetched route carries a NEW description + canonical in its <head>.
     const routeDoc =
-      "<!DOCTYPE html><html><head><title>Route</title>" +
+      '<!DOCTYPE html><html data-scrml-build="' + LIVE_BUILD + '"><head><title>Route</title>' +
       '<meta name="description" content="new desc"><link rel="canonical" href="/new">' +
       '</head><body><div data-scrml-outlet tabindex="-1"><p>two</p></div></body></html>';
     mockFetch({ "/page2": routeDoc });

@@ -45,6 +45,7 @@ import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync, mkdirSync
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { foldBuildIdentity } from "../../src/codegen/build-identity.ts";
 
 // ---------------------------------------------------------------------------
 // Fixture A — §40.9.9 worked example (re-used from A-4.3 integration test).
@@ -608,7 +609,10 @@ describe("§14 per-file .client.js byte regression — A-4.4 chunk-side wiring i
       // `// Requires: scrml-runtime.<hash>.js` header: under emitPerRoute the shared runtime
       // legitimately carries the route-splitter-only chunks ('mount' / 'vendor-ref' /
       // 'prefetch'), so its content hash — and so its filename — differs.
-      const normRuntime = (js) => js.replace(/scrml-runtime\.[0-9a-z]+\.js/g, "scrml-runtime.<HASH>.js");
+      // The runtime union differs with emitPerRoute, so the runtime hash AND the build
+      // identity (§20.8.2 step 0 — a hash over runtime + chunks) differ; both are
+      // build-wide derived values, not per-file emission.
+      const normRuntime = (js) => foldBuildIdentity(js.replace(/scrml-runtime\.[0-9a-z]+\.js/g, "scrml-runtime.<HASH>.js"));
       expect(normRuntime(withOut.clientJs)).toBe(normRuntime(withoutOut.clientJs));
     }
   });
