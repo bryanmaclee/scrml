@@ -216,7 +216,28 @@ ${
     fn expectP(tp: TP, s: string) -> TP {
         if (isP(tp, s)) return adv(tp)
         const t: PTok = cur(tp)
-        return diagAt(tp, "E-PARSE-EXPECTED", "expected `" + s + "`, found `" + t.text + "`", t)
+        return diagAt(tp, "E-PARSE-EXPECTED", "expected `" + s + "`, found `" + t.text + "`" + gluedQHint(tp), t)
+    }
+
+    // s469 (§7.2.2 rule 4, adjacency decides a `?`) — a message note, no code of its
+    // own: when the token before `tp` is a `?` glued to what it follows (propagation,
+    // which ends the expression) and an expression start follows it on its line — the
+    // conditional the S446 reading took it for (`f(a == 1? 2 : 3)`, `${ ok? "y" : "n" }`).
+    fn gluedQHint(tp: TP) -> string {
+        if (tp.i < 2) return ""
+        const q: PTok = tp.toks[tp.i - 1]
+        const t: PTok = cur(tp)
+        if (q.cls != TC.Punct || !tk(q, "?") || !touching(tp.toks[tp.i - 2], q)) return ""
+        if (t.cls == TC.End || t.cls == TC.TIEnd || t.line != q.line || !exprStartTok(t)) return ""
+        return " (A `?` written directly against what it follows is the propagation operator, §19.5 — for the conditional, put a space before it: `c ? a : b`.)"
+    }
+
+    // Can token `t` begin an expression?
+    fn exprStartTok(t: PTok) -> boolean {
+        if (t.cls == TC.Ident || t.cls == TC.Num || t.cls == TC.Str || t.cls == TC.At || t.cls == TC.Variant || t.cls == TC.TChunk) return true
+        if (t.cls == TC.Keyword) return t.v == "true" || t.v == "false" || t.v == "not" || t.v == "match"
+        if (t.cls != TC.Punct) return false
+        return tk(t, "(") || tk(t, "[") || tk(t, "{") || tk(t, "!") || tk(t, "-")
     }
 
     // Two tokens that touch (no trivia between them): `:>`, `@x`, `->`.
@@ -1474,7 +1495,7 @@ ${
                     slots = slots.concat([r.e])
                     t = r.tp
                     if (cur(t).cls != TC.TIEnd && !atEnd(t)) {
-                        t = diagAt(t, "E-PARSE-TEMPLATE", "a template slot holds ONE expression — found `" + cur(t).text + "` after it (§14.13.3); compute the value first and put the result in the slot", cur(t))
+                        t = diagAt(t, "E-PARSE-TEMPLATE", "a template slot holds ONE expression — found `" + cur(t).text + "` after it (§14.13.3); compute the value first and put the result in the slot" + gluedQHint(t), cur(t))
                         t = skipToSlotEnd(t)
                     }
                 }
@@ -2068,10 +2089,7 @@ ${
         // which ends the expression — name the conditional's spelling too, where
         // the code goes on after it on its line (`a == 1? 2 : 3`, the conditional
         // the S446 reading took it for)
-        if (tp.i > 1) {
-            const q: PTok = tp.toks[tp.i - 1]
-            if (q.cls == TC.Punct && tk(q, "?") && touching(tp.toks[tp.i - 2], q) && cur(tp).cls != TC.End && cur(tp).line == q.line) msg = msg + " (A `?` written directly against what it follows is the propagation operator, §19.5 — for the conditional, put a space before it: `c ? a : b`.)"
-        }
+        msg = msg + gluedQHint(tp)
         const d: Diag = newDiag("E-STMT-MISSING-SEMICOLON", msg, tp.file, mkSpan(at, at))
         return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
     }
@@ -2866,6 +2884,9 @@ ${
             t = adv(t)
         } else if (nx.cls != TC.End && nx.line == kw.line && !tk(nx, ";") && !tk(nx, "}")) {
             t = diagAt(t, "E-PARSE-EXPECTED", "`" + kw.v + "` takes only a loop label — there is no `" + kw.v + " value` (§49.2.1, §49.6)", nx)
+            // s469: a keyword there (`break fail;`) is consumed with the report, never
+            // read again as a statement of its own (one report, not a second bare `fail`)
+            if (nx.cls == TC.Keyword) t = adv(t)
         }
         if (isBreak) return mkS(t, kw.start, AStmtK.Break(label))
         return mkS(t, kw.start, AStmtK.Continue(label))
@@ -3069,21 +3090,23 @@ ${
         const a: PTok = cur(t)
         const b: PTok = peekAt(t, 1)
         const c: PTok = peekAt(t, 2)
-        if (a.cls == TC.Variant) return failArgs(adv(t), start, "", a)
-        if (a.cls == TC.Punct && tk(a, ".") && isNameTok(b) && touching(a, b)) return failArgs(adv(adv(t)), start, "", b)
-        if (a.cls == TC.Punct && tk(a, ":") && tk(b, ":") && touching(a, b) && isNameTok(c) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, "", c)
-        if (a.cls == TC.Ident && b.cls == TC.Punct && tk(b, ".") && isNameTok(c) && touching(a, b) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, a.v, c)
+        // s469 (§7.2.2 rule 10): the operand was read from a later line (analyze notes it on E-ERROR-009)
+        const split: boolean = a.line != endLine(cur(tp))
+        if (a.cls == TC.Variant) return failArgs(adv(t), start, "", a, split)
+        if (a.cls == TC.Punct && tk(a, ".") && isNameTok(b) && touching(a, b)) return failArgs(adv(adv(t)), start, "", b, split)
+        if (a.cls == TC.Punct && tk(a, ":") && tk(b, ":") && touching(a, b) && isNameTok(c) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, "", c, split)
+        if (a.cls == TC.Ident && b.cls == TC.Punct && tk(b, ".") && isNameTok(c) && touching(a, b) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, a.v, c, split)
         if (a.cls == TC.Ident && tk(b, ":") && tk(c, ":") && touching(a, b) && touching(b, c)) {
             const d: PTok = peekAt(t, 3)
-            if (isNameTok(d) && touching(c, d)) return failArgs(adv(adv(adv(adv(t)))), start, a.v, d)
+            if (isNameTok(d) && touching(c, d)) return failArgs(adv(adv(adv(adv(t)))), start, a.v, d, split)
         }
         // not a variant (`fail "x"`): kept, so analyze reports E-ERROR-009
         const r: RExpr = parseAssign(t)
-        return mkS(r.tp, start, AStmtK.Fail({ enumName: "", variant: "", args: [], target: r.e }))
+        return mkS(r.tp, start, AStmtK.Fail({ enumName: "", variant: "", args: [], target: r.e, split: split }))
     }
 
     // After the variant name: its payload `(args)`, when written touching it.
-    fn failArgs(tp: TP, start: int, enumName: string, vtok: PTok) -> RStmt {
+    fn failArgs(tp: TP, start: int, enumName: string, vtok: PTok, split: boolean) -> RStmt {
         let t: TP = tp
         let args: AExpr[] = []
         const o: PTok = cur(t)
@@ -3092,7 +3115,7 @@ ${
             args = r.es
             t = r.tp
         }
-        return mkS(t, start, AStmtK.Fail({ enumName: enumName, variant: vtok.v, args: args, target: not }))
+        return mkS(t, start, AStmtK.Fail({ enumName: enumName, variant: vtok.v, args: args, target: not, split: split }))
     }
 
     // `given c = @h :> { … }` (§66.7.5) — and, when no `=` follows the first
@@ -3544,8 +3567,13 @@ ${
             if (!failable) ret = r2.t
             t = r2.tp
         }
+        const n0: int = t.diags.length
         const body: RBlock = parseBlock(t)
         t = body.tp
+        // s469 — a declared-return (non-`void`, non-`!`) function whose body ENDS in a
+        // pure expression: that is analyze's E-TYPE-043 ("ends in an expression it does
+        // not `return`", §17.6) — the primary report, so the tail is not also NO-EFFECT
+        if (ret is given && !voidType(ret)) t = dropTailNoEffect(t, body.b, n0)
         const f: AFn = { nid: t.nid, span: spanFrom(t, start), exported: exported, pure: pure,
                          name: nameTok.v, params: params, ret: ret, body: body.b, server: server, failable: failable, err: err }
         return mkItem(bumpId(t), start, AItemK.FnItem(f))
@@ -3796,6 +3824,49 @@ ${
             .Lambda(params: ps) :> false
             .Handled(h: h) :> false
         }
+    }
+
+    // s469 — one report per refused statement: a parse-phase E-STMT-NO-EFFECT whose
+    // statement a LATER phase already refuses — E-BOOTSTRAP-UNSUPPORTED, or a scope
+    // error (E-SCOPE-*), reported inside its span — is dropped (the refusal is the
+    // root cause; `(x) => x;`, `bump;` naming a function, an undeclared `y;`).
+    // The front end's driver applies it to the parse diagnostics (slice-m2/lowered.js).
+    export fn withoutRefusedNoEffect(parsed: Diag[], later: Diag[]) -> Diag[] {
+        let out: Diag[] = []
+        for (const d of parsed) {
+            let keep = true
+            if (d.code == "E-STMT-NO-EFFECT") {
+                for (const a of later) {
+                    const refusal: boolean = a.code == "E-BOOTSTRAP-UNSUPPORTED" || a.code.substring(0, 8) == "E-SCOPE-"
+                    if (refusal && a.file == d.file && a.span.start >= d.span.start && a.span.end <= d.span.end) keep = false
+                }
+            }
+            if (keep) out = out.concat([d])
+        }
+        return out
+    }
+
+    fn voidType(t: AType) -> boolean {
+        const k: ATypeK = t.k
+        return match k {
+            .TName(name: n) :> n == "void"
+            .TSeq(elem: e) :> false
+            .TMaybe(inner: i) :> false
+        }
+    }
+
+    // `tp` without the E-STMT-NO-EFFECT report (made since `from`) on the LAST
+    // statement of block `b`.
+    fn dropTailNoEffect(tp: TP, b: ABlock, from: int) -> TP {
+        if (b.stmts.length == 0) return tp
+        const last: AStmt = b.stmts[b.stmts.length - 1]
+        let ds: Diag[] = []
+        let i: int = 0
+        for (const d of tp.diags) {
+            if (i < from || d.code != "E-STMT-NO-EFFECT" || d.span.end != last.span.end) ds = ds.concat([d])
+            i = i + 1
+        }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file }
     }
 
     // `tp` without the E-STMT-NO-EFFECT reports made since it had `from` diagnostics
@@ -6076,7 +6147,9 @@ ${
         // not fail the compile", so a parse warning neither untrusts a declaration
         // nor closes the diagnostics gate.
         let errs: ASpan[] = []
-        for (const d of r.mp.diags) { if (d.severity == Severity.Error) errs = errs.concat([d.span]) }
+        // (s469: not E-STMT-NO-EFFECT — a whole, well-formed statement: the body around
+        // it IS what was written, so analyze still judges it, e.g. E-TYPE-043)
+        for (const d of r.mp.diags) { if (d.severity == Severity.Error && d.code != "E-STMT-NO-EFFECT") errs = errs.concat([d.span]) }
         return { ast: { path: path, items: r.items, errs: errs, lines: lineStarts(src) }, diags: r.mp.diags, nextId: r.mp.nid }
     }
 

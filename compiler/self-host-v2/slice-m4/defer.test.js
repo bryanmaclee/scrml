@@ -206,8 +206,7 @@ describe("`defer` is a contextual keyword (§19.16.1) — everywhere else an ide
     expect(split.log).toBe("ab1");
     const braced = await runProgram(`    function go() {\n        defer\n        {\n            @log = @log + "2";\n        }\n        @log = @log + "c";\n    }`, ["go"], ["go"]);
     expect(braced.log).toBe("c2");
-    // a token that cannot begin a deferred statement still leaves `defer` a name (here: undeclared, and a
-    // bare name standing as a statement does nothing)
-    expect(codes(P(`    function go() {\n        defer\n        ;\n    }`, ["go"]))).toEqual(["E-STMT-NO-EFFECT", "E-SCOPE-001"]);
+    // a token that cannot begin a deferred statement still leaves `defer` a name (here: undeclared)
+    expect(codes(P(`    function go() {\n        defer\n        ;\n    }`, ["go"]))).toEqual(["E-SCOPE-001"]);   // (the refusal is the one report — no E-STMT-NO-EFFECT beside it)
   });
 });

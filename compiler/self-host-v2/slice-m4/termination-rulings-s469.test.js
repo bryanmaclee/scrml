@@ -34,7 +34,7 @@ const clean = (src) => {
 };
 // the parse tree without positions — two spellings that mean the same read the same
 const tree = (src) => JSON.stringify(mods.parse.parseFile("t.scrml", src, 0).ast ?? mods.parse.parseFile("t.scrml", src, 0),
-  (k, v) => (k === "span" || k === "nid" || k === "lines" || k === "start" || k === "end" ? undefined : v));
+  (k, v) => (k === "span" || k === "nid" || k === "lines" || k === "start" || k === "end" || k === "split" ? undefined : v));
 
 const TYPES = `    type E:enum = { A, B }\n    type L:enum = { NotFound(id: string), Timeout }`;
 const LOAD = `    function load(id: string)! L {\n        if (id == "x") fail L.NotFound(id);\n        return id;\n    }`;
@@ -240,5 +240,48 @@ describe("INTERIM (unruled) — unchanged", () => {
   test("a spaced same-line `x [y]` still splits (E-STMT-MISSING-SEMICOLON only); `break⏎label` too", () => {
     expect(codes(P(fn(`        const b = @n [1];`)))).toEqual(["E-STMT-MISSING-SEMICOLON"]);
     expect(codes(P(fn(`        outer: for (const x of [1, 2]) {\n            for (const y of [1, 2]) {\n                break\n                outer;\n            }\n        }`)))).toEqual(["E-STMT-MISSING-SEMICOLON", "E-SCOPE-001"]);   // (as before s469)
+  });
+});
+
+// ---------------------------------------------------------------------------
+// review round (LAND-W-F/U of 147323d51): one report per root cause; messages
+describe("review — E-TYPE-043 stays primary; refusals are not doubled; messages", () => {
+  test("a declared-return body ending in a pure expression: E-TYPE-043 (no implicit tail return), not E-STMT-NO-EFFECT", () => {
+    for (const f of [`    fn hd(p: string) -> string { p; }`, `    function hd(p: string) -> string { p; }`, `    function hd(p: int) -> int { const q = p + 1; q; }`]) {
+      const ds = run(P(f)).diags;
+      expect([f, ds.map((d) => d.code)]).toEqual([f, ["E-TYPE-043"]]);
+      expect(ds[0].message).toContain("ends in an expression it does not `return`");
+    }
+    // not the tail, or no declared return: still E-STMT-NO-EFFECT
+    expect(codes(P(`    function hd(p: int) -> int { p; return p; }`))).toEqual(["E-STMT-NO-EFFECT"]);
+    expect(codes(P(`    function hd(p: int) { p; }`))).toEqual(["E-STMT-NO-EFFECT"]);
+  });
+
+  test("a statement a later phase refuses is not also E-STMT-NO-EFFECT", () => {
+    expect(codes(P(`    function g() { (x) => x; }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`    function g() { y; }`))).toEqual(["E-SCOPE-001"]);
+    expect(codes(P(`    function bump() { @n = @n + 1; }`, `        <button onclick={ bump(); bump; }>b</button>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+
+  test("`break fail;` is one report (the keyword is consumed with it)", () => {
+    expect(codes(P(`    function g() { for (;;) { break fail; } }`))).toEqual(["E-PARSE-EXPECTED"]);
+  });
+
+  test("`fail⏎h(1);`: E-ERROR-009 says the operand was read from the next line", () => {
+    const src = P(`    function h(x: int) { @n = x; }\n    function g(id: string)! L {\n        fail\n        h(1);\n        return id;\n    }`);
+    expect(only(src, "E-ERROR-009")[0].message).toContain("the operand of `fail` was read from the next line");
+    expect(only(P(`    function g(id: string)! L {\n        fail .Nope;\n        return id;\n    }`), "E-ERROR-009")[0].message).not.toContain("read from the next line");
+  });
+
+  test("the glued-`?` note reaches call arguments and template slots (messages only)", () => {
+    const hint = "for the conditional, put a space before it";
+    const arg = run(P(`    fn id(x: int) -> int { return x; }\n    function g(a: int) { @n = id(a == 1? 2 : 3); }`)).diags;
+    expect(arg[0].code).toBe("E-PARSE-EXPECTED");
+    expect(arg[0].message).toContain(hint);
+    const slot = run(P(`    function g(a: int) -> string { return \`v=\${a == 1? "y" : "n"}\`; }`)).diags;
+    expect(slot[0].code).toBe("E-PARSE-TEMPLATE");
+    expect(slot[0].message).toContain(hint);
+    // a glued `?` at the end of its line gets no note
+    expect(run(P(`    function g(id: string)! L {\n        const v = load(id)?\n        @s = v;\n    }`)).diags[0].message).not.toContain(hint);
   });
 });

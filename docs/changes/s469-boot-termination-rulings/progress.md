@@ -84,3 +84,21 @@ an operand (a keyword / string / number operand is read only on `fail`'s line �
 3. Bare `fail` code: E-PARSE-EXPECTED (generic). Rec: keep; no new code. A `fail:` label is refused by it too.
 4. Glued `a == 1? 2 : 3`: propagation + E-STMT-MISSING-SEMICOLON (hint names the spaced form) and its cascade
    (E-ERROR-004, …). Rec: keep the ruled reading; optionally a dedicated message-only refinement later.
+
+## Round 3 — review LAND-W-F/U of 147323d51 (merged origin/main 10c04ecf0)
+1. **E-TYPE-043 primary again.** A body with E-STMT-NO-EFFECT is no longer "a function with a parse error" for
+   analyze (`parseFile` `errs` skips the code — the statement is whole), and a declared-return (non-`void`, non-`!`)
+   function's LAST statement is not also NO-EFFECT (`parseFn` → `dropTailNoEffect`): `fn hd(p: string) -> string
+   { p; }`, the `function` form and `{ const q = p + 1; q; }` report exactly E-TYPE-043, as on base. The conformance
+   case `endpoint/arm-body-valid-scope-clean` emits the same five codes as base (compared on both bootstraps).
+2. **Glued-`?` note** (`gluedQHint`, messages only): on `expectP` (call arguments, brackets), a template slot's
+   "ONE expression" refusal and the missing `;` — whenever a glued `?` is followed on its line by an expression start.
+3. **Dedupe.** `parse.withoutRefusedNoEffect`, applied by the front-end driver (slice-m2/lowered.js) after
+   analyze: a NO-EFFECT whose statement holds an E-BOOTSTRAP-UNSUPPORTED or E-SCOPE-* is dropped (`(x) => x;`,
+   `bump;` naming a function, undeclared `y;`, `defer⏎;`). `break fail;`: `parseJump` consumes the keyword with its
+   report (was a second, bare-`fail` report).
+4. `AFail.split` (ast.scrml): the operand was read from a line after `fail`; E-ERROR-009 / E-ERROR-001 append "the
+   operand of `fail` was read from the next line". (The replay's parse-tree hash ignores this new field.)
+- Equivalence re-run after the merge: 5,826 sets, 5,812 identical, the same 14 changed (none new).
+- Slices 3,191 pass, 0 fail (one expectation updated: `defer⏎;` is now E-SCOPE-001 alone). Conformance `--check`
+  current (PASS 218); snippet-gate --strict and claim-gate --strict exit 0.
