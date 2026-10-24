@@ -1,0 +1,12 @@
+// a cross-tab value would replace the append-only `xs` inside the struct.
+<program>
+    type Box:struct = { title: string, xs: int[free, append] }
+    let <b:Box=({ title: "t", xs: [1, 2, 3] }) persist="local" key="acc.h1.b"/>
+    function go() {
+        @b = { ...@b, title: "u" };
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@b.title}:${@b.xs.length}</p>
+    </main>
+</program>

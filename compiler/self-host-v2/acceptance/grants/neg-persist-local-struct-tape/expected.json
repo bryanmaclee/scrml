@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-grants-neg-persist-local-struct-tape",
+  "description": "`persist=\"local\"` on a struct whose tape field grants no `replace`: refused, fail closed.",
+  "language-version": "1.0",
+  "spec": "§6.14.2 · §66.12.6 rule 4",
+  "rationale": "Another tab's value is one whole-value write of the struct; it would replace the append-only tape, and wrapping the tape in a struct must not dodge O-061-5's refusal.",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

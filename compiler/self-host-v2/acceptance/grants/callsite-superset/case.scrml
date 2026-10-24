@@ -1,0 +1,15 @@
+// the argument grants append and pop; the parameter only append.
+<program>
+    <src:int[free, append, pop]=([1, 2])/>
+    let <n:int=0/>
+    function size(xs: int[free, append]) -> int {
+        return xs.length;
+    }
+    function go() {
+        @n = size(@src);
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@n}</p>
+    </main>
+</program>

@@ -49959,9 +49959,9 @@ write, wherever the tape is held, wherever it came from, and however the write i
    grants no `replace`. This holds for a genuine replace too, `reset(@b)` and a server reload included: O58 = (b)
    makes a genuine replace authoritative over its sub-fields' transition graphs and lifecycles (§66.11.3 rule 2),
    but it does not waive a tape field's grants, because no spelling gets around them (S469 point (4)) *(derived:
-   the PA's reading of point (4) for struct fields; not separately ruled)*. The bootstrap does not check this yet:
-   known gap `g-bootstrap-whole-struct-write-bypasses-tape-field-grants-s469` (`docs/known-gaps.md`) is the owed
-   implementation.
+   the PA's reading of point (4) for struct fields; not separately ruled)*. The bootstrap checks it (`analyze.scrml`
+   `structTapeWrites`; gap `g-bootstrap-whole-struct-write-bypasses-tape-field-grants-s469`, resolved S469), and refuses
+   (`E-BOOTSTRAP-UNSUPPORTED`) a `reset(@b)` / `reset-on=` whose effect on a tape field is known only at run time.
 
 ```scrml
 type Entry:struct = { at: number, actor: string, action: string }

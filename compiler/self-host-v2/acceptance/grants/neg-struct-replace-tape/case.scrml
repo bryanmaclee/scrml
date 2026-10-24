@@ -1,0 +1,13 @@
+// `@b = { title, xs: [] }` replaces `xs`, which grants only `append`.
+<program>
+    type Entry:struct = { at: int, action: string }
+    type Box:struct = { title: string, xs: Entry[free, append] }
+    let <b:Box=({ title: "log", xs: [] })/>
+    function go() {
+        @b = { title: "new", xs: [] };
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@b.title}</p>
+    </main>
+</program>

@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-grants-neg-local-inferred",
+  "description": "Rebinding an un-annotated local tape: its inferred type carries no grant.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rules 1 and 4 · §66.20 E-WRITE-NOT-GRANTED",
+  "rationale": "Inference never invents a grant.",
+  "expect": {
+    "codes": [
+      "E-WRITE-NOT-GRANTED"
+    ],
+    "codeCounts": {
+      "E-WRITE-NOT-GRANTED": 1
+    }
+  }
+}

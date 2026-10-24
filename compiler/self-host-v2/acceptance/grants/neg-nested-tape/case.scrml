@@ -1,0 +1,13 @@
+// `inner.ys` grants only `append`.
+<program>
+    type Inner:struct = { ys: int[free, append] }
+    type Outer:struct = { name: string, inner: Inner }
+    let <o:Outer=({ name: "o", inner: { ys: [] } })/>
+    function go() {
+        @o = { name: "n", inner: { ys: [] } };
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@o.name}</p>
+    </main>
+</program>

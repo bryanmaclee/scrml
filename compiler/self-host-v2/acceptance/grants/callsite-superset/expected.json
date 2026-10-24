@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-grants-callsite-superset",
+  "description": "A cell whose tape grants MORE than the parameter's is accepted at a call.",
+  "language-version": "1.0",
+  "spec": "§66.12.3",
+  "rationale": "Ruled S435 (\"type\"): a more-permissive argument is accepted.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "2"
+      }
+    ]
+  }
+}

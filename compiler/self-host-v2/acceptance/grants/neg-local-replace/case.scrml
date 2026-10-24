@@ -1,0 +1,13 @@
+// `out = []` is a replace; `int[]` grants none.
+<program>
+    let <shown:string=""/>
+    function go() {
+        let out: string[] = ["a"];
+        out = [];
+        @shown = out.join(",");
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@shown}</p>
+    </main>
+</program>

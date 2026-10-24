@@ -1,0 +1,12 @@
+// the tape field's own type grants `replace`.
+<program>
+    type RBox:struct = { title: string, xs: string[free, append, replace] }
+    let <r:RBox=({ title: "r", xs: ["a"] })/>
+    function go() {
+        @r = { title: "fresh", xs: ["x", "y"] };
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@r.title + ":" + @r.xs.join(",")}</p>
+    </main>
+</program>

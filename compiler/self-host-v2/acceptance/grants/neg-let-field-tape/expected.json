@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-grants-neg-let-field-tape",
+  "description": "`let` on a struct field of tape type.",
+  "language-version": "1.0",
+  "spec": "§66.9 · §66.12.6 rule 1 · §66.20 E-GRANT-LET-ON-SEQUENCE",
+  "rationale": "A tape's `replace` lives in its type's grants (O3 = (c)).",
+  "expect": {
+    "codes": [
+      "E-GRANT-LET-ON-SEQUENCE"
+    ],
+    "codeCounts": {
+      "E-GRANT-LET-ON-SEQUENCE": 1
+    }
+  }
+}

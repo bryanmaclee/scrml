@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-grants-struct-replace-granted",
+  "description": "A whole-struct write may replace a tape field whose type grants `replace`.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rule 4",
+  "rationale": "The FIELD's grants decide; this field grants `replace`.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "fresh:x,y"
+      }
+    ]
+  }
+}

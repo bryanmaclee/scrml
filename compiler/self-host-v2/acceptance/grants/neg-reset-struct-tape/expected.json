@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-grants-neg-reset-struct-tape",
+  "description": "`reset(@b)` of a struct whose tape field grants no `replace`: refused, not approximated.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rule 4 · §66.11.3 rule 2",
+  "rationale": "Whether the reset changes the tape field is known only at run time; the bootstrap has no run-time grant check.",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

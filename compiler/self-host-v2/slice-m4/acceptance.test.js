@@ -140,6 +140,30 @@ const STATUS = {
   "tapes/neg-unshift": ["PASS", ["E-TAPE-JS-METHOD"]],
   "tapes/neg-tosorted": ["PASS", ["E-TAPE-JS-METHOD"]],
   "tapes/neg-sort-discarded": ["PASS", ["E-TAPE-JS-METHOD"]],
+  // s469-boot-tape-grants — every write to a tape-typed place is judged by the one grant reader
+  // (§66.12.3, §66.12.6 rules 1 and 4); the forms it cannot judge statically are refused
+  "grants/struct-spread-keeps-tape": ["PASS", []],
+  "grants/struct-genuine-keep": ["PASS", []],
+  "grants/struct-replace-granted": ["PASS", []],
+  "grants/local-sort-write": ["PASS", []],
+  "grants/local-replace-granted": ["PASS", []],
+  "grants/callsite-superset": ["PASS", []],
+  "grants/neg-struct-replace-tape": ["PASS", ["E-WRITE-NOT-GRANTED"]],
+  "grants/neg-struct-opaque": ["PASS", ["E-WRITE-NOT-GRANTED"]],
+  "grants/neg-nested-tape": ["PASS", ["E-WRITE-NOT-GRANTED"]],
+  "grants/neg-spread-override-tape": ["PASS", ["E-WRITE-NOT-GRANTED"]],
+  "grants/neg-field-ungranted-tape": ["PASS", ["E-WRITE-NOT-GRANTED"]],
+  "grants/neg-let-field-tape": ["PASS", ["E-GRANT-LET-ON-SEQUENCE"]],
+  "grants/neg-local-replace": ["PASS", ["E-WRITE-NOT-GRANTED"]],
+  "grants/neg-local-sort": ["PASS", ["E-WRITE-NOT-GRANTED"]],
+  "grants/neg-local-inferred": ["PASS", ["E-WRITE-NOT-GRANTED"]],
+  "grants/neg-local-struct": ["PASS", ["E-WRITE-NOT-GRANTED"]],
+  // fail closed: a reset's effect on a tape field is known only at run time; the call-site code is unruled
+  "grants/neg-reset-struct-tape": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "grants/neg-callsite-subset": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // review r2 H1: a `persist="local"` cross-tab value is a whole-struct write — refused over an append-only tape field
+  "grants/neg-persist-local-struct-tape": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "grants/persist-session-struct-tape": ["PASS", []],
   // the W-STRING-INTERP-LITERAL lint (§34 row landed s469-spec-followup; name still provisional)
   "interp/logic-literal-warns": ["PASS", ["W-STRING-INTERP-LITERAL"]],
   "interp/attr-expression-warns": ["PASS", ["W-STRING-INTERP-LITERAL"]],
@@ -249,6 +273,13 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
     for (const rel of ["strings/guess-ci-yes", "strings/guess-ci-upper", "strings/guess-ci-mixed-no", "strings/guess-ci-maybe",
                        "strings/guess-ci-empty", "strings/methods", "tapes/sort-reverse-join", "tapes/append-prepend",
                        "interp/logic-literal-warns", "interp/attr-expression-warns", "interp/markup-does-not-warn"]) {
+      expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
+    }
+  });
+  test("s469-boot-tape-grants: every positive grant case RAN on the bootstrap (output checked)", () => {
+    for (const rel of ["grants/struct-spread-keeps-tape", "grants/struct-genuine-keep", "grants/struct-replace-granted",
+                       "grants/local-sort-write", "grants/local-replace-granted", "grants/callsite-superset",
+                       "grants/persist-session-struct-tape"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });

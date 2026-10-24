@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-grants-neg-callsite-subset",
+  "description": "An ungranted cell passed to a parameter that grants `append`: refused (the code is not ruled).",
+  "language-version": "1.0",
+  "spec": "§66.12.3",
+  "rationale": "An argument must grant at least what the parameter grants; the code for the refusal is owed a ruling.",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}
