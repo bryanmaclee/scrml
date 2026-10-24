@@ -159,7 +159,9 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const docsArg = args.find((a) => a.startsWith("--docs="));
 const dialects = collectSnippetDialects(
   (doc) => readFileSync(resolve(repoRoot, doc), "utf8"),
-  docsArg ? docsArg.slice("--docs=".length).split(",").filter(Boolean) : discoverDocs(repoRoot),
+  // POSIX like every other printed path (S469): discoverDocs already yields `/`-separated
+  // repo-relative paths; an explicit `--docs=` path built with `join` on Windows does not.
+  docsArg ? docsArg.slice("--docs=".length).split(",").filter(Boolean).map((d) => d.split(sep).join("/")) : discoverDocs(repoRoot),
 );
 // Marker paths are repo-relative (or absolute); compare as absolute paths.
 const dialectByAbs = new Map([...dialects.byFile].map(([p, d]) => [resolve(repoRoot, p), d]));

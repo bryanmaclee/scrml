@@ -15,7 +15,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { spawnSync } from "child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, sep } from "path";
 import { parseDocMarkers, collectSnippetDialects } from "../../../scripts/doc-gate-markers.js";
 import { parseDoc } from "../../../scripts/snippet-drift.js";
 import { loadBoot } from "../../../scripts/scrml-boot.ts";
@@ -149,6 +149,9 @@ beforeAll(async () => {
 }, 300_000);
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
+// The gates print POSIX paths on every OS (S469): `join` writes `\` on Windows, so an
+// expected path built here is compared in its `/` form.
+const posix = (p) => p.split(sep).join("/");
 const write = (name, lines) => {
   const p = join(dir, name);
   writeFileSync(p, lines.join("\n") + "\n");
@@ -219,9 +222,9 @@ describe("snippet-gate — bootstrap mode", () => {
       `<!-- gate: spec-ahead — no ^{} yet -->`, `<!-- snippet: ${ahead} -->`, ...fence("x"),
     ]);
     const r = snippet(`--docs=${md}`, good, ahead, legacy);
-    expect(r.stdout).toContain(`PASS  ${good}  (bootstrap)`);
-    expect(r.stdout).toContain(`AHEAD ${ahead}  (bootstrap; spec-ahead — no ^{} yet)`);
-    expect(r.stdout).toContain(`PASS  ${legacy}\n`); // uncited → impl#1
+    expect(r.stdout).toContain(`PASS  ${posix(good)}  (bootstrap)`);
+    expect(r.stdout).toContain(`AHEAD ${posix(ahead)}  (bootstrap; spec-ahead — no ^{} yet)`);
+    expect(r.stdout).toContain(`PASS  ${posix(legacy)}\n`); // uncited → impl#1
     expect(r.stdout).toMatch(/impl1 — 1 file\(s\), 1 pass, 0 fail · bootstrap \(ruled\) — 2 file\(s\), 1 pass, 1 spec-ahead, 0 stale, 0 fail/);
     expect(r.status).toBe(0);
   }, 120_000);
@@ -237,7 +240,7 @@ describe("snippet-gate — bootstrap mode", () => {
     const r = snippet(`--docs=${md}`, good, legacy);
     expect(r.stdout).toContain("STALE");
     expect(r.stdout).toContain("remove the marker");
-    expect(r.stdout).toContain(`FAIL  ${legacy}  (bootstrap)`);
+    expect(r.stdout).toContain(`FAIL  ${posix(legacy)}  (bootstrap)`);
     expect(r.status).toBe(1);
   }, 120_000);
 });
