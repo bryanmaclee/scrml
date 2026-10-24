@@ -294,7 +294,9 @@ shapes.push(["inner-loop local in a region of a keyed row", `<pw> = "secret"
 // Review of b192c63de (HIGH) — an inner loop with an open gate among a FRAGMENT row roots (the group head,
 // beside sibling roots, inside an arm with a sibling): the row is lowered plain. "wrong" revokes, then
 // REORDERS the rows (the move that re-inserted frozen region nodes).
-const FRAG_REG = `for (k of r.kids) { const ok = @pw == "secret"\n lift <span><b if=(ok && r.id == 1)>LOGGED IN</b></span> }`;
+// Review of 1811a2cce (LOW-1): the gate is plain `if=(ok)` and the row test lives in the TEXT — the node a reorder
+// re-inserts is the MOVED row's (row 2), so `if=(ok && r.id == 1)` could never show it and the shapes missed the bug.
+const FRAG_REG = `for (k of r.kids) { const ok = @pw == "secret"\n lift <span><b if=(ok)>\${r.id == 2 ? "LOGGED IN" : ""}</b></span> }`;
 for (const [n, row] of [
   ["group head", FRAG_REG],
   ["sibling root before", `lift <i></i>\n ${FRAG_REG}`],
