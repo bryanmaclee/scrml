@@ -1,0 +1,15 @@
+// `@src` grants nothing; the parameter grants append.
+<program>
+    <src:int[]=([1])/>
+    let <n:int=0/>
+    function size(xs: int[free, append]) -> int {
+        return xs.length;
+    }
+    function go() {
+        @n = size(@src);
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@n}</p>
+    </main>
+</program>

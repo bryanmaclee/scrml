@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-grants-local-replace-granted",
+  "description": "Rebinding a local tape to an unrelated value is a `replace`, granted when its type grants `replace`.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rule 4 · O63",
+  "rationale": "`let` grants nothing; `replace` in the type does.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "b,c"
+      }
+    ]
+  }
+}

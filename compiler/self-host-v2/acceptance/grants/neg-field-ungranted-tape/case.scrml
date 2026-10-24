@@ -1,0 +1,12 @@
+// `xs: int[]` grants nothing.
+<program>
+    type Bag:struct = { title: string, xs: int[] }
+    let <g:Bag=({ title: "g", xs: [] })/>
+    function go() {
+        @g.xs = [1];
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@g.title}</p>
+    </main>
+</program>

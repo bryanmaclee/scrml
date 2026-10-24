@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-grants-neg-struct-opaque",
+  "description": "A whole-struct write of an opaque value (a name, not an object literal) replaces every tape field.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rule 4 · §66.20 E-WRITE-NOT-GRANTED",
+  "rationale": "A value that is not an object literal cannot show that it keeps a field.",
+  "expect": {
+    "codes": [
+      "E-WRITE-NOT-GRANTED"
+    ],
+    "codeCounts": {
+      "E-WRITE-NOT-GRANTED": 1
+    }
+  }
+}

@@ -1,0 +1,13 @@
+// `let out = [1]` infers a tape with no grants.
+<program>
+    let <shown:string=""/>
+    function go() {
+        let out = ["a"];
+        out = ["b"];
+        @shown = "done";
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@shown}</p>
+    </main>
+</program>

@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-grants-neg-nested-tape",
+  "description": "A tape field reached through a nested struct field is replaced by the outer whole-struct write.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rule 4 · §66.20 E-WRITE-NOT-GRANTED",
+  "rationale": "structTapeWrites walks struct fields to every tape field.",
+  "expect": {
+    "codes": [
+      "E-WRITE-NOT-GRANTED"
+    ],
+    "codeCounts": {
+      "E-WRITE-NOT-GRANTED": 1
+    }
+  }
+}

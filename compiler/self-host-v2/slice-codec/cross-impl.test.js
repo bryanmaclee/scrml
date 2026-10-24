@@ -94,7 +94,7 @@ const core = frontEnd(mods, [{ path: "x.scrml", src: SRC }]).core;
 const sym = (n) => core.types.find((t) => t.data.sym.hint === n).data.sym;
 const Named = (n) => ({ variant: "Named", data: { sym: sym(n) } });
 const Maybe = (inner) => ({ variant: "Maybe", data: { inner } });
-const Seq = (elem) => ({ variant: "Seq", data: { elem, grants: { length: "Free", at: [], shrink: [], positionsWritable: false } } });
+const Seq = (elem) => ({ variant: "Seq", data: { elem, grants: { length: "Free", at: [], shrink: [], positionsWritable: false, replace: false } } });
 const tb = (ty) => descriptor(mods, core, ty).table;
 
 const pt = (x) => ({ x, label: "p" + x, on: x % 2 === 0 });

@@ -1,0 +1,15 @@
+// `q = { …, xs: [] }` replaces `q.xs`.
+<program>
+    type Entry:struct = { at: int, action: string }
+    type Box:struct = { title: string, xs: Entry[free, append] }
+    let <shown:string=""/>
+    function go() {
+        let q: Box = { title: "a", xs: [] };
+        q = { title: "b", xs: [] };
+        @shown = q.title;
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@shown}</p>
+    </main>
+</program>

@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-grants-local-sort-write",
+  "description": "Rebinding a local tape to its sorted self is a position write, granted by `write` in its type.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rule 4 · O63",
+  "rationale": "A local's tape is judged by its TYPE's grants.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "a,b,c"
+      }
+    ]
+  }
+}

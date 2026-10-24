@@ -94,7 +94,8 @@ describe("#2 — call arity (E-CALL-ARITY)", () => {
 // provably not a sequence").
 // ---------------------------------------------------------------------------
 describe("#3 — `<each in=>` over a non-sequence (E-EACH-NOT-SEQUENCE)", () => {
-  const O = "    type O:struct = { let xs: int[] | not, let n: int | not }\n    let <o:O=({ xs: not, n: not })/>\n";
+  // s469-boot-tape-grants: `xs` is never written here, and `let` on a tape field is E-GRANT-LET-ON-SEQUENCE (its grants live on its type)
+  const O = "    type O:struct = { xs: int[] | not, let n: int | not }\n    let <o:O=({ xs: not, n: not })/>\n";
   test("E-EACH-NOT-SEQUENCE — an int, a number, a bool, a string, a struct, an enum, an instance", () => {
     for (const [decls, src] of [
       ["    <n:int=3/>", "@n"], ["    <r:number=0.5/>", "@r"], ["    <b:bool=true/>", "@b"], ["    <s:string=\"ab\"/>", "@s"],
@@ -571,7 +572,8 @@ describe("#8 — a `T | not` operand must be narrowed first (Gotcha Q3)", () => 
     expect(inApp(O + XS, "<each in=@xs as x><p if=(x.n is given)>${x.n + 1}</p></each>")).toEqual([]);
   });
   test("r5 R1 — N3 at depth: writing the OUTER source of a nested `<each>` drops the inner row's narrowing", () => {
-    const G = "    type G:struct = { let name: string, let kids: O[] }\n    <gs:G[replace]=([{ name: \"a\", kids: [{ v: \"\", n: 0, f: false }] }])/>\n    function clearGs() { @gs = [{ name: \"b\", kids: [{ v: not, n: not, f: not }] }]; }\n    function other() { @m = 2; }\n";
+    // s469-boot-tape-grants: `kids` takes `replace` from its type (`let` on a tape field is E-GRANT-LET-ON-SEQUENCE)
+    const G = "    type G:struct = { let name: string, kids: O[replace] }\n    <gs:G[replace]=([{ name: \"a\", kids: [{ v: \"\", n: 0, f: false }] }])/>\n    function clearGs() { @gs = [{ name: \"b\", kids: [{ v: not, n: not, f: not }] }]; }\n    function other() { @m = 2; }\n";
     const nested = (body) => `<each in=@gs as g><each in=g.kids as y><p if=(y.n is given)><button onclick={ ${body};\n @m = y.n + 1; }>b</button></p></each></each>`;
     expect(inApp(O + G, nested("clearGs()"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
     expect(inApp(O + G, nested("@gs = []"))).toEqual(["E-OPERAND-NOT-NARROWED"]);

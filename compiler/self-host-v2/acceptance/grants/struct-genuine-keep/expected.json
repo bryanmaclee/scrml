@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-grants-struct-genuine-keep",
+  "description": "A genuine replace that keeps the tape field (`xs: @b.xs`) is granted by the struct's `let`.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rule 4",
+  "rationale": "`xs: @b.xs` leaves the field as it was, so it is not a write of it.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "rebuilt"
+      }
+    ]
+  }
+}
