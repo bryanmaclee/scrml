@@ -45,4 +45,40 @@ for (const [ln, [deny, arms]] of Object.entries(LISTS)) {
     }
   }
 }
+
+// S469 r8 (final review of 45208d9c7, F1) — g-impl1-text-lowered-match-payload-variant-misdispatch-s469:
+// the text-lowered server match compared a PAYLOAD variant value (`{ variant: "Denied", data }`)
+// with `"Denied"` — never equal — so the default-ALLOW arm ran for the denied login. Measured on
+// 45208d9c7: every shape FAIL (the wrong password logs in); all PASS after (tag dispatch).
+const PAYLOAD_PAGE = (pos, armsText) => `type AuthErr:enum = { Denied }
+type Verdict:enum = { Rejected(reason: string), Locked(until: number), Granted }
+<msg> = "init"
+\${
+    server function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied
+        return true
+    }
+    server function verdict(p) -> Verdict {
+        const good = check(p) !{ .Denied :> false }
+        if (good == true) { return Verdict.Granted }
+        return Verdict.Rejected("bad password")
+    }
+    server function login(p) {
+        const st = verdict(p)
+${pos === "reassignment"
+    ? `        let v = ""\n        v = match st {\n${armsText}\n        }\n        return v`
+    : `        return String(match st {\n${armsText}\n        })`}
+    }
+    function go() { @msg = login("wrong") !{ _ :> "err" } }
+}
+<button onclick=go()>go</button>
+<p>\${@msg}</p>
+`;
+const PAYLOAD_ARMS = [`.Rejected(r) :> "rejected"`, `.Locked(u) :> "rejected"`, `else :> "LOGGED IN"`];
+for (const pos of ["reassignment", "call argument"]) {
+  for (const [sn, sep] of SPELLINGS) {
+    const armsText = PAYLOAD_ARMS.map((a, i) => `            ${a}${sep[i]}`).join("\n");
+    shapes.push([`server ${pos} match, payload-variant deny-list (${sn} arms)`, PAYLOAD_PAGE(pos, armsText)]);
+  }
+}
 export default shapes;

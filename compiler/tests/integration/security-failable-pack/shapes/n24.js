@@ -300,4 +300,41 @@ for (const [ln, [deny, arms]] of Object.entries(ENGINE_LISTS)) {
     shapes.push([`engine derived=match ${ln} alternation deny-list (${sn} arms)`, ENGINE_PAGE(deny, f(arms))]);
   }
 }
+
+// S469 r8 (final review of 45208d9c7, F1) — an engine `derived=match` over a PAYLOAD enum, lowered
+// from text: a payload value (`{ variant: "Rejected", data }`) was compared with `"Rejected"` —
+// never equal — so the default-ALLOW arm ran for the denied login. Now dispatched on the tag.
+// Measured on 16d03e9fa (before the fix): all 3 shapes FAIL; all 3 PASS after.
+const PAYLOAD_ENGINE_PAGE = (armsText) => `type AuthErr:enum = { Denied }
+type Verdict:enum = { Pending, Rejected(reason: string), Locked(until: number), Ok }
+type Access:enum = { Granted, Refused }
+<st>: Verdict = .Pending
+\${
+    function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied
+        return true
+    }
+    function login(p) {
+        const good = check(p) !{ .Denied :> false }
+        if (good == true) { @st = .Ok } else { @st = .Rejected("bad password") }
+    }
+}
+<engine for=Access derived=match @st {
+${armsText}
+}>
+  <Granted/>
+  <Refused/>
+</>
+<button id="wrong" onclick=login("wrong")>go</button>
+<button id="right" onclick=login("secret")>go</button>
+<p id="out">\${match @access { .Granted :> "LOGGED IN", else :> "rejected" }}</p>
+`;
+const PAYLOAD_ENGINE_ARMS = [`.Rejected(r) :> .Refused`, `.Locked(u) :> .Refused`, `.Pending :> .Refused`, `else :> .Granted`];
+for (const [sn, f] of [
+  ["newline", (a) => a.map((l) => "  " + l).join("\n")],
+  ["comma", (a) => a.map((l) => "  " + l + ",").join("\n")],
+  ["one-line", (a) => "  " + a.join(", ")],
+]) {
+  shapes.push([`engine derived=match payload-variant deny-list (${sn} arms)`, PAYLOAD_ENGINE_PAGE(f(PAYLOAD_ENGINE_ARMS))]);
+}
 export default shapes;
