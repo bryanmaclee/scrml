@@ -8,7 +8,7 @@ ${
             .A(defer) :> {
                 defer [1].split("").forEach(note);
                 note("a");
-            }
+            },
             .B :> {
                 note("b");
             }

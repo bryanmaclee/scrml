@@ -7,7 +7,7 @@ ${
     <B rule=.A/>
 </>
 <engine for=Dst derived=match @src {
-    Src.A :> .X
+    Src.A :> .X,
     Src.B :> .Y
 }>
     <X/>

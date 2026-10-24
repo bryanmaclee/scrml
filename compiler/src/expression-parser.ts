@@ -26,6 +26,7 @@ import { ScrmlParser } from "./scrml-acorn.ts";
 import { sliceTemplateText } from "./interpolation-extent.ts";
 import type { TemplateSegment } from "./interpolation-extent.ts";
 import { boundNamesOf } from "./binding-names.ts";
+import { splitArmSeparatorCommas } from "./arm-list-split.ts";
 // GITI-017 (S125): shared regex/comment/string fence. preprocessForAcorn's
 // `not `→`!` lowering must skip regex-literal / comment / string interiors or
 // it corrupts `/not a jj repo/i` → `/!a jj repo/i` (silent-corruption class).
@@ -2673,8 +2674,13 @@ function splitMatchArms(content: string): string[] {
   if (arms.length === 0 && content.trim()) {
     arms.push(content.trim());
   }
-  return arms;
+  return arms.flatMap(splitArmSeparatorCommas);
 }
+
+// S469 (dpa-073 F2 / F5(1)) — the arm-separator `,` split (`splitArmSeparatorCommas`) and the
+// stray-`,` guard (`rawArmHasStrayComma`) read the arm text with the LEXER (arm-list-split.ts):
+// a `,` or a quote inside a regular-expression literal is the regex's own (S469 r2, F1 / F2).
+export { rawArmHasStrayComma } from "./arm-list-split.ts";
 
 // ---------------------------------------------------------------------------
 // esTreeToExprNode — convert Acorn ESTree to ExprNode

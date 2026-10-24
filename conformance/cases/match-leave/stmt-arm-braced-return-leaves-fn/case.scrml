@@ -11,8 +11,8 @@ ${
     }
     function pick(k: K) {
         match k {
-            .A :> { return; }
-            .B :> @seen = "b"
+            .A :> { return; },
+            .B :> @seen = "b",
             .C :> @seen = "c"
         }
         @after = "ran";

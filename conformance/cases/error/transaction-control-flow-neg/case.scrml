@@ -17,7 +17,7 @@
         transaction {
             ?{`UPDATE orders SET name = 'y' WHERE id = 1`}.run()
             match m {
-                .A :> { return 5 }
+                .A :> { return 5 },
                 .B :> { let y = 1 }
             }
             ?{`UPDATE orders SET name = 'after-match' WHERE id = 2`}.run()

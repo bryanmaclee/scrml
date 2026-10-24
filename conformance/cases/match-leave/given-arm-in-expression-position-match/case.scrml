@@ -7,19 +7,19 @@ ${
     function go() {
         let n: number | not = 5;
         @s = show(match K.A {
-            given n :> 1
-            .A :> 2
+            given n :> 1,
+            .A :> 2,
             .B :> 3
         })
         @v = match K.A {
-            given n :> 1
-            .A :> 2
+            given n :> 1,
+            .A :> 2,
             .B :> 3
         }
         let ww = 0
         ww = match K.A {
-            given n :> 1
-            .A :> 2
+            given n :> 1,
+            .A :> 2,
             .B :> 3
         }
         @w = ww

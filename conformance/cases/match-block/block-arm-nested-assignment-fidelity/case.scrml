@@ -4,20 +4,20 @@ ${
 
     // Derived cell — a nested bare assignment writes the OUTER binding.
     const <derivedAssign> = match @level {
-        .Low :> { let a = 0; for (const i of [1, 2]) { a = 1 } a }
+        .Low :> { let a = 0; for (const i of [1, 2]) { a = 1 } a },
         _    :> 99
     }
 
     // Derived cell — SELF-REFERENCING nested assignment.
     const <derivedSelfRef> = match @level {
-        .Low :> { let a = 10; for (const i of [1, 2]) { a = a + 1 } a }
+        .Low :> { let a = 10; for (const i of [1, 2]) { a = a + 1 } a },
         _    :> 99
     }
 
     // Return position — nested self-referencing assignment inside an `if`.
     fn retSelfRef(k: int) -> int {
         return match k {
-            1 :> { let a = 20; if (k > 0) { a = a + 1 } a }
+            1 :> { let a = 20; if (k > 0) { a = a + 1 } a },
             _ :> 99
         }
     }
@@ -25,7 +25,7 @@ ${
     // Multi-scrutinee decl — nested bare assignment.
     fn multiAssign(x: int, y: int) -> int {
         const r = match (x, y) {
-            (1, 2) :> { let a = 0; for (const i of [1, 2]) { a = 30 } a }
+            (1, 2) :> { let a = 0; for (const i of [1, 2]) { a = 30 } a },
             _ :> 99
         }
         return r
@@ -34,7 +34,7 @@ ${
     // Plain local decl inside `fn` — nested self-referencing assignment.
     fn localSelfRef(k: int) -> int {
         const r = match k {
-            1 :> { let a = 40; for (const i of [1, 2]) { a = a + 1 } a }
+            1 :> { let a = 40; for (const i of [1, 2]) { a = a + 1 } a },
             _ :> 99
         }
         return r
@@ -43,7 +43,7 @@ ${
     // Plain local decl inside `function` — the structured-body route, both forms.
     function fnLocalAssign(k: int) -> int {
         const r = match k {
-            1 :> { let a = 0; for (const i of [1, 2]) { a = 50 } a }
+            1 :> { let a = 0; for (const i of [1, 2]) { a = 50 } a },
             _ :> 99
         }
         return r
@@ -51,7 +51,7 @@ ${
 
     function fnLocalSelfRef(k: int) -> int {
         const r = match k {
-            1 :> { let a = 60; for (const i of [1, 2]) { a = a + 1 } a }
+            1 :> { let a = 60; for (const i of [1, 2]) { a = a + 1 } a },
             _ :> 99
         }
         return r

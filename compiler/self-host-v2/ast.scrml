@@ -134,7 +134,8 @@ ${
     // function's declared error type, §19.3.3). `target`: a `fail` whose
     // target is not a variant at all (`fail "x"`) — kept, so analyze reports
     // E-ERROR-009 ("a `fail` target that is not an enum variant").
-    export type AFail:struct = { enumName: string, variant: string, args: AExpr[], target: AExpr | not }
+    // s469 — `split`: the operand was read from a line after `fail` (§7.2.2 rule 10), noted on E-ERROR-009.
+    export type AFail:struct = { enumName: string, variant: string, args: AExpr[], target: AExpr | not, split: boolean }
 
     // s451 (U1a) — the terminator of a `?{}` chain (§8.3): `.all()` (or none
     // written — "`.all()` (or bare `?{}`)"), `.get()`, `.run()`.

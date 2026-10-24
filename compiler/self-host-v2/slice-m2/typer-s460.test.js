@@ -182,10 +182,19 @@ describe("S460 — `x is given` / `x is not`: the explicit pair (parsed, typed `
     // twin: a nested block that writes something else keeps it
     expect(codes(O + "    function f() { if (@o.n is given) { if (@b) { @m = 2; }\n @m = @o.n + 1; } }")).toEqual([]);
   });
-  test("a newline before `is` does not continue the line (§7.2.2)", () => {
-    expect(codes(O + "    function f() { const q: bool = @o.n\n        is given }").some((c) => c.startsWith("E-PARSE-"))).toBe(true);
-    // s469: the split shape as written — pinned whole (the bootstrap still decides `is given` by line)
-    expect(codes(O + "    function f() { const q: bool = @o.n\n        is given }")).toEqual(["E-STMT-MISSING-SEMICOLON", "E-STMT-MISSING-SEMICOLON", "E-SYNTAX-044", "E-PARSE-EXPECTED", "E-SCOPE-001"]);
+  // s469 (§7.2.2 rule 4, RULED "Attach to the line above"): a line break is whitespace and `is given` /
+  // `is not` cannot start a statement, so `x⏎is given` tests `x`. (Before: the test was read only on the
+  // line of what it tests — an E-PARSE-* / E-SYNTAX-044 cascade, fail closed.)
+  test("s469 rule 4 — a newline before `is` continues the expression: `x⏎is given` tests `x`", () => {
+    expect(codes(O + "    function f() { const q: bool = @o.n\n        is given; }")).toEqual([]);
+    expect(codes(O + "    function f() { if (@o.n\n        is not) { @m = 1; } }")).toEqual([]);
+    // the same tree as the one-line form
+    const one = mods.parse.parseFile("t.scrml", prog(O + "    function f() { const q: bool = @o.n is given; }"), 0);
+    const two = mods.parse.parseFile("t.scrml", prog(O + "    function f() { const q: bool = @o.n\n        is given; }"), 0);
+    const kinds = (p) => JSON.stringify(p, (k, v) => (k === "span" || k === "nid" || k === "lines" ? undefined : v));
+    expect(kinds(two)).toEqual(kinds(one));
+    // as written before s469 (no `;`): now only the missing `;` before the `}`
+    expect(codes(O + "    function f() { const q: bool = @o.n\n        is given }")).toEqual(["E-STMT-MISSING-SEMICOLON"]);
   });
 });
 

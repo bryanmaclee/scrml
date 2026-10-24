@@ -1,7 +1,7 @@
 ${
   fn label(x: asIs) -> string {
     match x {
-      "a" :> "a"
+      "a" :> "a",
       "b" :> "b"
     }
   }

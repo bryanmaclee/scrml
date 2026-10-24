@@ -1,0 +1,12 @@
+{
+  "id": "acceptance-termination-neg-spaced-propagate",
+  "description": "§7.2.2 rule 4: a spaced `?` is the conditional (adjacency decides, the end-of-line test is dropped) — `load(id) ?;` is refused (E-PARSE-EXPR), never read as propagation.",
+  "language-version": "1.0",
+  "spec": "§7.2.2 rule 4 (S469), §19.5",
+  "rationale": "user-voice-scrml.md S469 \"⭐ RULED — statement termination follow-ups, §7.2.2\" item 2: \"`?` is decided by adjacency only: glued `x?` is propagation, spaced `?` is the conditional. The end-of-line test is dropped.\"",
+  "expect": {
+    "codes": ["E-PARSE-EXPR"],
+    "codeCounts": { "E-PARSE-EXPR": 1 },
+    "severity": { "E-PARSE-EXPR": "error" }
+  }
+}

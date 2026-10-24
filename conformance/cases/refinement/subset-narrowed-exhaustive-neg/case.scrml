@@ -2,7 +2,7 @@ ${
     type Role:enum = { Admin, Editor, Viewer, Guest }
     <role>: Role oneOf([.Admin, .Editor]) = .Admin
     const <label> = match @role {
-        .Admin :> "admin"
+        .Admin :> "admin",
         .Editor :> "editor"
     }
 }
