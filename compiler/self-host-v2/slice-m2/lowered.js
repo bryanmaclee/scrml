@@ -66,10 +66,11 @@ export function frontEnd(mods, files, entry) {
   const t0 = performance.now();
   const linked = mods.link.parseProgram(files.map((f) => ({ path: f.path, src: f.src })), entry);
   const asts = linked.files;
-  const parseDiags = linked.diags;
   const next = linked.nextId;
   const t1 = performance.now();
   const tp = mods.analyze.analyze(asts, entry);
+  // s469 — a statement a later phase refuses is not also E-STMT-NO-EFFECT (parse.scrml withoutRefusedNoEffect)
+  const parseDiags = mods.parse.withoutRefusedNoEffect(linked.diags, tp.diags);
   const t2 = performance.now();
   const lowered = mods.lower.lower(tp);
   const t3 = performance.now();

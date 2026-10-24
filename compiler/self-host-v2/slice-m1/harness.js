@@ -86,6 +86,33 @@ function logAnalyze(analyzeMod, file) {
 }
 
 /**
+ * s469-boot-termination-rulings — the OLD-vs-NEW SOURCE RECORDER. With
+ * SCRML_BOOT_SRC_LOG=<file> set, every source set a test hands the front end
+ * (`link.parseProgram`) or the parser (`parse.parseFile`) is appended as one
+ * JSON line `{ via, files, entry }` / `{ via, path, src, firstId }`, so a parser
+ * change can be replayed over exactly what the slice suite compiles, on the old
+ * and the new bootstrap (docs/changes/s469-boot-termination-rulings/progress.md).
+ * (Calls made INSIDE the bootstrap — link calling parse — are not recorded: the
+ * chunks bind their imports at load time.) Off unless the variable is set.
+ */
+function logSources(mods, file) {
+  if (mods.link && mods.link.parseProgram) {
+    const inner = mods.link.parseProgram;
+    mods.link = { ...mods.link, parseProgram(xs, entry) {
+      appendFileSync(file, JSON.stringify({ via: "program", files: xs.map((x) => ({ path: x.path, src: x.src })), entry }) + "\n");
+      return inner(xs, entry);
+    } };
+  }
+  if (mods.parse && mods.parse.parseFile) {
+    const inner = mods.parse.parseFile;
+    mods.parse = { ...mods.parse, parseFile(path, src, firstId) {
+      appendFileSync(file, JSON.stringify({ via: "file", path, src, firstId }) + "\n");
+      return inner(path, src, firstId);
+    } };
+  }
+}
+
+/**
  * Compile + load every module. Returns { mods, warnings } where `mods` maps a
  * module base name (e.g. "print") to its export object.
  */
@@ -155,5 +182,6 @@ export function evaluateChunks(chunks) {
   const mods = {};
   for (const [k, v] of Object.entries(registry)) mods[k.replace(/\.client\.js$/, "").replace(/^.*\//, "")] = v;
   if (process.env.SCRML_BOOT_DIAG_LOG && mods.analyze) mods.analyze = logAnalyze(mods.analyze, process.env.SCRML_BOOT_DIAG_LOG);
+  if (process.env.SCRML_BOOT_SRC_LOG) logSources(mods, process.env.SCRML_BOOT_SRC_LOG);
   return mods;
 }

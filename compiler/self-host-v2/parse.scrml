@@ -216,11 +216,44 @@ ${
     fn expectP(tp: TP, s: string) -> TP {
         if (isP(tp, s)) return adv(tp)
         const t: PTok = cur(tp)
-        return diagAt(tp, "E-PARSE-EXPECTED", "expected `" + s + "`, found `" + t.text + "`", t)
+        return diagAt(tp, "E-PARSE-EXPECTED", "expected `" + s + "`, found `" + t.text + "`" + gluedQHint(tp), t)
+    }
+
+    // s469 (§7.2.2 rule 4, adjacency decides a `?`) — a message note, no code of its
+    // own: when the token before `tp` is a `?` glued to what it follows (propagation,
+    // which ends the expression) and an expression start follows it on its line — the
+    // conditional the S446 reading took it for (`f(a == 1? 2 : 3)`, `${ ok? "y" : "n" }`).
+    fn gluedQHint(tp: TP) -> string {
+        if (tp.i < 2) return ""
+        const q: PTok = tp.toks[tp.i - 1]
+        const t: PTok = cur(tp)
+        if (q.cls != TC.Punct || !tk(q, "?") || !touching(tp.toks[tp.i - 2], q)) return ""
+        if (t.cls == TC.End || t.cls == TC.TIEnd || t.line != q.line || !exprStartTok(t)) return ""
+        return " (A `?` written directly against what it follows is the propagation operator, §19.5 — for the conditional, put a space before it: `c ? a : b`.)"
+    }
+
+    // Can token `t` begin an expression?
+    fn exprStartTok(t: PTok) -> boolean {
+        if (t.cls == TC.Ident || t.cls == TC.Num || t.cls == TC.Str || t.cls == TC.At || t.cls == TC.Variant || t.cls == TC.TChunk) return true
+        if (t.cls == TC.Keyword) return t.v == "true" || t.v == "false" || t.v == "not" || t.v == "match"
+        if (t.cls != TC.Punct) return false
+        return tk(t, "(") || tk(t, "[") || tk(t, "{") || tk(t, "!") || tk(t, "-")
     }
 
     // Two tokens that touch (no trivia between them): `:>`, `@x`, `->`.
     fn touching(a: PTok, b: PTok) -> boolean { return a.end == b.start }
+
+    // s469 — the line a token ENDS on (a template chunk can span lines; `line`
+    // is where it starts). "The line above" a token is its predecessor's end line.
+    fn endLine(x: PTok) -> int {
+        let n: int = x.line
+        let i: int = x.text.indexOf("\n")
+        while (i >= 0) {
+            n = n + 1
+            i = x.text.indexOf("\n", i + 1)
+        }
+        return n
+    }
 
     fn spanFrom(tp: TP, start: int) -> ASpan {
         let end: int = start
@@ -327,6 +360,16 @@ ${
         // s451: `?{` is the SQL sigil (§8.1), never a ternary's `?` — the
         // expression ends here and a `?{` statement follows
         if (isSqlOpen(test.tp)) return test
+        // s469 (§7.2.2 rule 4, RULED: adjacency decides a `?`) — a SPACED `?`
+        // is the conditional's, so one with nothing after it (`load(id) ?;`,
+        // `f(x ?)`) is a conditional missing its branches: refused by name,
+        // naming the propagation spelling, never read as propagation
+        const q: PTok = cur(test.tp)
+        const qn: PTok = peekAt(test.tp, 1)
+        if (qn.cls == TC.End || qn.cls == TC.TIEnd || (qn.cls == TC.Punct && (tk(qn, ")") || tk(qn, "]") || tk(qn, ",") || tk(qn, "}") || tk(qn, ";")))) {
+            const dq: TP = diagAt(test.tp, "E-PARSE-EXPR", "a `?` with whitespace before it is the conditional (`c ? a : b`), and nothing follows it — for propagation (§19.5) write the `?` directly against what it follows: `x?` (§7.2.2 rule 4: adjacency decides)", q)
+            return mkE(adv(dq), start, AExprK.Recovered)
+        }
         const yes: RExpr = parseTernary(adv(test.tp))
         const t2: TP = expectP(yes.tp, ":")
         const no: RExpr = parseTernary(t2)
@@ -398,28 +441,30 @@ ${
             } else if (t.cls == TC.Punct && tk(t, ".") && peekAt(r.tp, 1).cls == TC.Keyword) {
                 const kname: string = peekAt(r.tp, 1).v
                 r = mkE(adv(adv(r.tp)), start, AExprK.Member(r.e, kname))
-            } else if (t.cls == TC.Punct && tk(t, "(") && t.line == prev.line) {
+            } else if (t.cls == TC.Punct && tk(t, "(") && t.line == endLine(prev)) {
                 const args: RExprs = parseList(adv(r.tp), ")")
                 r = mkE(args.tp, start, AExprK.Call(r.e, args.es))
             } else if (t.cls == TC.Punct && tk(t, "[") && touching(prev, t)) {
                 // `a[i]` — the `[` touches what it indexes (a spaced `[` starts a new expression)
                 const ix: RExpr = parseAssign(adv(r.tp))
                 r = mkE(expectP(ix.tp, "]"), start, AExprK.Index(r.e, ix.e))
-            } else if (t.cls == TC.TChunk && t.line == prev.line) {
+            } else if (t.cls == TC.TChunk && t.line == endLine(prev)) {
                 // s469 — `tag`…`` (a tagged template: the tag CALLED with the
                 // template's pieces) is not a text template; refused by name, the
                 // template read past (its own errors report)
                 const dt: TP = diagAt(r.tp, "E-BOOTSTRAP-UNSUPPORTED", "a tagged template (`tag` followed by a backtick template) is not in the bootstrap — a logic template is text (§14.13.3); pass the template to the function as an argument instead (`f(` then the template then `)`)", t)
                 const rt: RExpr = parseTemplate(dt)
                 r = mkE(rt.tp, start, AExprK.Recovered)
-            } else if (t.cls == TC.TChunk) {
-                // s469 (review L1) — a template on the LINE AFTER an expression:
-                // JavaScript reads it as a tagged template (the expression called
-                // with the template's pieces); scrml would read a new statement and
-                // drop the template. Read two ways — refused by name, fail closed.
-                const dn: TP = diagAt(r.tp, "E-PARSE-TEMPLATE", "this template starts the line after an expression, which reads two ways — JavaScript continues the expression (a tagged template: `" + prev.text + "` called with the template's pieces), scrml would start a new statement and drop it (§14.13.3). Put the template where its value is used (`const t = ` + the template)", t)
-                const rn: RExpr = parseTemplate(dn)
-                r = mkE(rn.tp, start, AExprK.Recovered)
+            } else if (splitContinuesAt(r.tp)) {
+                // s469 (§7.2.2 rule 5, F4 (ii) — RULED, "Build both"): an expression
+                // that continues across a line break into a line starting with `(`,
+                // `[` or a template is E-STMT-SPLIT-CONTINUATION — never the call /
+                // index / tagged template JavaScript reads, never a silent split.
+                // The expression ends here (as if the `;` were written), so the
+                // next line is read as a statement of its own and reports only
+                // its own errors (no second terminator or no-effect report).
+                r = { e: r.e, tp: splitContinuation(r.tp) }
+                going = false
             } else if (isHandlerOpen(r.tp)) {
                 // s451 (Ue): `expr !{ … }` — a failable handler (§19.4.3 item 3)
                 r = parseGuard(r, start)
@@ -462,33 +507,34 @@ ${
     // so a message holding the sigil literally comes out mangled.
     fn sqlSigil() -> string { return "?" + "{" }
 
-    // `!{` on the line of what precedes it (a `!` that starts a new line starts
-    // a new statement; `!=` is its own token).
+    // s469 (§7.2.2 rule 4, RULED "Attach to the line above"): `!{` after an
+    // expression handles it, on its line or the next — a line break is
+    // whitespace, and `!{ … }` cannot start a statement (`x⏎!{ … }` handles
+    // `x`). `!=` is its own token.
     fn isHandlerOpen(tp: TP) -> boolean {
         const a: PTok = cur(tp)
         const b: PTok = peekAt(tp, 1)
         if (a.cls != TC.Punct || !tk(a, "!") || b.cls != TC.Punct || !tk(b, "{")) return false
-        if (tp.i == 0) return false
-        return peekAt(tp, -1).line == a.line
+        return tp.i > 0
     }
 
-    // A postfix `?`: on the line of what it follows, and followed by what ends
-    // an expression — the end of the line or input, or `)` `]` `,` `}` `;` `|`.
-    // Anything else after it makes it a ternary's `?` (and `?{` the SQL sigil).
+    // s469 (§7.2.2 rule 4, RULED: "`?` is decided by adjacency only: glued
+    // `x?` is propagation, spaced `?` is the conditional. The end-of-line test
+    // is dropped"). A `?` written directly against what it follows is the §19.5
+    // postfix propagation operator, whatever comes after it; a `?` with
+    // whitespace before it (a line break is whitespace) is the conditional's.
+    // `?{` (touching) is the SQL sigil (§8.1), never propagation.
     fn isPropagate(tp: TP) -> boolean {
         const a: PTok = cur(tp)
         if (a.cls != TC.Punct || !tk(a, "?")) return false
         if (tp.i == 0) return false
-        if (peekAt(tp, -1).line != a.line) return false
-        const b: PTok = peekAt(tp, 1)
-        // s469: a template slot's `}` ends the expression too (`${ load(id)? }`)
-        if (b.cls == TC.End || b.cls == TC.TIEnd || b.line != a.line) return true
-        if (b.cls != TC.Punct) return false
-        return tk(b, ")") || tk(b, "]") || tk(b, ",") || tk(b, "}") || tk(b, ";") || tk(b, "|")
+        if (!touching(peekAt(tp, -1), a)) return false
+        return !isSqlOpen(tp)
     }
 
-    // s460: `is given` / `is not` on the line of what it tests (§7.2.2: a
-    // line that starts with `is` does not continue the previous one).
+    // s460: `is given` / `is not` after what it tests. s469 (§7.2.2 rule 4,
+    // RULED): on its line or the next — `is given` / `is not` cannot start a
+    // statement, so `x⏎is given` tests `x`.
     // s462: `is some` too — the SOFT-DEPRECATED spelling of `is given`
     // (§42.2.2a, §63.1 Stage 1): it reads as `is given` and surfaces
     // W-IS-SOME-DEPRECATED (`someLint`). §63.5: rejecting it would be a
@@ -496,9 +542,56 @@ ${
     fn isPresenceTest(tp: TP) -> boolean {
         if (!isWord(tp, "is")) return false
         if (tp.i == 0) return false
-        if (peekAt(tp, -1).line != cur(tp).line) return false
         const n: TP = adv(tp)
         return isWord(n, "given") || isWord(n, "not") || isWord(n, "some")
+    }
+
+    // s469 (§7.2.2 rule 5, F4 (ii)): after an expression, does the NEXT LINE
+    // start with `(`, `[` or a template — a continuation across the line break,
+    // which the language refuses? (On the same line `(` is a call, a touching
+    // `[` an index and a template a tagged template, read above; a SPACED
+    // same-line `x [y]` still ends the expression — INTERIM, no ruling.)
+    fn splitContinuesAt(tp: TP) -> boolean {
+        const t: PTok = cur(tp)
+        if (tp.i == 0) return false
+        if (t.line == endLine(peekAt(tp, -1))) return false
+        if (t.cls == TC.TChunk) return true
+        if (t.cls != TC.Punct) return false
+        if (tk(t, "[")) return true
+        if (!tk(t, "(")) return false
+        // a `( … ) :>` line is an arm head (a tuple pattern, §18), not a
+        // continuation — left to the arm list (unchanged)
+        return !tupleArmHeadAt(tp.toks, tp.i)
+    }
+
+    // Does `( … )` at token `i` close and then meet an arm separator?
+    fn tupleArmHeadAt(ts: PTok[], i: int) -> boolean {
+        let j: int = i
+        let depth: int = 0
+        while (j < ts.length && ts[j].cls != TC.End) {
+            if (ts[j].cls == TC.Punct && tk(ts[j], "(")) depth = depth + 1
+            if (ts[j].cls == TC.Punct && tk(ts[j], ")")) {
+                depth = depth - 1
+                if (depth == 0) return sepTokAt(ts, j + 1)
+            }
+            j = j + 1
+        }
+        return false
+    }
+
+    // E-STMT-SPLIT-CONTINUATION, with the ruled message, at the EMPTY span at the
+    // end of the line above (the end of its last token) — where the `;` goes,
+    // so the span is the fix-it.
+    fn splitContinuation(tp: TP) -> TP {
+        const last: PTok = peekAt(tp, -1)
+        const t: PTok = cur(tp)
+        // (one report per place — a region read twice reports once)
+        for (const d0 of tp.diags) { if (d0.code == "E-STMT-SPLIT-CONTINUATION" && d0.span.start == last.end) return tp }
+        let what: string = "`" + t.text + "`"
+        if (t.cls == TC.TChunk) what = "a template"
+        const msg: string = "add `;` to the line above, or join the lines — the next line starts with " + what + ", which would continue the expression above it (a call, an index or a tagged template); scrml refuses that reading rather than guess (§7.2.2 rule 5)"
+        const d: Diag = newDiag("E-STMT-SPLIT-CONTINUATION", msg, tp.file, mkSpan(last.end, last.end))
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
     }
 
     // s462 — W-IS-SOME-DEPRECATED (§42.2.2a, Info; one per site): the
@@ -900,15 +993,29 @@ ${
                 done = true
             }
             if (!done) {
-                const r: RStmt = parseTermStmt(t, b0)
+                // s469 — E-STMT-NO-EFFECT (stmtChecks): every statement but the
+                // block's LAST is a statement in any position; the last is the
+                // arm's value where the arm's value is used, so it is judged
+                // only for a statement-position `match` / `!{}` (armTails)
+                const h0: int = hardErrors(t.diags)
+                const r: RStmt = parseTermStmtBare(t, b0)
                 stmts = stmts.concat([r.s])
                 t = r.tp
+                if (!armBlockLastAt(t)) t = stmtChecks(t, r.s, b0, h0)
                 if (t.i == before) t = adv(t)
             }
         }
         t = expectP(t, "}")
         const b: ABlock = { nid: t.nid, span: spanFrom(t, start), stmts: stmts }
         return { b: b, lifted: lifted, tp: bumpId(t) }
+    }
+
+    // After a statement in an arm block: is it the block's last (only `;`s, then
+    // the block's `}` or the end of the input, follow)?
+    fn armBlockLastAt(tp: TP) -> boolean {
+        let t: TP = tp
+        while (isP(t, ";")) { t = adv(t) }
+        return atEnd(t) || isP(t, "}")
     }
 
     fn shorthandArmReason(n: string) -> string {
@@ -1388,7 +1495,7 @@ ${
                     slots = slots.concat([r.e])
                     t = r.tp
                     if (cur(t).cls != TC.TIEnd && !atEnd(t)) {
-                        t = diagAt(t, "E-PARSE-TEMPLATE", "a template slot holds ONE expression — found `" + cur(t).text + "` after it (§14.13.3); compute the value first and put the result in the slot", cur(t))
+                        t = diagAt(t, "E-PARSE-TEMPLATE", "a template slot holds ONE expression — found `" + cur(t).text + "` after it (§14.13.3); compute the value first and put the result in the slot" + gluedQHint(t), cur(t))
                         t = skipToSlotEnd(t)
                     }
                 }
@@ -1430,16 +1537,21 @@ ${
     }
 
     // s469 — the errors that can derail what follows: every Error but a
-    // missing terminator (E-STMT-MISSING-SEMICOLON / E-MATCH-ARM-SEPARATOR),
-    // which is reported at an exact place and parsed past without loss. The
-    // terminator cascade guard (termAfter) counts these, so one missing `;` or
-    // `,` does not hide the next.
+    // missing terminator (E-STMT-MISSING-SEMICOLON / E-MATCH-ARM-SEPARATOR /
+    // E-STMT-SPLIT-CONTINUATION, whose fix-it is the `;`), which is reported at
+    // an exact place and parsed past without loss, and E-STMT-NO-EFFECT (a
+    // whole, well-formed statement). The terminator cascade guard (termAfter)
+    // counts these, so one missing `;` or `,` does not hide the next.
     fn hardErrors(ds: Diag[]) -> int {
         let n: int = 0
         for (const d of ds) {
-            if (d.severity == Severity.Error && d.code != "E-STMT-MISSING-SEMICOLON" && d.code != "E-MATCH-ARM-SEPARATOR") n = n + 1
+            if (d.severity == Severity.Error && !softError(d.code)) n = n + 1
         }
         return n
+    }
+
+    fn softError(c: string) -> boolean {
+        return c == "E-STMT-MISSING-SEMICOLON" || c == "E-MATCH-ARM-SEPARATOR" || c == "E-STMT-SPLIT-CONTINUATION" || c == "E-STMT-NO-EFFECT"
     }
 
     // A template chunk's text: a malformed escape (lex.scrml escapeWhy) is refused.
@@ -1564,7 +1676,8 @@ ${
         if (t.v == "for") {
             const df: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "a `for` used as a value (the value form, §49.6) is not in the bootstrap yet — write the loop as a statement in a function and return what it builds", t)
             const rf: RStmt = parseFor(df, "", start)
-            return mkE(rf.tp, start, AExprK.Recovered)
+            // (refused: its body is not judged as statements — s469 E-STMT-NO-EFFECT)
+            return mkE(dropNoEffect(rf.tp, df.diags.length), start, AExprK.Recovered)
         }
         // s469 — an `if` where a value stands (if-as-expression §17.6, the value form
         // §17.6.10, whose branch rule S469 rules: `{ e }`, or `lift` once the branch
@@ -1573,7 +1686,9 @@ ${
         if (t.v == "if") {
             const di: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "an `if` used as a value (§17.6, the value form §17.6.10) is not in the bootstrap yet — use a `match` on the condition (`match c { true :> a, false :> b }`), or compute the value in a function", t)
             const ri: RStmt = parseIf(di)
-            return mkE(ri.tp, start, AExprK.Recovered)
+            // (refused: its branches are value positions, §17.6.10 — not judged as
+            // statements, s469 E-STMT-NO-EFFECT)
+            return mkE(dropNoEffect(ri.tp, di.diags.length), start, AExprK.Recovered)
         }
         return mkE(adv(tp), start, AExprK.Name(t.v))
     }
@@ -1694,8 +1809,254 @@ ${
     // block's `}` and run on into what follows. (impl#1 keeps reading
     // newline-terminated statements — a carried divergence, dpa-073 F5.)
     fn parseTermStmt(tp: TP, d0: int) -> RStmt {
+        const h0: int = hardErrors(tp.diags)
+        const r: RStmt = parseTermStmtBare(tp, d0)
+        return { s: r.s, tp: stmtChecks(r.tp, r.s, d0, h0) }
+    }
+
+    // The statement and its terminator, without the no-effect judgment (an arm
+    // block's LAST statement, whose position — value or statement — is the
+    // enclosing form's: see parseArmBlock).
+    fn parseTermStmtBare(tp: TP, d0: int) -> RStmt {
         const r: RStmt = parseStmt(tp)
         return { s: r.s, tp: termAfter(r.tp, r.s, d0) }
+    }
+
+    // =========================================================================
+    // s469 — E-STMT-NO-EFFECT (§40.8, §7.2.2 rule 9; RULED S469 "Build both":
+    // "a pure expression statement on either line, including after a
+    // block-like `}`"). An EXPRESSION statement whose expression has no effect
+    // — no call (any call), no assignment, no `?{ … }` query (§40.8's list; the
+    // bootstrap has no `++` / `--` / `new` / `delete` / tagged template, each
+    // refused where it is written) — computes a value and drops it: `-1;`,
+    // `(x);`, `[1];`, a bare template, a bare literal or name, `x => y;` (a
+    // lambda's body is not run by the statement). Not judged here:
+    //   - a value position (§40.8 "Not expression statements"): an arm's
+    //     single-expression body, a `lift` / `return` / `fail` operand, an
+    //     arm block's LAST statement where the arm's value is used (only a
+    //     statement-position `match` / `!{}` makes it a statement — armTails);
+    //   - a handling form at the top of the statement (`x?`, `x !{ … }`, a
+    //     statement `match`): it handles a failure or chooses a branch, and its
+    //     arms are judged on their own (PA reading, S469 — see the progress note);
+    //   - a parse-error placeholder (its error was reported);
+    //   - after a hard error in the same block (the cascade guard, as termAfter);
+    //   - a statement beside a terminator error (E-STMT-MISSING-SEMICOLON /
+    //     E-STMT-SPLIT-CONTINUATION at its end or just before it): the two
+    //     halves may be one expression written across a missing `;`, and the
+    //     one root cause is reported once (`x⏎[1];`, `break⏎label;`, the
+    //     refused `return⏎expr;` — each keeps exactly its terminator report).
+    // Two no-effect statements on one line are one report (§40.8). The `~`
+    // exemption (§32.2) has nothing to apply to: the bootstrap has no `~`.
+    // =========================================================================
+    fn stmtChecks(tp: TP, s: AStmt, d0: int, h0: int) -> TP {
+        let t: TP = noEffectStmt(tp, s, d0)
+        if (hardErrors(t.diags) == h0) t = armTails(t, s, d0)
+        return t
+    }
+
+    fn noEffectStmt(tp: TP, s: AStmt, d0: int) -> TP {
+        const x: AExpr | not = stmtExpr(s)
+        if (x is not) return tp
+        if (exprHasEffect(x)) return tp
+        if (hardErrors(tp.diags) > d0) return tp
+        if (besideTermError(tp, s.span)) return tp
+        // two (or more) on one line, one after the other (`a; b;`) are one report
+        if (tp.diags.length > 0) {
+            const prev: Diag = tp.diags[tp.diags.length - 1]
+            if (prev.code == "E-STMT-NO-EFFECT" && lineAt(tp, prev.span.start) == lineAt(tp, s.span.start) && onlySemisBetween(tp, prev.span.end, s.span.start)) return tp
+        }
+        let shown: string = ""
+        // the statement's own span (a parenthesized `(a)` included), without its `;`
+        const i0: int = tokIndexAt(tp, s.span.start)
+        if (i0 >= 0) {
+            let i1: int = i0
+            let plain = true
+            while (i1 < tp.toks.length && tp.toks[i1].cls != TC.End && tp.toks[i1].end <= s.span.end) {
+                const c: TC = tp.toks[i1].cls
+                if (c == TC.TChunk || c == TC.TIStart || c == TC.TIEnd) plain = false
+                i1 = i1 + 1
+            }
+            const txt: string = tokText(tp, i0, i1)
+            if (plain && txt.length <= 40 && txt.indexOf("\n") < 0) shown = " `" + txt + "`"
+        }
+        const msg: string = "this statement has no effect —" + shown + " computes a value and discards it: it holds no call, assignment or query (§40.8, §7.2.2 rule 9). Remove it, or use the value — assign it, pass it to a call, return it, or show it in markup (`<span>" + interpOpen() + "…}</span>`)"
+        // (a template's first chunk starts after its opening backtick — the span takes the backtick in)
+        let from: int = s.span.start
+        if (i0 >= 0 && tp.toks[i0].cls == TC.TChunk && from > 0) from = from - 1
+        const d: Diag = newDiag("E-STMT-NO-EFFECT", msg, tp.file, mkSpan(from, s.span.end))
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
+    }
+
+    // A statement-position `match` / `!{}` (the whole expression statement): its
+    // block arms yield nothing (§18.5), so each block's LAST statement is a
+    // statement too — judged here (parseArmBlock left it alone). A `lift` there
+    // is analyze's refusal (it yields to nothing), not judged.
+    fn armTails(tp: TP, s: AStmt, d0: int) -> TP {
+        const x: AExpr | not = stmtExpr(s)
+        if (x is not) return tp
+        const arms: AArm[] = handledArms(x)
+        let t: TP = tp
+        for (const a of arms) {
+            const b: ABlock | not = armBlockOf(a)
+            if (b is given && !a.lifted && b.stmts.length > 0) {
+                const last: AStmt = b.stmts[b.stmts.length - 1]
+                t = stmtChecks(t, last, d0, hardErrors(t.diags))
+            }
+        }
+        return t
+    }
+
+    fn armBlockOf(a: AArm) -> ABlock | not {
+        const body: AArmBody = a.body
+        return match body {
+            .ArmBlock(b: b) :> b
+            .ArmExpr(e: e) :> not
+        }
+    }
+
+    // The arms of a `match` / `!{}` that IS the expression (none otherwise).
+    fn handledArms(e: AExpr) -> AArm[] {
+        const k: AExprK = e.k
+        const none: AArm[] = []
+        return match k {
+            .Handled(h: h) :> howArms(h.how)
+            .Recovered :> none
+            .Sql(q: q) :> none
+            .Template(quasis: qs) :> none
+            .Name(name: n) :> none
+            .At(name: n) :> none
+            .AtItem :> none
+            .Num(raw: r) :> none
+            .Str(v: s) :> none
+            .Bool(v: b) :> none
+            .NotLit :> none
+            .Variant(name: n) :> none
+            .Member(obj: o) :> none
+            .Call(callee: c) :> none
+            .Unary(op: o) :> none
+            .Binary(op: o) :> none
+            .Ternary(test: t) :> none
+            .Assign(target: t) :> none
+            .ArrayLit(elems: es) :> none
+            .ObjectLit(props: ps) :> none
+            .Spread(e: x) :> none
+            .Index(obj: o) :> none
+            .Lambda(params: ps) :> none
+        }
+    }
+
+    fn howArms(how: AHow) -> AArm[] {
+        const none: AArm[] = []
+        return match how {
+            .MatchOn(arms: a) :> a
+            .Guard(arms: a) :> a
+            .Propagate :> none
+        }
+    }
+
+    // The expression of an expression statement (not, for any other statement).
+    fn stmtExpr(s: AStmt) -> AExpr | not {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> e
+            .Local(name: n) :> not
+            .Return(e: e) :> not
+            .If(cond: c) :> not
+            .Given(name: n) :> not
+            .EffectStmt(w: w) :> not
+            .Defer(body: b) :> not
+            .Fail(f: x) :> not
+            .For(f: x) :> not
+            .Break(label: x) :> not
+            .Continue(label: x) :> not
+        }
+    }
+
+    // Does evaluating `e` do anything (§40.8)? A call, an assignment, a query —
+    // anywhere inside it except a lambda's body. A handling form (`?`, `!{}`,
+    // `match`) and a parse-error placeholder count as effects (see above).
+    fn exprHasEffect(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Call(callee: c) :> true
+            .Assign(target: t) :> true
+            .Sql(q: q) :> true
+            .Handled(h: h) :> true
+            .Recovered :> true
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Variant(name: n) :> false
+            .Lambda(params: ps) :> false
+            .Member(obj: o) :> exprHasEffect(o)
+            .Unary(op: o, e: x) :> exprHasEffect(x)
+            .Binary(op: o, l: l, r: r) :> exprHasEffect(l) || exprHasEffect(r)
+            .Ternary(test: c, yes: y, no: n) :> exprHasEffect(c) || exprHasEffect(y) || exprHasEffect(n)
+            .ArrayLit(elems: es) :> anyEffect(es)
+            .ObjectLit(props: ps) :> propsEffect(ps)
+            .Spread(e: x) :> exprHasEffect(x)
+            .Index(obj: o, idx: i) :> exprHasEffect(o) || exprHasEffect(i)
+            .Template(quasis: qs, slots: ss) :> anyEffect(ss)
+        }
+    }
+
+    fn anyEffect(es: AExpr[]) -> boolean {
+        for (const x of es) { if (exprHasEffect(x)) return true }
+        return false
+    }
+
+    fn propsEffect(ps: AProp[]) -> boolean {
+        for (const p of ps) { if (exprHasEffect(p.value)) return true }
+        return false
+    }
+
+    // Is there a terminator error (a missing `;`, a split continuation) at the
+    // end of the statement spanning `sp`, or at the end of the token before it?
+    fn besideTermError(tp: TP, sp: ASpan) -> boolean {
+        let before: int = -1
+        const i0: int = tokIndexAt(tp, sp.start)
+        if (i0 > 0) before = tp.toks[i0 - 1].end
+        for (const d of tp.diags) {
+            if (d.code == "E-STMT-MISSING-SEMICOLON" || d.code == "E-STMT-SPLIT-CONTINUATION") {
+                if (d.span.start == sp.end || d.span.start == before) return true
+            }
+        }
+        return false
+    }
+
+    // Are the tokens between offset `from` (a token's end) and the token that
+    // starts at `to` only `;`s?
+    fn onlySemisBetween(tp: TP, from: int, to: int) -> boolean {
+        let i: int = tokIndexAt(tp, to) - 1
+        while (i >= 0 && tp.toks[i].cls == TC.Punct && tk(tp.toks[i], ";")) { i = i - 1 }
+        return i >= 0 && tp.toks[i].end == from
+    }
+
+    // The index of the token that starts at `pos` (-1 when none does).
+    fn tokIndexAt(tp: TP, pos: int) -> int {
+        let i: int = tp.i
+        if (i >= tp.toks.length) i = tp.toks.length - 1
+        while (i >= 0) {
+            if (tp.toks[i].start == pos) return i
+            if (tp.toks[i].start < pos) return -1
+            i = i - 1
+        }
+        return -1
+    }
+
+    // The source line of offset `pos` (the line of the last token starting at or before it).
+    fn lineAt(tp: TP, pos: int) -> int {
+        let i: int = tp.i
+        if (i >= tp.toks.length) i = tp.toks.length - 1
+        while (i >= 0) {
+            if (tp.toks[i].start <= pos) return tp.toks[i].line
+            i = i - 1
+        }
+        return 0
     }
 
     // After statement `s` (the enclosing block's error count was `d0`): its `;`.
@@ -1716,12 +2077,19 @@ ${
             if (last.text.length <= 24 && last.text.indexOf("\n") < 0) after = " after `" + last.text + "`"
         }
         // (one report per place: a statement that already reported its own
-        // missing `;` here — the split `return` — is not reported twice)
+        // missing `;` here — the split `return`, or a split continuation
+        // (E-STMT-SPLIT-CONTINUATION, whose fix-it is this `;`) — is not
+        // reported twice)
         if (tp.diags.length > 0) {
             const prev: Diag = tp.diags[tp.diags.length - 1]
-            if (prev.code == "E-STMT-MISSING-SEMICOLON" && prev.span.start == at) return tp
+            if ((prev.code == "E-STMT-MISSING-SEMICOLON" || prev.code == "E-STMT-SPLIT-CONTINUATION") && prev.span.start == at) return tp
         }
-        const msg: string = "Expected `;` to end the statement — insert `;`" + after + ". A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3)."
+        let msg: string = "Expected `;` to end the statement — insert `;`" + after + ". A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3)."
+        // s469 (§7.2.2 rule 4): a `?` glued to what it follows is propagation,
+        // which ends the expression — name the conditional's spelling too, where
+        // the code goes on after it on its line (`a == 1? 2 : 3`, the conditional
+        // the S446 reading took it for)
+        msg = msg + gluedQHint(tp)
         const d: Diag = newDiag("E-STMT-MISSING-SEMICOLON", msg, tp.file, mkSpan(at, at))
         return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
     }
@@ -1795,7 +2163,9 @@ ${
         if (isWord(tp, "let") || isWord(tp, "const")) return parseLocal(tp)
         if (deferAhead(tp)) return parseDefer(tp)      // s451 (§19.16.1)
         if (failAhead(tp)) return parseFail(tp)        // s451 (Ue, §19.3.1)
-        if (isWord(tp, "transaction") && tk(peekAt(tp, 1), "{") && peekAt(tp, 1).line == t.line) {
+        if (isWord(tp, "fail")) return bareFail(tp)    // s469 (§7.2.2 rule 10: reserved here)
+        // s469 (§7.2.2 rule 10): `transaction` before `{`, on its line or the next
+        if (isWord(tp, "transaction") && tk(peekAt(tp, 1), "{")) {
             // s451 (Ue): §19.10.2 — refused, never read as a name + a block
             const dt: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "`transaction { … }` (§19.10) is not in the bootstrap — it arrives with unit U1e (transactions, which need the error model's `!` functions)", t)
             const rb: RBlock = parseBlock(adv(dt))
@@ -2514,6 +2884,9 @@ ${
             t = adv(t)
         } else if (nx.cls != TC.End && nx.line == kw.line && !tk(nx, ";") && !tk(nx, "}")) {
             t = diagAt(t, "E-PARSE-EXPECTED", "`" + kw.v + "` takes only a loop label — there is no `" + kw.v + " value` (§49.2.1, §49.6)", nx)
+            // s469: a keyword there (`break fail;`) is consumed with the report, never
+            // read again as a statement of its own (one report, not a second bare `fail`)
+            if (nx.cls == TC.Keyword) t = adv(t)
         }
         if (isBreak) return mkS(t, kw.start, AStmtK.Break(label))
         return mkS(t, kw.start, AStmtK.Continue(label))
@@ -2622,11 +2995,16 @@ ${
     //   defer-stmt    ::= 'defer' deferred-body
     //   deferred-body ::= statement | '{' statement* '}'
     // =========================================================================
+    //
+    // s469 (§7.2.2 rule 10, RULED "Keyword at statement start"): "regardless of
+    // line" — the next token may stand on the next line (a line break is
+    // whitespace): `defer⏎    close(h);` defers `close(h);`. The same-line
+    // condition quoted above is superseded; the token list is unchanged.
     fn deferAhead(tp: TP) -> boolean {
         const t: PTok = cur(tp)
         if (t.cls != TC.Ident || t.v != "defer") return false
         const nx: PTok = peekAt(tp, 1)
-        if (nx.cls == TC.End || nx.line != t.line) return false
+        if (nx.cls == TC.End) return false
         if (nx.cls == TC.Ident) return nx.v != "or" && nx.v != "and"
         if (nx.cls == TC.At) return true
         if (nx.cls == TC.Keyword) return !deferNonLead(nx.v)
@@ -2660,18 +3038,48 @@ ${
     }
 
     // s451 (Ue) — `fail` (§19.3.1 `fail-stmt ::= 'fail' enum-type? ('.' |
-    // '::') variant-name ('(' arg-list ')')?`). `fail` is not reserved: it
-    // opens a statement only at statement start, followed on the same line by
-    // something that is not an identifier's continuation (`fail.x`, `fail(…)`,
-    // `fail[i]` touch it; `fail = 1` assigns it).
+    // '::') variant-name ('(' arg-list ')')?`). s469 (§7.2.2 rule 10, RULED
+    // "Keyword at statement start"): at the start of a statement `fail` is the
+    // keyword whenever the next token can begin its operand — a variant, a
+    // name (the enum type), `.` or `::` (and, kept from s451, a keyword /
+    // string / number, for analyze's E-ERROR-009) — on its line or the next
+    // (a line break is whitespace: `fail⏎.NotFound;` is `fail .NotFound;`).
+    // The bare name `fail` is reserved in statement position: anything else
+    // after it is refused (parseStmt, `bareFail`), never read as a name.
     fn failAhead(tp: TP) -> boolean {
         if (!isWord(tp, "fail")) return false
-        const f: PTok = cur(tp)
         const nx: PTok = peekAt(tp, 1)
-        if (nx.cls == TC.End || nx.line != f.line) return false
-        if (nx.cls == TC.Variant || nx.cls == TC.Ident || nx.cls == TC.Keyword || nx.cls == TC.Str || nx.cls == TC.Num) return true
-        if (nx.cls != TC.Punct || touching(f, nx)) return false
-        return tk(nx, ".") || tk(nx, ":")
+        if (nx.cls == TC.End) return false
+        if (nx.cls == TC.Variant || nx.cls == TC.Ident) return true
+        // a keyword / string / number cannot begin a valid operand: read as one only
+        // on `fail`'s own line (s451's E-ERROR-009 path, unchanged) — on a later line
+        // it starts the next statement, and this `fail` has no operand (`bareFail`)
+        if (nx.cls == TC.Keyword || nx.cls == TC.Str || nx.cls == TC.Num) return nx.line == cur(tp).line
+        if (nx.cls != TC.Punct) return false
+        if (tk(nx, ".")) return true
+        const n2: PTok = peekAt(tp, 2)
+        return tk(nx, ":") && n2.cls == TC.Punct && tk(n2, ":") && touching(nx, n2)
+    }
+
+    // s469 (§7.2.2 rule 10): `fail` at statement start with no operand after it
+    // (`fail;`, `fail = 1`, `fail(x)`, `fail` before a `}`) — the name is
+    // reserved there, so this is a `fail` missing its variant: E-PARSE-EXPECTED
+    // (never the misleading E-SCOPE-001 "`fail` is not declared"). The rest of
+    // the statement is read past as one recovered expression (no cascade).
+    fn bareFail(tp: TP) -> RStmt {
+        const f: PTok = cur(tp)
+        const start: int = f.start
+        const nx: PTok = peekAt(tp, 1)
+        let found: string = "`" + nx.text + "`"
+        if (nx.cls == TC.End) found = "the end of the block"
+        const d: TP = diagAt(tp, "E-PARSE-EXPECTED", "expected the failure after `fail` (`fail .Variant;`, `fail ErrorType.Variant(…);`, §19.3.1), found " + found + " — at the start of a statement `fail` is the keyword, and the name `fail` is reserved there (§7.2.2 rule 10)", f)
+        if (nx.cls == TC.End || tk(nx, ";") || tk(nx, "}")) {
+            const re: RExpr = mkE(adv(d), start, AExprK.Recovered)
+            return mkS(re.tp, start, AStmtK.Eval(re.e))
+        }
+        const rv: RExpr = parseAssign(d)
+        const rr: RExpr = mkE(rv.tp, start, AExprK.Recovered)
+        return mkS(rr.tp, start, AStmtK.Eval(rr.e))
     }
 
     fn isNameTok(x: PTok) -> boolean { return x.cls == TC.Ident || x.cls == TC.Keyword }
@@ -2682,21 +3090,23 @@ ${
         const a: PTok = cur(t)
         const b: PTok = peekAt(t, 1)
         const c: PTok = peekAt(t, 2)
-        if (a.cls == TC.Variant) return failArgs(adv(t), start, "", a)
-        if (a.cls == TC.Punct && tk(a, ".") && isNameTok(b) && touching(a, b)) return failArgs(adv(adv(t)), start, "", b)
-        if (a.cls == TC.Punct && tk(a, ":") && tk(b, ":") && touching(a, b) && isNameTok(c) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, "", c)
-        if (a.cls == TC.Ident && b.cls == TC.Punct && tk(b, ".") && isNameTok(c) && touching(a, b) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, a.v, c)
+        // s469 (§7.2.2 rule 10): the operand was read from a later line (analyze notes it on E-ERROR-009)
+        const split: boolean = a.line != endLine(cur(tp))
+        if (a.cls == TC.Variant) return failArgs(adv(t), start, "", a, split)
+        if (a.cls == TC.Punct && tk(a, ".") && isNameTok(b) && touching(a, b)) return failArgs(adv(adv(t)), start, "", b, split)
+        if (a.cls == TC.Punct && tk(a, ":") && tk(b, ":") && touching(a, b) && isNameTok(c) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, "", c, split)
+        if (a.cls == TC.Ident && b.cls == TC.Punct && tk(b, ".") && isNameTok(c) && touching(a, b) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, a.v, c, split)
         if (a.cls == TC.Ident && tk(b, ":") && tk(c, ":") && touching(a, b) && touching(b, c)) {
             const d: PTok = peekAt(t, 3)
-            if (isNameTok(d) && touching(c, d)) return failArgs(adv(adv(adv(adv(t)))), start, a.v, d)
+            if (isNameTok(d) && touching(c, d)) return failArgs(adv(adv(adv(adv(t)))), start, a.v, d, split)
         }
         // not a variant (`fail "x"`): kept, so analyze reports E-ERROR-009
         const r: RExpr = parseAssign(t)
-        return mkS(r.tp, start, AStmtK.Fail({ enumName: "", variant: "", args: [], target: r.e }))
+        return mkS(r.tp, start, AStmtK.Fail({ enumName: "", variant: "", args: [], target: r.e, split: split }))
     }
 
     // After the variant name: its payload `(args)`, when written touching it.
-    fn failArgs(tp: TP, start: int, enumName: string, vtok: PTok) -> RStmt {
+    fn failArgs(tp: TP, start: int, enumName: string, vtok: PTok, split: boolean) -> RStmt {
         let t: TP = tp
         let args: AExpr[] = []
         const o: PTok = cur(t)
@@ -2705,7 +3115,7 @@ ${
             args = r.es
             t = r.tp
         }
-        return mkS(t, start, AStmtK.Fail({ enumName: enumName, variant: vtok.v, args: args, target: not }))
+        return mkS(t, start, AStmtK.Fail({ enumName: enumName, variant: vtok.v, args: args, target: not, split: split }))
     }
 
     // `given c = @h :> { … }` (§66.7.5) — and, when no `=` follows the first
@@ -3157,8 +3567,13 @@ ${
             if (!failable) ret = r2.t
             t = r2.tp
         }
+        const n0: int = t.diags.length
         const body: RBlock = parseBlock(t)
         t = body.tp
+        // s469 — a declared-return (non-`void`, non-`!`) function whose body ENDS in a
+        // pure expression: that is analyze's E-TYPE-043 ("ends in an expression it does
+        // not `return`", §17.6) — the primary report, so the tail is not also NO-EFFECT
+        if (ret is given && !voidType(ret)) t = dropTailNoEffect(t, body.b, n0)
         const f: AFn = { nid: t.nid, span: spanFrom(t, start), exported: exported, pure: pure,
                          name: nameTok.v, params: params, ret: ret, body: body.b, server: server, failable: failable, err: err }
         return mkItem(bumpId(t), start, AItemK.FnItem(f))
@@ -3338,7 +3753,12 @@ ${
 
     // ---- attribute values ---------------------------------------------------
     // At the char after `=`: "…" / '…' · ( expr ) · { stmts } · bare.
-    fn parseAttrValue(mp: MP) -> RValue {
+    // s469 — `handler`: the attribute is an event handler (`on…`), whose `{ … }`
+    // value is a statement list (§5.2.3) — judged for E-STMT-NO-EFFECT, except
+    // the one-name reference `{ f }` / `{ f; }` (§19.4.3 "Handler references":
+    // the event CALLS `f`). Any other attribute's `{ … }` is not a statement
+    // list (analyze refuses it, §5.2.4), so its statements are not judged.
+    fn parseAttrValue(mp: MP, handler: boolean) -> RValue {
         const c: string = chAt(mp, 0)
         if (c == "\"" || c == "'") return parseQuoted(mp, c)
         if (c == "(") {
@@ -3349,8 +3769,10 @@ ${
         }
         if (c == "{") {
             const tp2: TP = regionTP(mp, LexStop.Balanced)
+            const n0: int = tp2.diags.length
             const b: RBlock = parseBlock(tp2)
-            const t3: TP = expectRegionEnd(b.tp)
+            let t3: TP = expectRegionEnd(b.tp)
+            if (!handler || oneNameBlock(b.b)) t3 = dropNoEffect(t3, n0)
             return { v: AAttrValue.Braced(b.b), mp: backToMarkup(mp, t3) }
         }
         const tp3: TP = regionTP(mp, LexStop.BareValue)
@@ -3361,6 +3783,102 @@ ${
         const r3: RExpr = parseTernary(tp3)
         const t4: TP = expectRegionEnd(r3.tp)
         return { v: AAttrValue.Bare(r3.e), mp: backToMarkup(mp, t4) }
+    }
+
+    // An event-handler attribute name (§5.2 rule 1 — analyze's rule: `on…`,
+    // except the non-event words `one`, `online`, `onboarding`).
+    fn isHandlerName(n: string) -> boolean {
+        if (n == "one" || n == "online" || n == "onboarding") return false
+        return n.length > 2 && n.substring(0, 2) == "on"
+    }
+
+    // A braced handler body that is one bare name (`{ f }`, `{ f; }`) — a
+    // handler REFERENCE (analyze `blockReference`).
+    fn oneNameBlock(b: ABlock) -> boolean {
+        if (b.stmts.length != 1) return false
+        const x: AExpr | not = stmtExpr(b.stmts[0])
+        if (x is not) return false
+        const k: AExprK = x.k
+        return match k {
+            .Name(name: n) :> true
+            .Recovered :> false
+            .Sql(q: q) :> false
+            .Template(quasis: qs) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps) :> false
+            .Handled(h: h) :> false
+        }
+    }
+
+    // s469 — one report per refused statement: a parse-phase E-STMT-NO-EFFECT whose
+    // statement a LATER phase already refuses — E-BOOTSTRAP-UNSUPPORTED, or a scope
+    // error (E-SCOPE-*), reported inside its span — is dropped (the refusal is the
+    // root cause; `(x) => x;`, `bump;` naming a function, an undeclared `y;`).
+    // The front end's driver applies it to the parse diagnostics (slice-m2/lowered.js).
+    export fn withoutRefusedNoEffect(parsed: Diag[], later: Diag[]) -> Diag[] {
+        let out: Diag[] = []
+        for (const d of parsed) {
+            let keep = true
+            if (d.code == "E-STMT-NO-EFFECT") {
+                for (const a of later) {
+                    const refusal: boolean = a.code == "E-BOOTSTRAP-UNSUPPORTED" || a.code.substring(0, 8) == "E-SCOPE-"
+                    if (refusal && a.file == d.file && a.span.start >= d.span.start && a.span.end <= d.span.end) keep = false
+                }
+            }
+            if (keep) out = out.concat([d])
+        }
+        return out
+    }
+
+    fn voidType(t: AType) -> boolean {
+        const k: ATypeK = t.k
+        return match k {
+            .TName(name: n) :> n == "void"
+            .TSeq(elem: e) :> false
+            .TMaybe(inner: i) :> false
+        }
+    }
+
+    // `tp` without the E-STMT-NO-EFFECT report (made since `from`) on the LAST
+    // statement of block `b`.
+    fn dropTailNoEffect(tp: TP, b: ABlock, from: int) -> TP {
+        if (b.stmts.length == 0) return tp
+        const last: AStmt = b.stmts[b.stmts.length - 1]
+        let ds: Diag[] = []
+        let i: int = 0
+        for (const d of tp.diags) {
+            if (i < from || d.code != "E-STMT-NO-EFFECT" || d.span.end != last.span.end) ds = ds.concat([d])
+            i = i + 1
+        }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file }
+    }
+
+    // `tp` without the E-STMT-NO-EFFECT reports made since it had `from` diagnostics
+    // (a region whose statements are not a statement list: see the callers).
+    fn dropNoEffect(tp: TP, from: int) -> TP {
+        let ds: Diag[] = []
+        let i: int = 0
+        for (const d of tp.diags) {
+            if (i < from || d.code != "E-STMT-NO-EFFECT") ds = ds.concat([d])
+            i = i + 1
+        }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file }
     }
 
     fn parseQuoted(mp: MP, q: string) -> RValue {
@@ -3618,7 +4136,7 @@ ${
         let own: AAttrValue = AAttrValue.NoValue
         m = checkSpacedEq(m)
         if (chAt(m, 0) == "=") {
-            const rv: RValue = parseAttrValue(mAdv(m, 1))
+            const rv: RValue = parseAttrValue(mAdv(m, 1), false)
             own = rv.v
             m = rv.mp
         }
@@ -4259,7 +4777,7 @@ ${
             let dflt: AAttrValue = AAttrValue.NoValue
             m = checkSpacedEq(m)
             if (chAt(m, 0) == "=") {
-                const rv: RValue = parseAttrValue(mAdv(m, 1))
+                const rv: RValue = parseAttrValue(mAdv(m, 1), false)
                 dflt = rv.v
                 m = rv.mp
             }
@@ -4290,7 +4808,7 @@ ${
         }
         let v: AAttrValue = AAttrValue.NoValue
         if (chAt(m, 0) == "=") {
-            const rv2: RValue = parseAttrValue(mAdv(m, 1))
+            const rv2: RValue = parseAttrValue(mAdv(m, 1), isHandlerName(name))
             v = rv2.v
             m = rv2.mp
         } else if (name == "as" && isSpaceCh(chAt(m, 0))) {
@@ -5629,7 +6147,9 @@ ${
         // not fail the compile", so a parse warning neither untrusts a declaration
         // nor closes the diagnostics gate.
         let errs: ASpan[] = []
-        for (const d of r.mp.diags) { if (d.severity == Severity.Error) errs = errs.concat([d.span]) }
+        // (s469: not E-STMT-NO-EFFECT — a whole, well-formed statement: the body around
+        // it IS what was written, so analyze still judges it, e.g. E-TYPE-043)
+        for (const d of r.mp.diags) { if (d.severity == Severity.Error && d.code != "E-STMT-NO-EFFECT") errs = errs.concat([d.span]) }
         return { ast: { path: path, items: r.items, errs: errs, lines: lineStarts(src) }, diags: r.mp.diags, nextId: r.mp.nid }
     }
 

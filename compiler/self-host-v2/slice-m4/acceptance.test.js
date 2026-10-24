@@ -200,6 +200,14 @@ const STATUS = {
   "css/neg-unknown-ref": ["PASS", ["E-THEME-TOKEN-UNKNOWN"]],
   // `@media` is ruled CSS (§65.2.2); the bootstrap's reader does not carry block at-rules yet
   "css/media-unsupported": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // s469-boot-termination-rulings — §7.2.2 rules 4, 5, 9, 10 (S469 "statement termination follow-ups")
+  "termination/guard-next-line": ["PASS", []],
+  "termination/fail-next-line": ["PASS", []],
+  "termination/defer-next-line": ["PASS", []],
+  "termination/neg-no-effect-after-if": ["PASS", ["E-STMT-NO-EFFECT"]],
+  "termination/neg-split-call": ["PASS", ["E-STMT-SPLIT-CONTINUATION"]],
+  "termination/neg-bare-fail": ["PASS", ["E-PARSE-EXPECTED"]],
+  "termination/neg-spaced-propagate": ["PASS", ["E-PARSE-EXPR"]],
 };
 
 let verdicts;
@@ -228,7 +236,7 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
     });
   }
   test("the runtime halves executed where the case has one", () => {
-    for (const rel of ["arms/comma-guard", "arms/comma-match", "opener/union-maybe"]) {
+    for (const rel of ["arms/comma-guard", "arms/comma-match", "opener/union-maybe", "termination/guard-next-line", "termination/fail-next-line", "termination/defer-next-line"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });
