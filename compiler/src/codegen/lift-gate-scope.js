@@ -32,6 +32,7 @@ let _fileLevel = new Set();      // names declared at file level
 let _nested = new Set();         // names declared below any block's top level, file-wide
 let _blockTop = new WeakMap();   // markup node -> Set of its outermost block's top-level names
 let _inFn = new WeakSet();       // markup nodes built inside a function / lambda body
+let _blockOf = new WeakMap();    // markup node -> its outermost block's body (statement array)
 let _active = false;
 
 export function resetLiftGateScopes() {
@@ -39,6 +40,7 @@ export function resetLiftGateScopes() {
   _nested = new Set();
   _blockTop = new WeakMap();
   _inFn = new WeakSet();
+  _blockOf = new WeakMap();
   _active = false;
 }
 
@@ -149,11 +151,12 @@ function _topLevelDeclNames(stmt, out) {
  * Map every markup node under `n` to `topNames` (merging when a node is reached twice), and
  * record the ones built inside a function or lambda body (`inFn`).
  */
-function _mapMarkup(n, topNames, seen, inFn) {
+function _mapMarkup(n, topNames, seen, inFn, blockBody) {
   if (!n || typeof n !== "object" || seen.has(n)) return;
   seen.add(n);
-  if (Array.isArray(n)) { for (const c of n) _mapMarkup(c, topNames, seen, inFn); return; }
+  if (Array.isArray(n)) { for (const c of n) _mapMarkup(c, topNames, seen, inFn, blockBody); return; }
   if (n.kind === "markup") {
+    if (!_blockOf.has(n)) _blockOf.set(n, blockBody);
     const prev = _blockTop.get(n);
     if (prev && prev !== topNames) _blockTop.set(n, new Set([...prev, ...topNames]));
     else _blockTop.set(n, topNames);
@@ -163,7 +166,7 @@ function _mapMarkup(n, topNames, seen, inFn) {
   for (const k of Object.keys(n)) {
     if (k === "span") continue;
     const v = n[k];
-    if (v && typeof v === "object") _mapMarkup(v, topNames, seen, fn);
+    if (v && typeof v === "object") _mapMarkup(v, topNames, seen, fn, blockBody);
   }
 }
 
@@ -218,7 +221,7 @@ export function setLiftGateFileScopes(fileAST) {
       if (st.kind === "for-stmt" || st.kind === "for-expr" || st.kind === "lambda") _collectDeclared(st, _nested);
       if (st.kind === "function-decl") for (const prm of Array.isArray(st.params) ? st.params : []) _addBindName(_nested, prm);
     }
-    _mapMarkup(b, top, new WeakSet(), false);
+    _mapMarkup(b, top, new WeakSet(), false, body);
   }
 }
 
@@ -403,7 +406,7 @@ export function liftGateCellsAllNamed(val, rawText) {
     if (n == null || typeof n !== "object") return true;
     if (Array.isArray(n)) return n.every(ok);
     switch (n.kind) {
-      case "ident": case "sql-ref": case "input-state-ref": return true;
+      case "ident": return true;
       case "lit": return n.litType !== "template";
       case "unary": return ok(n.argument);
       case "binary": return ok(n.left) && ok(n.right);
@@ -421,6 +424,39 @@ export function liftGateCellsAllNamed(val, rawText) {
 /** The render names of a lifted condition at `node` (null = unknown). */
 export function liftGateReads(val, rawText, node) {
   return liftGateRenderNames(liftGateConditionNames(val, rawText), node);
+}
+
+/**
+ * True when one of the group's top-level `function` declarations may read one of the group's
+ * top-level bindings. Such a function is hoisted to chunk scope (§7.6), so it reads the binding at
+ * chunk scope — which only exists while the group runs ONCE there. Making the group a re-render
+ * effect moves the binding inside the effect and the call throws (known-gaps M1a). Over-reports: any
+ * identifier-shaped token of the function equal to a binding name counts.
+ */
+export function liftGroupFnReadsItsBindings(stmts) {
+  const body = Array.isArray(stmts) ? stmts : [];
+  return _blockFnReadsItsBindings(body);
+}
+
+/** liftGroupFnReadsItsBindings for the outermost block a gate's markup node is built in. */
+export function liftGateBlockFnReadsItsBindings(node) {
+  const body = node ? _blockOf.get(node) : undefined;
+  return body ? _blockFnReadsItsBindings(body) : false;
+}
+
+function _blockFnReadsItsBindings(body) {
+  const names = new Set();
+  for (const st of body) {
+    if (!st || typeof st !== "object" || st.kind === "function-decl") continue;
+    _topLevelDeclNames(st, names);
+  }
+  if (names.size === 0) return false;
+  for (const st of body) {
+    if (!st || st.kind !== "function-decl") continue;
+    const text = JSON.stringify(st, (k, v) => (k === "span" ? undefined : v));
+    for (const t of text.matchAll(/[A-Za-z_$][\w$]*/g)) if (names.has(t[0])) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------

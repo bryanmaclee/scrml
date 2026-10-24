@@ -40,7 +40,7 @@ function isCallableJsExprText(text) {
   }
 }
 import { detectPredicateShapeBind } from "./predicate-bind-detector.js";
-import { liftGateReads, liftForTreeGatePins, liftGateInFunction, liftGateCellsAllNamed } from "./lift-gate-scope.js";
+import { liftGateReads, liftForTreeGatePins, liftGateInFunction, liftGateCellsAllNamed, liftGateBlockFnReadsItsBindings } from "./lift-gate-scope.js";
 
 // ---------------------------------------------------------------------------
 // Bug 64 (S159) — Tier-0 per-item content reactivity on reconcile.
@@ -255,6 +255,7 @@ export function resetLiftModuleState() {
   _scrml_lift_live_stack.length = 0;
   _scrml_lift_request_ids_stack.length = 0;
   _liftOpenGateCount = 0;
+  _liftOpenGates = [];
   _liftGroupWindow = false;
 }
 
@@ -746,16 +747,29 @@ function _liftLandsOutsideRow() {
 // the group re-render. An open gate emitted with no window and outside an arm — in a
 // function body, emitted apart from any group — has no render to re-run it: refused.
 let _liftOpenGateCount = 0;
+let _liftOpenGates = [];
 let _liftGroupWindow = false;
 export function liftOpenGateCount() { return _liftOpenGateCount; }
 export function setLiftGroupWindow(on) { _liftGroupWindow = !!on; }
+/**
+ * Refuse every open gate emitted since `count` (liftOpenGateCount): the group that built them
+ * cannot be made to re-render (emit-reactive-wiring.ts — a function it declares reads its bindings
+ * at chunk scope).
+ */
+export function refuseLiftOpenGatesSince(count, why) {
+  for (const g of _liftOpenGates.slice(count)) _refuseLiftGate(g.attrName, g.node, g.reads, why);
+}
+/** True when the block an open gate emitted since `count` is built in declares a function that reads its bindings. */
+export function liftOpenGatesBlockFnHazard(count) {
+  return _liftOpenGates.slice(count).some((g) => liftGateBlockFnReadsItsBindings(g.node));
+}
 
 function _refuseLiftGate(attrName, node, reads, why) {
   const names = reads && reads.size > 0 ? [...reads].map((n) => `\`${n}\``).join(", ") : null;
   recordRefusedLowering(new CGError(
     "E-IMPL1-LIFT-GATE-UNTRACKED",
     `E-IMPL1-LIFT-GATE-UNTRACKED: impl#1 cannot keep this lifted \`${attrName}=\` fresh: ` +
-      (names ? `its condition reads ${names}, a value of the code that builds the element, ` : `impl#1 cannot read what its condition depends on, `) +
+      (names ? `its condition reads ${names}, computed by the code that builds the element, ` : `impl#1 cannot read what its condition depends on, `) +
       `and ${why}. A guard it cannot re-evaluate is refused rather than left open after it turns false (§17.1). ` +
       `Read cells, file-level bindings or the row's own item in the condition, or move the computation into a ` +
       `function of those.`,
@@ -840,7 +854,13 @@ function _emitLiftGate(lines, attrName, exprJS, rawText, node, val, apply, decla
     lines.push(`_scrml_mount_track(_scrml_effect(${updVar}, true));`);
     return;
   }
-  // OPEN: read in the render; the render re-runs on it.
+  // OPEN: read in the render; the render re-runs on it. A condition that names no cell and calls
+  // nothing (operators over locals and literals) can read nothing reactive: evaluated once, where
+  // the element is built, it is never stale, and nothing needs to re-run.
+  if (liftGateCellsAllNamed(val, rawText) && _liftGateRefs(rawText).length === 0 && !/\b_scrml_/.test(exprJS)) {
+    lines.push(`${updVar}();`);
+    return;
+  }
   if (liftGateInFunction(node) || (!_liftLiveActive() && !_liftGroupWindow)) {
     _refuseLiftGate(attrName, node, reads, "it is built where no render re-runs (a function body, or markup outside a `${}` block)");
     lines.pop();
@@ -848,6 +868,7 @@ function _emitLiftGate(lines, attrName, exprJS, rawText, node, val, apply, decla
     return;
   }
   _liftOpenGateCount++;
+  _liftOpenGates.push({ attrName, node, reads });
   lines.push(`${updVar}();`);
 }
 

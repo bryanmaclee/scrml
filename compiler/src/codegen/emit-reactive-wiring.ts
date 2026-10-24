@@ -6,7 +6,8 @@ import { emitStringFromTree } from "../expression-parser.ts";
 import { emitLogicNode, nodeListContainsTildeRef, beginEmitLogicFile, beginTopLevelLogicEmission } from "./emit-logic.js";
 import { withBoundaryCatchSite, boundaryChecksEmittedCount } from "./emit-expr.ts";
 import { wrapBoundaryRenderLogic, exprContainsBoundaryCheck, type BoundaryCatchInfo } from "./emit-boundary-logic.ts";
-import { pushLiftNonKeyed, popLiftNonKeyed, pushLiftLive, popLiftLive, liftArmDeclaredNames, checkLoopBinderWrites, liftOpenGateCount, setLiftGroupWindow } from "./emit-lift.js";
+import { pushLiftNonKeyed, popLiftNonKeyed, pushLiftLive, popLiftLive, liftArmDeclaredNames, checkLoopBinderWrites, liftOpenGateCount, setLiftGroupWindow, refuseLiftOpenGatesSince, liftOpenGatesBlockFnHazard } from "./emit-lift.js";
+import { liftGroupFnReadsItsBindings } from "./lift-gate-scope.js";
 import { pushIfChainCollector, popIfChainCollector, ifChainArmOpen, ifChainArmClose, type IfChainCollector } from "./emit-control-flow.ts";
 import { liftScopeDeclaredNames, seedOwnConsts, seededConstFallbackCount, withSeededConstsOff } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
@@ -1751,8 +1752,17 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     // emitLiftGate) is re-evaluated only by re-running the group: the group re-renders
     // through its outer effect even when its text names no cell (the cell may be read inside
     // a called function), and even when its only other reads are inside a keyed list.
-    _liftGroupForceRerender = liftOpenGateCount() !== groupOpenGatesBefore;
-    if (_liftGroupForceRerender) groupHasReactiveDeps = true;
+    // A group that would otherwise run ONCE at chunk scope cannot be made a re-render effect when a
+    // function it declares reads its bindings (the hoisted function would read them at chunk scope,
+    // where they no longer are — a ReferenceError): those gates are refused instead (fail closed).
+    if (liftOpenGateCount() !== groupOpenGatesBefore) {
+      if (!liftGroupWrapsOuterEffect(codes.join("\n"), groupHasReactiveDeps) && (liftGroupFnReadsItsBindings(stmts) || liftOpenGatesBlockFnHazard(groupOpenGatesBefore))) {
+        refuseLiftOpenGatesSince(groupOpenGatesBefore, "the `${}` block that builds it runs once: making it re-render would move its bindings away from a function it declares");
+      } else {
+        _liftGroupForceRerender = true;
+        groupHasReactiveDeps = true;
+      }
+    }
 
     if (codes.length === 0) continue;
     let combinedCode = codes.join("\n");

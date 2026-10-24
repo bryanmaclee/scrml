@@ -18,3 +18,7 @@ export declare function liftGateReads(val: unknown, rawText: string, node: unkno
 export declare function liftGateAttrRawText(val: unknown): string;
 /** True when a rendering for-loop's tree holds a lifted gate its keyed row could not re-read. */
 export declare function liftForTreeGatePins(forNode: unknown): boolean;
+/** True when a group's top-level function may read one of the group's top-level bindings. */
+export declare function liftGroupFnReadsItsBindings(stmts: unknown[]): boolean;
+/** liftGroupFnReadsItsBindings for the outermost block a gate's markup node is built in. */
+export declare function liftGateBlockFnReadsItsBindings(node: unknown): boolean;

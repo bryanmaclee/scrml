@@ -26810,9 +26810,11 @@ read tracking (`_scrml_effect` records every cell read at any call depth). The d
   lowered as the plain loop (`liftForTreeGatePins`, folded into `forLiftTreeHasImpureLoop`; a lift whose markup is
   still TEXT in the AST pins on any `if=` / `show=` in it).
 - **refused, E-IMPL1-LIFT-GATE-UNTRACKED** (new, provisional name, §34) — an open gate no render re-runs: markup
-  built in a function body, a lift escaping its row (a `while` in a row — there also a condition that calls a
-  function; one naming every cell it reads keeps main's unowned subscriptions), and the backstop for an open gate
-  the pin prediction left in a keyed row.
+  built in a function body, a run-once `${}` block that declares a function reading its own bindings (forcing the
+  re-render would move them out of the hoisted function's reach — M1a's ReferenceError), a lift escaping its row
+  (a `while` in a row — there also a condition that calls a function; one naming every cell it reads keeps main's
+  unowned subscriptions), and the backstop for an open gate the pin prediction left in a keyed row. An open
+  condition that names no cell and calls nothing can read nothing reactive and is evaluated once, unrefused.
 Measured: pack `n23` on main 57 FAIL of 152 (the 36 round-5 pins + 21 of the 28 shapes added here), branch 0
 (`n23/open gate in a function body` PASS-REFUSED); the 21 expected-failure browser cases of
 `lift-if-render-gate-s469.browser.test.js` pass, and `lift-gate-staleness-s469.browser.test.js` (47 revoke /

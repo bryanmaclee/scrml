@@ -178,6 +178,20 @@ describe("a gate no render can re-run is refused (fail closed)", () => {
     expect(app.errors).toContain("E-IMPL1-LIFT-GATE-UNTRACKED");
   });
 
+  test("…but one that names no cell and calls nothing can read nothing reactive: accepted, evaluated once", async () => {
+    const app = compileAndMount(PAGE(`\${ function pill(q: bool) { return <span><b class="g" if=(q)>x</b></span> } }\n\${ pill(true) }\n\${ pill(false) }`));
+    expect(app.errors).toEqual([]);
+    await flush();
+    expect(count("#out b.g")).toBe(1);
+  });
+
+  test("a run-once block whose function reads its bindings cannot be made to re-render: refused", () => {
+    // Making the block a re-render effect would move `mode` inside the effect, where the hoisted
+    // `matches` no longer sees it (a ReferenceError at run time) — refused at compile time instead.
+    const app = compileAndMount(`<n> = 1\n<div id="out">\${ let mode = 1\n function matches() { return mode == @n }\n let ok = false\n lift <b class="g" if=(ok || matches())>x</b>\n ok = true }</div>\n`);
+    expect(app.errors).toContain("E-IMPL1-LIFT-GATE-UNTRACKED");
+  });
+
   test("a lift escaping its row (a `while` in a row) whose condition calls a function: refused", () => {
     const app = compileAndMount(PAGE(`\${ for (x of @xs) { lift <i></i>\n let i = 0\n while (i < 1) { lift <b class="g" if=isAdmin()>x</b>\n i = i + 1 } } }`));
     expect(app.errors).toContain("E-IMPL1-LIFT-GATE-UNTRACKED");
