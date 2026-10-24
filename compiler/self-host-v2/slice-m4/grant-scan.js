@@ -240,6 +240,10 @@ export function grantReadsOutsideReader(src, libs = []) {
   const START = src.indexOf(READER_START);
   const END = src.indexOf(READER_END);
   if (START < 0 || END < START) return [{ line: 0, rule: "range", text: "the reader's range markers are missing" }];
+  // Exactly one of each: a second copy of a marker (a comment quoting it) would widen the exempt range.
+  if (src.indexOf(READER_START, START + 1) >= 0 || src.indexOf(READER_END, END + 1) >= 0) {
+    return [{ line: 0, rule: "range", text: "the reader's range markers must each appear exactly once" }];
+  }
   const toks = tokenize(src);
   const m = matchBrackets(toks);
   const inside = (k) => k.at > START && k.at < END;

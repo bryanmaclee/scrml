@@ -164,6 +164,10 @@ describe("no write path reads a grant outside the reader (analyze.scrml source; 
     expect(src.indexOf(READER_START)).toBeGreaterThan(0);
     expect(src.indexOf(READER_END)).toBeGreaterThan(src.indexOf(READER_START));
   });
+  test("a second copy of a range marker (a comment quoting it) fails the scan instead of widening the range", () => {
+    const early = src.replace("fn ", `// see ${READER_START}) below\n    fn `);
+    expect(scan(early).some((v) => v.rule === "range")).toBe(true);
+  });
   test("outside the reader, no GrantSet is named, held or read (no allow-list)", () => {
     expect(scan(src).map((v) => `${v.line} ${v.rule}: ${v.text}`)).toEqual([]);
   });
