@@ -10,8 +10,8 @@ ${
     }
     function go() {
         match risky(-1) {
-            .Ok(v) :> @seen = "ok"
-            .Boom(m) :> return
+            .Ok(v) :> @seen = "ok",
+            .Boom(m) :> return,
             .Other :> @seen = "other"
         }
         @after = "ran";

@@ -22,7 +22,7 @@ ${
 ${
     function handleEmpty() {
         let r = check("") !{
-            .Missing :> @phase = Phase.Missing
+            .Missing :> @phase = Phase.Missing,
             .Bad(why) :> @phase = Phase.Bad(why)
         };
     }

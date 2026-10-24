@@ -404,10 +404,17 @@ describe("M1 — a backslash before U+2028 / U+2029 is a line continuation", () 
 });
 
 describe("L1 — a template on the line after an expression reads two ways", () => {
-  test("refused by name (E-PARSE-TEMPLATE), never dropped as a second statement", () => {
+  // s469 (§7.2.2 rule 5, F4 (ii); the code RULED "Build both"): E-STMT-SPLIT-CONTINUATION, at the end of the line
+  // above (was E-PARSE-TEMPLATE). The template line is then read as its own statement, which lacks its `;`.
+  test("refused by name (E-STMT-SPLIT-CONTINUATION), never dropped as a second statement", () => {
     const src = "<program>\n    fn f(s: string, n: int) -> string {\n        const t: string = s\n        `x${n}`\n        return t;\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n";
-    expect(diag(src, "E-PARSE-TEMPLATE").message).toContain("line after an expression");
-    expect(codes(src)).toEqual(["E-PARSE-TEMPLATE"]);
+    const d = diag(src, "E-STMT-SPLIT-CONTINUATION");
+    expect(d.message).toContain("add `;` to the line above, or join the lines");
+    expect(d.span.start).toBe(src.indexOf("= s") + 3);
+    expect(d.span.end).toBe(d.span.start);
+    expect(codes(src)).toEqual(["E-STMT-MISSING-SEMICOLON", "E-STMT-SPLIT-CONTINUATION"]);   // (sorted)
+    // with both `;`s written there is nothing to refuse — and the template statement does nothing
+    expect(codes(src.replace("= s\n", "= s;\n").replace("`x${n}`\n", "`x${n}`;\n"))).toEqual(["E-STMT-NO-EFFECT"]);
   });
 });
 

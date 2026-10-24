@@ -7392,6 +7392,30 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // alternate arm is even read.
       if (markupRootClosed && depth === 0 && ternaryDepth === 0) break;
       if (stopAt && tok.text === stopAt && depth === 0) break;
+      // S469 (dpa-073 F2 / F5(1)) — the arm list is a comma list: at the ARM
+      // level of a `match { … }` body a depth-0 `,` is the arm SEPARATOR, so the
+      // arm (its body, or a raw arm kept as text) ends here; the body loop
+      // (`_parseRecursiveBodyInner`) consumes the `,`. scrml has no comma
+      // operator (§40.8), so a depth-0 `,` never belongs to the body; a `,`
+      // inside `( … )` / `[ … ]` / `{ … }` / markup is the body's own (§18.2).
+      if (
+        depth === 0 && angleDepth === 0 &&
+        tok.kind === "PUNCT" && tok.text === "," &&
+        _matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth
+      ) break;
+      // S469 r5 — at the same arm level, a `|` that LEADS an arm (`| 1 :> …`, a pattern
+      // chain and an arm arrow after it) ends the arm body before it, on this line or the
+      // next: it is never a bitwise `|` (an arrow follows the operand). The body loop refuses
+      // the leading `|` (E-PARSE-001, §18.2). Not while this collection is still an arm HEAD
+      // (`.A | .B :>`) — there the `|` is the head's own alternation.
+      if (
+        !_inArmHead && parts.length > 0 &&
+        depth === 0 && angleDepth === 0 &&
+        tok.kind === "PUNCT" && tok.text === "|" &&
+        !(peek(1) && peek(1).kind === "PUNCT" && peek(1).text === "|") &&
+        _matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth &&
+        armPatternChainArrowOffset(peek, 1) >= 0
+      ) break;
       // BLOCK_REF at depth 0 is a statement boundary — the child block
       // (sql, error-effect, meta) should be its own AST node, not part of a bare-expr.
       // Exception: when the BLOCK_REF is inside a tag body (tagNesting > 0), the
@@ -9717,6 +9741,53 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   let _multiScrutineeArity = 0;
   // The `_nestedBlockDepth` of the innermost `match { … }` body being parsed (0 = none) — its ARM level.
   let _matchArmBodyDepth = 0;
+  // S469 r6 — the innermost `match` body being parsed is a VALUE match (`const v = match …`), not a
+  // statement match. Saved/restored with `_matchArmBodyDepth`.
+  let _matchArmValueCtx = false;
+
+  /**
+   * S469 r6 (g-impl1-stmt-match-arm-bare-handled-call-dropped-s469) — at a match's arm level, does
+   * the arm starting at `tokens[i]` have a BARE handled-call body, `<head> :> call(…) !{ … }` with
+   * no braces? Returns `{ bodyAt, handlerAt }` (peek offsets of the body's first token and of the
+   * `!{}` BLOCK_REF that ends it), or null. The body ends at the handler: the next token is the
+   * list's `}`, a `,` separator, or on a later line.
+   */
+  function bareHandledArmBody() {
+    const t0 = peek();
+    if (!t0 || !t0.span) return null;
+    let k = 0;
+    let arrow = null;
+    for (; k < 80; k++) {
+      const t = peek(k);
+      if (!t || t.kind === "EOF" || !t.span || t.span.line !== t0.span.line) return null;
+      arrow = matchArrowGlyphAt(peek, k);
+      if (arrow) break;
+      if (t.kind === "BLOCK_REF" || (t.kind === "PUNCT" && (t.text === "{" || t.text === "}" || t.text === ";"))) return null;
+    }
+    if (!arrow) return null;
+    const bodyAt = k + arrow.len;
+    const first = peek(bodyAt);
+    if (!first || first.kind === "EOF" || (first.kind === "PUNCT" && first.text === "{")) return null;
+    let depth = 0;
+    let prev = null;
+    for (let j = bodyAt; j < bodyAt + 400; j++) {
+      const t = peek(j);
+      if (!t || t.kind === "EOF") return null;
+      if (depth === 0 && prev && prev.span && t.span && t.span.line > prev.span.line) return null;
+      if (depth === 0 && t.kind === "PUNCT" && (t.text === "," || t.text === "}" || t.text === ";")) return null;
+      if (depth === 0 && t.kind === "BLOCK_REF" && t.block && t.block.type === "error-effect") {
+        if (j === bodyAt) return null;
+        const n = peek(j + 1);
+        const ends = !n || n.kind === "EOF" || (n.kind === "PUNCT" && (n.text === "}" || n.text === ",")) ||
+          (n.span && t.span && n.span.line > t.span.line);
+        return ends ? { bodyAt, handlerAt: j } : null;
+      }
+      if (t.kind === "PUNCT" && (t.text === "(" || t.text === "[" || t.text === "{")) depth++;
+      else if (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) { if (depth === 0) return null; depth--; }
+      prev = t;
+    }
+    return null;
+  }
 
   /**
    * S469 r2 (#1450) — is the match-arm brace body that starts at `tokens[i]` (the `{`
@@ -9914,6 +9985,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   function _parseRecursiveBodyInner() {
     const stmts = [];
     const _swallowed = swallowedMarkupTracker(); // S464 Q24
+    // S469 (dpa-073 F2 / F5(1)) — the arm level of a `match` body reads `,` as the
+    // arm separator. `_armSepOpen`: the last thing read at this level was a `,`
+    // (or nothing yet), so another `,` has no arm before it.
+    const _atArmLevel = _matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth;
+    let _armSepOpen = true;
     while (true) {
       _swallowed.step();
       const tok = peek();
@@ -9942,6 +10018,27 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // that then failed recognition and rendered nothing (SILENT-WRONG).
       if (tok.text.trim() === "" && tok.kind !== "EOF" && tok.kind !== "STRING") { consume(); continue; }
 
+      // S469 (dpa-073 F2 / F5(1)) — the arm separator `,` (§18.2: a `,` between
+      // every pair of arms, the trailing one optional). impl#1 ACCEPTS it and
+      // keeps reading a newline-separated list (a carried divergence; it never
+      // enforces commas), so a list may mix the two. A `,` with no arm before it
+      // (a leading `,`, or `,,`) separates nothing: E-PARSE-001 (fail closed),
+      // consumed so the rest of the list still parses.
+      if (_atArmLevel && tok.kind === "PUNCT" && tok.text === ",") {
+        if (_armSepOpen) {
+          errors.push(new TABError(
+            "E-PARSE-001",
+            "E-PARSE-001: a `,` with no match arm before it. A `match` arm list puts one `,` " +
+            "after each arm, the trailing one optional (`{ .A :> 1, .B :> 2, }`) — a leading " +
+            "`,` or a doubled `,,` separates nothing. Remove this `,` (§18.2).",
+            tokenSpan(tok, filePath),
+          ));
+        }
+        consume();
+        _armSepOpen = true;
+        continue;
+      }
+
       // §18.19 — an optional leading `|` arm separator before a whole-product
       // wildcard (`| _` / `| else`) or a product arm (`| ( p, p )`). The
       // collectExpr value-arm boundary (above) now breaks BEFORE such a `|`,
@@ -9956,11 +10053,57 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           (n1.kind === "PUNCT" && n1.text === "(" && scanProductPatternArm(peek, 1, _multiScrutineeArity >= 2 ? 1 : 2) != null)
         );
         if (startsArm) { consume(); continue; }
+        // S469 r5 (g-impl1-legacy-pipe-literal-match-arms-s469) — any other `|` that leads
+        // an arm (`| 1 :> …`, `| "a" :> …`, `| .V :> …`) is the `!{}` handler's legacy
+        // spelling; §18.2's `match` grammar never admitted it (§19.4.5). It used to be read
+        // past — a statement match silently ran its LAST arm for every subject. Refuse it,
+        // consume the `|`, and let the arm parse so the rest of the list still reads.
+        if (_atArmLevel && armPatternChainArrowOffset(peek, 1) >= 0) {
+          errors.push(new TABError(
+            "E-PARSE-001",
+            "E-PARSE-001: a `match` arm takes no leading `|` (§18.2) — write the arm as `<pattern> :> body`. " +
+            "The `|`-led arm is the legacy spelling of a `!{}` handler arm only (§19.4.5); in a `match` it " +
+            "separates nothing (arms are separated by `,`, or by a line break).",
+            tokenSpan(tok, filePath),
+          ));
+          consume();
+          continue;
+        }
       }
 
-      if (rejectDanglingElse(stmts[stmts.length - 1])) continue;
+      if (rejectDanglingElse(stmts[stmts.length - 1])) { _armSepOpen = false; continue; }
+
+      // S469 r6 (g-impl1-stmt-match-arm-bare-handled-call-dropped-s469) — an arm whose body is a
+      // BARE handled call, `1 :> risky(2) !{ … }`. The statement loop below wrapped the whole ARM in
+      // a guarded-expr (the `!{}` read as the handler of the arm), which no match lowering reads: the
+      // arm was silently DROPPED. In a statement match the arm is the braced form exactly — braces are
+      // inserted around the body (zero-width tokens), so it parses, checks and lowers as
+      // `1 :> { risky(2) !{ … } }`. A value match has no braced equivalent (a block arm yields with
+      // `lift`): refused, E-PARSE-001.
+      if (_atArmLevel) {
+        const bh = bareHandledArmBody();
+        if (bh && !_matchArmValueCtx) {
+          const at = tokens[i + bh.bodyAt];
+          const hEnd = tokens[i + bh.handlerAt];
+          const zw = (ref, text, atEnd) => {
+            const off = atEnd ? (ref.span.end ?? ref.span.start) : ref.span.start;
+            return { kind: "PUNCT", text, span: { ...ref.span, start: off, end: off } };
+          };
+          tokens.splice(i + bh.handlerAt + 1, 0, zw(hEnd, "}", true));
+          tokens.splice(i + bh.bodyAt, 0, zw(at, "{", false));
+        } else if (bh) {
+          errors.push(new TABError(
+            "E-PARSE-001",
+            "E-PARSE-001: this value `match` arm's body is a handled call (`f() !{ … }`) written without braces, " +
+            "which impl#1 cannot read as the arm's value. Bind the handled call first " +
+            "(`const r = f() !{ … }`) and use `r` (§18.5, §19.4.3).",
+            tokenSpan(tok, filePath),
+          ));
+        }
+      }
 
       const node = parseOneStatement();
+      _armSepOpen = false;
       if (node) {
         // GUARDED-EXPR: check if next token is a BLOCK_REF to error-effect — if so, wrap
         const nextTok = peek();
@@ -15526,11 +15669,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   // scrutinee count for the duration (so a single-position `( pat )` arm is
   // recognized as a wrong-arity product arm → E-MATCH-SCRUTINEE-ARITY). Assumes
   // the next token is the body `{`. Restores the prior arity (nested matches).
-  function parseMatchBodyWithArity(headerText, isMatch = true) {
+  function parseMatchBodyWithArity(headerText, isMatch = true, valueCtx = false) {
     if (peek().text !== "{") return [];
     consume(); // consume `{`
     const saved = _multiScrutineeArity;
     const savedArmDepth = _matchArmBodyDepth;
+    const savedValueCtx = _matchArmValueCtx;
+    _matchArmValueCtx = !!valueCtx;
     const mh = detectMultiScrutineeHead(headerText);
     _multiScrutineeArity = mh ? mh.length : 0;
     // The arm level of THIS match body: parseRecursiveBody increments
@@ -15539,7 +15684,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     _matchArmBodyDepth = isMatch ? _nestedBlockDepth + 1 : 0;
     let body;
     try { body = parseRecursiveBody(); }
-    finally { _multiScrutineeArity = saved; _matchArmBodyDepth = savedArmDepth; }
+    finally { _multiScrutineeArity = saved; _matchArmBodyDepth = savedArmDepth; _matchArmValueCtx = savedValueCtx; }
     if (isMatch) {
       reportOrphanArmLines(body);
       markPropagateArms(body);
@@ -15630,7 +15775,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     if (isPartial) consume(); // consume 'partial'
     const startTok = consume(); // consume 'match'
     const { expr: header } = collectExpr("{");
-    const body = parseMatchBodyWithArity(header);
+    const body = parseMatchBodyWithArity(header, true, true);
     // errarm-refail (§19.5.2 / §19.3): recognize a bare re-`fail` VALUE-arm
     // (`::X(reason) :> fail AErr::Wrapped(reason)`). The inline-arm `result` is
     // captured as a string where `fail` is a leading ident, so it emitted
@@ -20326,6 +20471,9 @@ function _errArmGluedToPrev(tokens, i) {
   const pe = prev && prev.span && typeof prev.span.end === "number" ? prev.span.end : null;
   const cs = cur && cur.span && typeof cur.span.start === "number" ? cur.span.start : null;
   if (pe === null || cs === null || pe !== cs) return false;
+  // S469 — a head glued to the `,` arm separator (`.A :> 1,.B :> 2`) starts an arm;
+  // nothing continues across a `,`.
+  if (prev.kind === "PUNCT" && prev.text === ",") return false;
   // Glued only matters where it makes `cur` a continuation: `.`/`::` after any
   // token (member / qualified access), or a name right after a `.`/`::`.
   return _errArmIsSep(cur) || _errArmIsSep(prev);
@@ -20491,9 +20639,35 @@ function parseErrorTokens(tokens, filePath, errors) {
   };
   const isStrayArrowAt = (k, depth) =>
     depth === 0 && tokens[k] && tokens[k].kind === "OPERATOR" && tokens[k].text === ":>";
+  // S469 (dpa-073 F2 / F5(1)) — a `!{}` arm list is a comma list, the same arm
+  // list as a `match` (§18.2, §19.4.5): a depth-0 `,` ends an arm's handler and
+  // separates it from the next; the trailing one is optional. impl#1 keeps
+  // reading newline-separated arms too (it never enforces commas). `_armSepOpen`:
+  // nothing but a `,` (or nothing at all) since the last arm, so another `,`
+  // separates nothing — E-PARSE-001 (fail closed).
+  const isArmSepComma = (k, depth) =>
+    depth === 0 && tokens[k] && tokens[k].kind === "PUNCT" && tokens[k].text === ",";
+  let _armSepOpen = true;
 
   while (i < tokens.length && tokens[i].kind !== "EOF") {
     const tok = tokens[i];
+
+    if (isArmSepComma(i, 0)) {
+      if (_armSepOpen && errors) {
+        errors.push(new TABError(
+          "E-PARSE-001",
+          "E-PARSE-001: a `,` with no `!{}` handler arm before it. An arm list puts one `,` after each arm, " +
+          "the trailing one optional (`!{ .A(m) :> f(m), .B :> g(), }`) — a leading `,` or a doubled `,,` " +
+          "separates nothing. Remove this `,` (§18.2, §19.4.5).",
+          tokenSpan(tok, filePath),
+        ));
+      }
+      _armSepOpen = true;
+      _strayRunOpen = false;
+      i++;
+      continue;
+    }
+    if (tok.kind !== "COMMENT") _armSepOpen = false;
 
     // Arm starts with `|`, OR (S452) is a pipe-less §18.2 arm head. A
     // pipe-less arm is parsed by the SAME path as its `|`-prefixed spelling —
@@ -20676,6 +20850,8 @@ function parseErrorTokens(tokens, filePath, errors) {
       let _armDepth = 0; // S452 — bracket depth within this arm's handler
       while (i < tokens.length && tokens[i].kind !== "EOF") {
         if (tokens[i].kind === "PUNCT" && tokens[i].text === "|") break;
+        // S469 — the `,` arm separator ends the handler (the outer loop consumes it).
+        if (isArmSepComma(i, _armDepth)) break;
         // S452 — stop at a pipe-less §18.2 arm head at the arm-list's level.
         if (_armDepth === 0 && isPipelessErrorArmStart(tokens, i)) break;
         if (isStrayArrowAt(i, _armDepth)) reportStrayArrow(tokens[i]);
@@ -20767,6 +20943,8 @@ function parseErrorTokens(tokens, filePath, errors) {
       while (i < tokens.length && tokens[i].kind !== "EOF") {
         if (tokens[i].kind === "PUNCT" && tokens[i].text === "|") break;
         if (tokens[i].kind === "OPERATOR" && tokens[i].text === "::") break;
+        // S469 — the `,` arm separator ends the handler (the outer loop consumes it).
+        if (isArmSepComma(i, _armDepth2)) break;
         // S452 r3 — stop at a pipe-less §18.2 arm head at the arm-list's level
         // (as the `|` and short-form paths do); a following `else :>` /
         // `.Gone :>` was absorbed into this arm's body.
@@ -20828,6 +21006,8 @@ function parseErrorTokens(tokens, filePath, errors) {
       const handlerPartStarts = []; // parallel: source offset of each part (S468)
       let _armDepth3 = 0; // S452 — bracket depth within this arm's handler
       while (i < tokens.length && tokens[i].kind !== "EOF") {
+        // S469 — the `,` arm separator ends the handler (the outer loop consumes it).
+        if (isArmSepComma(i, _armDepth3)) break;
         // S452 — stop at a pipe-less §18.2 arm head at the arm-list's level.
         if (_armDepth3 === 0 && isPipelessErrorArmStart(tokens, i)) break;
         if (isStrayArrowAt(i, _armDepth3)) reportStrayArrow(tokens[i]);

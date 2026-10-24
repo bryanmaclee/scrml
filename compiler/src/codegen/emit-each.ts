@@ -54,6 +54,7 @@ import { isRcdataElement } from "../html-elements.js";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { CGError } from "./errors.ts";
 import { recordRefusedLowering, refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite, refuseUnloweredElseChain } from "./refused-lowering-errors.ts";
+import { ENGINE_IN_ROW_CODE, ENGINE_IN_ROW_REFUSED, ENGINE_HOST_SPAN, engineInEachRowMessage, engineInEachEmptyMessage } from "../engine-in-each-row.ts";
 import {
   classifyInterpolatedAttrSink,
   interpolatedAttrSinkMessage,
@@ -2223,6 +2224,27 @@ function renderTemplateChildToJs(
     return;
   }
 
+  // §51.0.K (S439 ruling #10) — an `<engine>` in a row is refused, never dropped.
+  // SYM PASS 13.B refuses every engine in a row the TAB parsed (and marks it); this
+  // backstop reaches the rows only codegen parses (an `<each>` in a `<match>` arm),
+  // which before it emitted the comment below and rendered no engine at exit 0.
+  // gap g-engine-inside-each-row-renders-nothing.
+  // An engine reached while rendering an `<empty>` fallback (and not refused by SYM as
+  // in a row) is in a NON-row position the renderer still cannot lower: E-CG-003.
+  if (child.kind === "engine-decl") {
+    const inEmpty = _emptyFallbackDepth > 0;
+    if ((child as any)[ENGINE_IN_ROW_REFUSED] !== true) {
+      recordRefusedLowering(new CGError(
+        inEmpty ? "E-CG-003" : ENGINE_IN_ROW_CODE,
+        inEmpty ? engineInEachEmptyMessage((child as any).governedType) : engineInEachRowMessage((child as any).governedType),
+        (child as any)[ENGINE_HOST_SPAN] ?? (child as any).span ?? { start: 0, end: 0 },
+      ), child);
+      (child as any)[ENGINE_IN_ROW_REFUSED] = true;
+    }
+    lines.push(`${indent}// each: <engine> refused (${inEmpty ? "E-CG-003" : ENGINE_IN_ROW_CODE})`);
+    return;
+  }
+
   // Other node kinds — defer to a runtime-error hint so adopters see the
   // missing case (rather than silent skip).
   lines.push(`${indent}// each: unhandled template child kind="${(child as any).kind}"`);
@@ -3305,10 +3327,18 @@ function renderEmptyChildToJs(
   // <empty> body is plain-markup free-text; no `@.` substitution needed
   // (empty-state can reference outer @cells but those use bare `@cell`
   // syntax, not contextual sigils).
-  for (const grand of children) {
-    renderTemplateChildToJs(grand, "/* no iter scope in <empty> */", "", fragmentVar, lines, "  ", engineCtx);
+  _emptyFallbackDepth++;
+  try {
+    for (const grand of children) {
+      renderTemplateChildToJs(grand, "/* no iter scope in <empty> */", "", fragmentVar, lines, "  ", engineCtx);
+    }
+  } finally {
+    _emptyFallbackDepth--;
   }
 }
+
+/** >0 while `renderEmptyChildToJs` renders an `<empty>` body (the engine backstop reads it). */
+let _emptyFallbackDepth = 0;
 
 // ---------------------------------------------------------------------------
 // Iter var counter — local to a single emit

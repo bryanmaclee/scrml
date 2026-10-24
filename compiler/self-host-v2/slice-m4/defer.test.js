@@ -165,7 +165,9 @@ describe("the static codes (§19.16.1–§19.16.3)", () => {
   });
 
   test("E-DEFER-AMBIGUOUS-LEAD — `defer [` while a binding named `defer` is visible", () => {
-    expect(codes(P(`    function go(defer: int) {\n        defer [1, 2];\n    }`, []))).toEqual(["E-DEFER-AMBIGUOUS-LEAD"]);
+    expect(codes(P(`    function go(defer: int) {\n        defer [1, 2];\n    }`, []))).toEqual(["E-STMT-NO-EFFECT", "E-DEFER-AMBIGUOUS-LEAD"]);
+    // (s469: the deferred `[1, 2];` is a statement with no effect in either reading — E-STMT-NO-EFFECT, §7.2.2
+    // rule 9 — beside the ambiguity analyze names)
   });
 
   test("§19.16.4 — a deferred body in a pure `fn` meets every prohibition the same statement would at the exit", () => {
@@ -195,10 +197,16 @@ describe("`defer` is a contextual keyword (§19.16.1) — everywhere else an ide
     clean(P(`    function defer(x: int) {\n        @n = x;\n    }\n    function go() {\n        defer(3);\n    }`, ["go"]));
   });
 
-  test("the deferred statement must start on the SAME line — a lone `defer` is a read (here: undeclared)", () => {
-    expect(codes(P(`    function go() {\n        defer\n        @n = 1;\n    }`, ["go"]))).toEqual(["E-STMT-MISSING-SEMICOLON", "E-SCOPE-001"]);
-    // (s469: dpa-073 F1 would read `defer⏎@n = 1;` as one defer statement; the bootstrap still decides the
-    // contextual keyword by line (route-to-PA R8) — the lone `defer` stays a read, and the missing `;`
-    // after it is reported, so the split form fails closed rather than meaning two things)
+  // s469 (§7.2.2 rule 10, RULED "Keyword at statement start" — answers dpa-073 R8): `defer` is the keyword at
+  // statement start whenever the next token can begin its operand, REGARDLESS OF LINE. (Before: the deferred
+  // statement had to start on the `defer` line, and a lone `defer⏎@n = 1;` was a read — E-STMT-MISSING-SEMICOLON
+  // + E-SCOPE-001, fail closed.)
+  test("s469 rule 10 — the deferred statement may start on the NEXT line: `defer⏎@n = 1;` is one defer statement", async () => {
+    const split = await runProgram(`    function go() {\n        @log = @log + "a";\n        defer\n            @log = @log + "1";\n        @log = @log + "b";\n    }`, ["go"], ["go"]);
+    expect(split.log).toBe("ab1");
+    const braced = await runProgram(`    function go() {\n        defer\n        {\n            @log = @log + "2";\n        }\n        @log = @log + "c";\n    }`, ["go"], ["go"]);
+    expect(braced.log).toBe("c2");
+    // a token that cannot begin a deferred statement still leaves `defer` a name (here: undeclared)
+    expect(codes(P(`    function go() {\n        defer\n        ;\n    }`, ["go"]))).toEqual(["E-SCOPE-001"]);   // (the refusal is the one report — no E-STMT-NO-EFFECT beside it)
   });
 });

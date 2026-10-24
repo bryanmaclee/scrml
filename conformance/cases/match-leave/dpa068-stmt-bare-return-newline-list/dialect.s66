@@ -1,0 +1,1 @@
+{"exclude": "impl#1-only guard (s469-impl1-arm-commas): the arm list is written NEWLINE-separated on purpose, to keep impl#1's carried newline-list reading covered after the conformance comma migration; the bootstrap enforces the comma list (dpa-073 F5(4)), so it is not graded there. The comma-list case is match-leave/dpa068-stmt-bare-return."}

@@ -695,7 +695,8 @@ describe("fix round r3 — fail-closed tx scan, every-path yield, no echoed conn
   });
 
   test("r3 LOW-C: a `fn` tail expression is NOT a value in the bootstrap (no implicit tail return — it prints `\"a\";`), so it stays E-ERROR-012", () => {
-    expect(codes(go(`    fn h() { "a"; }\n    function go() {\n        @log = load("x") !{ _ :> h() };\n    }`))).toEqual(["E-ERROR-012"]);
+    // s469 (§7.2.2 rule 9, RULED "Build both"): the dropped `"a";` is also E-STMT-NO-EFFECT (a statement that does nothing)
+    expect(codes(go(`    fn h() { "a"; }\n    function go() {\n        @log = load("x") !{ _ :> h() };\n    }`))).toEqual(["E-STMT-NO-EFFECT", "E-ERROR-012"]);
   });
 
   test("r3 LOW-B: no db diagnostic echoes the value — every credential shape stays out", () => {

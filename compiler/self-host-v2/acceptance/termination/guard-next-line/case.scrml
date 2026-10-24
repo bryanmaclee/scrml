@@ -1,0 +1,17 @@
+// §7.2.2 rule 4 (S469 "Attach to the line above"): `!{ … }` cannot start a statement, so on the next line it handles the expression above.
+<program>
+    type LoadError:enum = { NotFound(id: string), Timeout }
+    let <out:string=""/>
+    function load(id: string)! LoadError {
+        if (id == "x") fail LoadError.NotFound(id);
+        return id;
+    }
+    function go() {
+        @out = load("x")
+            !{ .NotFound(m) :> "nf:" + m, .Timeout :> "to" };
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@out}</p>
+    </main>
+</program>

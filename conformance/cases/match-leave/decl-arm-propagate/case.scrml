@@ -11,15 +11,15 @@ ${
     }
     function viaQ(k: K, n: number)! E {
         const r = match k {
-            .A :> risky(n)?
-            .B :> 0
+            .A :> risky(n)?,
+            .B :> 0,
             .C :> 1
         };
         @out = "r=" + r;
     }
     function go() {
         viaQ(K.A, -1) !{
-            .Boom(m) :> @seen = "boom:" + m
+            .Boom(m) :> @seen = "boom:" + m,
             .Other :> @seen = "other"
         };
     }

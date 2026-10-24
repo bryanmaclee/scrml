@@ -1,0 +1,14 @@
+// §7.2.2 rule 10 (S469 "Keyword at statement start"): the bare name `fail` is reserved in statement position — a `fail` with no variant after it is refused there, never read as an undeclared name.
+<program>
+    type LoadError:enum = { NotFound(id: string), Timeout }
+    let <out:string=""/>
+    function load(id: string)! LoadError {
+        if (id == "x") { fail; }
+        return id;
+    }
+    function go() { @out = load("x") !{ .NotFound(m) :> "nf:" + m, .Timeout :> "to" }; }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@out}</p>
+    </main>
+</program>

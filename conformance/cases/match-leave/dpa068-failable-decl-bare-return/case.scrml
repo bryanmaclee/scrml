@@ -10,8 +10,8 @@ ${
     }
     function calc(n: number) -> string {
         const v = match risky(n) {
-            .Ok(x) :> "ok"
-            .Boom(m) :> return "early:" + m
+            .Ok(x) :> "ok",
+            .Boom(m) :> return "early:" + m,
             .Other :> "other"
         };
         return "got:" + v;

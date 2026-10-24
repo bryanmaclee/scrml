@@ -1,13 +1,13 @@
 /**
  * S144 Cluster D — match-codegen diagnostics
  *
- * Bug Y  — E-MATCH-ARM-SEPARATOR: comma-separated match arms are invalid
- *          (§18.2: arms are juxtaposed, newline-separated; the only arm
- *          separator is the `=>`/`->` arrow). A trailing `,` after an arm body
- *          is rejected with a clean source-anchored error that REPLACES the
- *          generic E-CODEGEN-INVALID-LOGIC the comma would otherwise surface from
- *          codegen. Covers BOTH the markup `${match}` path and the
- *          `let/const = match` decl path.
+ * Bug Y  — S144 refused a `,` between match arms (E-MATCH-ARM-SEPARATOR, its
+ *          old meaning). S469 (dpa-073 F2 / F5(1)) made the arm list a comma
+ *          list and impl#1 ACCEPTS the `,` (it keeps reading newline-separated
+ *          arms too). §1–§3 now pin that the comma list compiles clean and to
+ *          the SAME client JS as the newline list, on BOTH the markup `${match}`
+ *          path and the `let/const = match` decl path. (Exhaustive arm-comma
+ *          coverage: match-arm-commas-s469.test.js.)
  *
  * Bug AA — W-MATCH-VALUE-UNUSED: a plain `function` (no `fn`, no return type)
  *          whose LAST statement is a value-producing `match` written WITHOUT a
@@ -16,9 +16,9 @@
  *          discard. Does NOT change return semantics.
  *
  * Coverage:
- *   §1  Bug Y decl  — `let r = match {...,}` → E-MATCH-ARM-SEPARATOR (not INVALID-JS)
- *   §2  Bug Y markup — `${match {...,}}`     → E-MATCH-ARM-SEPARATOR (not INVALID-JS)
- *   §3  Bug Y — one error per comma arm
+ *   §1  Bug Y decl  — `let r = match {...,}` compiles clean (S469)
+ *   §2  Bug Y markup — `${match {...,}}`     compiles clean (S469)
+ *   §3  Bug Y — the comma list emits the same JS as the newline list (S469)
  *   §4  Bug Y regression — newline arms (decl) compile clean
  *   §5  Bug Y regression — newline arms (markup) compile clean
  *   §6  Bug Y — inner result comma (fmt(1, 2)) does NOT false-positive
@@ -44,8 +44,10 @@ let tmpCounter = 0;
  * the emitted client JS (when present). `validate-emit` is OFF here (the API
  * default); Bug Y is caught by the typer regardless of that gate.
  */
-function compile(source) {
-  const tmpDir = resolve(tmpRoot, `case-${++tmpCounter}-${Date.now()}`);
+function compile(source, dirName = null) {
+  // `dirName` pins the source path (the emit carries a path-derived hash), so two
+  // compiles can be compared byte for byte.
+  const tmpDir = resolve(tmpRoot, dirName ?? `case-${++tmpCounter}-${Date.now()}`);
   const tmpInput = resolve(tmpDir, "app.scrml");
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
@@ -73,11 +75,11 @@ function countCode(codes, code) {
 }
 
 // ---------------------------------------------------------------------------
-// Bug Y — E-MATCH-ARM-SEPARATOR
+// Bug Y — comma match arms (S469 meaning)
 // ---------------------------------------------------------------------------
 
-describe("Bug Y — E-MATCH-ARM-SEPARATOR (comma match arms)", () => {
-  test("§1 decl form: `let r = match {...,}` fires E-MATCH-ARM-SEPARATOR, not E-CODEGEN-INVALID-LOGIC", () => {
+describe("Bug Y — comma match arms (S469: accepted, dpa-073 F2 / F5(1))", () => {
+  test("§1 decl form: `let r = match {...,}` compiles clean (no E-MATCH-ARM-SEPARATOR, no E-CODEGEN-INVALID-LOGIC)", () => {
     const { codes } = compile(`<program>
 \${
   type S:enum = { Loading, Ready, Done }
@@ -86,11 +88,12 @@ describe("Bug Y — E-MATCH-ARM-SEPARATOR (comma match arms)", () => {
 }
 <p>\${r}</p>
 </program>`);
-    expect(codes).toContain("E-MATCH-ARM-SEPARATOR");
+    expect(codes).not.toContain("E-MATCH-ARM-SEPARATOR");
     expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
+    expect(codes).not.toContain("E-PARSE-001");
   });
 
-  test("§2 markup form: `${match {...,}}` fires E-MATCH-ARM-SEPARATOR, not E-CODEGEN-INVALID-LOGIC", () => {
+  test("§2 markup form: `${match {...,}}` compiles clean (no E-MATCH-ARM-SEPARATOR, no E-CODEGEN-INVALID-LOGIC)", () => {
     const { codes } = compile(`<program>
 \${
   type S:enum = { Loading, Ready, Done }
@@ -98,21 +101,30 @@ describe("Bug Y — E-MATCH-ARM-SEPARATOR (comma match arms)", () => {
 }
 <p>\${match @state { .Loading => "a", .Ready => "b", else => "c" }}</p>
 </program>`);
-    expect(codes).toContain("E-MATCH-ARM-SEPARATOR");
+    expect(codes).not.toContain("E-MATCH-ARM-SEPARATOR");
     expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
+    expect(codes).not.toContain("E-PARSE-001");
   });
 
-  test("§3 one E-MATCH-ARM-SEPARATOR per comma-terminated arm", () => {
-    const { codes } = compile(`<program>
+  test("§3 the comma list (trailing `,` included) emits the same client JS as the newline list", () => {
+    const head = `<program>
 \${
   type S:enum = { Loading, Ready, Done }
   @state: S = S.Loading
-  let r = match @state { .Loading => "a", .Ready => "b", else => "c" }
+  let r = match @state {`;
+    const tail = `}
 }
 <p>\${r}</p>
-</program>`);
-    // Two arms carry a trailing comma (.Loading, .Ready); else has none.
-    expect(countCode(codes, "E-MATCH-ARM-SEPARATOR")).toBe(2);
+</program>`;
+    const commas = compile(head + ` .Loading => "a", .Ready => "b", else => "c", ` + tail, "same-path");
+    const lines = compile(head + `
+    .Loading => "a"
+    .Ready => "b"
+    else => "c"
+  ` + tail, "same-path");
+    expect(commas.codes).toEqual(lines.codes);
+    expect(commas.clientJs.length).toBeGreaterThan(0);
+    expect(commas.clientJs).toBe(lines.clientJs);
   });
 
   test("§4 regression: newline arms (decl) compile clean", () => {

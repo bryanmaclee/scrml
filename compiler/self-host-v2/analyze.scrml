@@ -9811,6 +9811,13 @@ ${
     // `fail` naming a foreign enum entirely, and a `fail` target that is not an
     // enum variant"; the bare form resolves against the declared type; a valid
     // variant with the wrong payload count is E-TYPE-082 ("never double-fire").
+    // s469 (§7.2.2 rule 10): `fail` is a keyword at statement start regardless of line,
+    // so its operand may have been read from the next line (`fail⏎h(1);`) — say so.
+    fn failSplitNote(f: AFail) -> string {
+        if (f.split) return " — note: the operand of `fail` was read from the next line (`fail` is a keyword at statement start, §7.2.2 rule 10); if this line was meant to stand on its own, give `fail` its variant on its own line"
+        return ""
+    }
+
     fn resolveFail(env: Env, s: AStmt, f: AFail, st0: AS) -> AS {
         let st: AS = resolveExprs(env, f.args, not, st0)
         const t: AExpr | not = f.target
@@ -9818,21 +9825,21 @@ ${
         if (!env.fx.failable) {
             let where: string = "outside any function (a handler, an effect or markup)"
             if (env.fx.inFn) where = "in function '" + env.fx.fnName + "', which is not declared as failable"
-            return addDiag(st, env.file, s.span, "E-ERROR-001", "'fail' used " + where + ". Add '!' to the function signature: 'function " + env.fx.fnName + "(...)! ErrorType' (§19.3.3)")
+            return addDiag(st, env.file, s.span, "E-ERROR-001", "'fail' used " + where + ". Add '!' to the function signature: 'function " + env.fx.fnName + "(...)! ErrorType' (§19.3.3)" + failSplitNote(f))
         }
         const err: Sym | not = env.fx.err
         if (err is not) return st                          // E-ERROR-011 reported
         const vs: VariantDef[] = enumVariantsOf(env.g, err)
         const valid: string = variantNamesOf(vs).join(", ")
-        if (t is given) return addDiag(st, env.file, s.span, "E-ERROR-009", "'fail' names something that is not a variant of the declared error type '" + err.hint + "' for function '" + env.fx.fnName + "'. Valid variants: " + valid + " (§19.3.3)")
+        if (t is given) return addDiag(st, env.file, s.span, "E-ERROR-009", "'fail' names something that is not a variant of the declared error type '" + err.hint + "' for function '" + env.fx.fnName + "'. Valid variants: " + valid + " (§19.3.3)" + failSplitNote(f))
         if (f.enumName != "") {
             const named: Sym | not = typeNamedHere(env, f.enumName)
             let same = false
             if (named is given) same = named.id == err.id
-            if (!same) return addDiag(st, env.file, s.span, "E-ERROR-009", "'fail' names variant '" + f.enumName + "." + f.variant + "', which is not a valid variant of the declared error type '" + err.hint + "' for function '" + env.fx.fnName + "' — '" + f.enumName + "' is a different type. Valid variants: " + valid + " (§19.3.3)")
+            if (!same) return addDiag(st, env.file, s.span, "E-ERROR-009", "'fail' names variant '" + f.enumName + "." + f.variant + "', which is not a valid variant of the declared error type '" + err.hint + "' for function '" + env.fx.fnName + "' — '" + f.enumName + "' is a different type. Valid variants: " + valid + " (§19.3.3)" + failSplitNote(f))
         }
         const idx: int = variantIndex(env.g.types, err, f.variant)
-        if (idx < 0) return addDiag(st, env.file, s.span, "E-ERROR-009", "'fail' names variant '" + f.variant + "' which is not a valid variant of the declared error type '" + err.hint + "' for function '" + env.fx.fnName + "'. Valid variants: " + valid + " (§19.3.3)")
+        if (idx < 0) return addDiag(st, env.file, s.span, "E-ERROR-009", "'fail' names variant '" + f.variant + "' which is not a valid variant of the declared error type '" + err.hint + "' for function '" + env.fx.fnName + "'. Valid variants: " + valid + " (§19.3.3)" + failSplitNote(f))
         const n: int = vs[idx].fields.length
         if (n != f.args.length) return addDiag(st, env.file, s.span, "E-TYPE-082", "`" + err.hint + "." + f.variant + "` carries " + n + " payload value(s) but this `fail` supplies " + f.args.length + " — one argument per declared field, in order (§19.3.3, §14.4)")
         return addFail(st, s.nid, FailFact.FFail(err, idx))
