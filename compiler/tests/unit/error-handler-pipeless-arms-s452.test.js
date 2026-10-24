@@ -70,7 +70,9 @@ function runGo(clientJs, n) {
   const end = clientJs.lastIndexOf("})();");
   const body = clientJs.slice(start, end);
   // eslint-disable-next-line no-new-func
-  return new Function(`const _scrml_g = globalThis;\n${body}\nreturn ${m[1]}(${JSON.stringify(n)});`)();
+  // `_scrml_build_admit` shadowed as absent (§20.8.2 step 0 gate): no runtime here, and a
+  // runtime an earlier test file left on globalThis must not refuse the chunk.
+  return new Function("_scrml_build_admit", `const _scrml_g = globalThis;\n${body}\nreturn ${m[1]}(${JSON.stringify(n)});`)(undefined);
 }
 
 /** Each case: [name, pipe-less handler lines, piped handler lines, prefix, suffix]. */

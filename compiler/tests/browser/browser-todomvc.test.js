@@ -116,6 +116,10 @@ function loadTodoMVC() {
     window._scrml_reactive_subscribe = _scrml_reactive_subscribe;
     // The host-global alias the client code reads every host global through (S457 2a).
     if (typeof _scrml_g !== "undefined") window._scrml_g = _scrml_g;
+    // §20.8.2 step 0: the client chunk admits its build first, and its delegated
+    // listeners check build ownership (_scrml_build_owns) on every event.
+    window._scrml_build_admit = _scrml_build_admit;
+    window._scrml_build_owns = _scrml_build_owns;
     window._scrml_lift = _scrml_lift;
     if (typeof _scrml_reconcile_list !== "undefined") window._scrml_reconcile_list = _scrml_reconcile_list;
     if (typeof _scrml_deep_reactive !== "undefined") window._scrml_deep_reactive = _scrml_deep_reactive;

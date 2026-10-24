@@ -153,6 +153,11 @@ async function composeFirstPaint(serverJs, html, dbRows) {
  * assert the seed actually SAVED the /__serverLoad round trip).
  */
 function runUnderStrictCsp(documentHtml, externalScripts) {
+  // A page's `<html data-scrml-build>` stamp (§20.8.2 step 0) reaches the ROOT through this
+  // innerHTML (an `<html>` start tag in body mode merges only MISSING attributes into the root),
+  // so the previous program's stamp would survive and claim this one's document. A real page
+  // never re-parses into a live document; reset the root the way a fresh load would have it.
+  document.documentElement.removeAttribute("data-scrml-build");
   document.documentElement.innerHTML = documentHtml;
   try { delete window.__scrml_ssr_state; } catch (_) { window.__scrml_ssr_state = undefined; }
 

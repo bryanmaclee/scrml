@@ -38,6 +38,7 @@
 // @ts-ignore — acorn ships its own types but the compiler imports it untyped
 // (matching codegen/validate-emit.ts). We only touch `.tokenizer`.
 import * as acorn from "acorn";
+import { foldBuildIdentity } from "./codegen/build-identity.ts";
 
 // Printable, collision-improbable sentinels — NEVER a control byte (keeps this
 // module plain-text + the emit-corpus / fingerprint strings greppable). A scrml
@@ -783,7 +784,10 @@ function buildComparableCorpus(
     // D2 — neutralize the source-basename stem baked into emitted content BEFORE
     // canonicalization (in JS it lives inside string literals canonicalizeJs
     // preserves verbatim, so it must be rewritten first).
-    const deBased = canonicalizeChunkNamespaceToken(canonicalizeSourceBasename(a.content, stem));
+    // §20.8.2 step 0 — the build identity is a hash of the client code that is
+    // compared anyway (and of the path-derived token): it carries no independent
+    // signal, and would make every difference anywhere read as a difference everywhere.
+    const deBased = canonicalizeChunkNamespaceToken(canonicalizeSourceBasename(foldBuildIdentity(a.content), stem));
     const body = JS_KINDS.has(a.kind) ? canonicalizeJs(deBased, renameMap) : deBased;
     return a.kind + CORPUS_KIND_SEP + body;
   });
