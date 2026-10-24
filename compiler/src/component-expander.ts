@@ -300,6 +300,18 @@ function collectBodyEngines(reparsedAst: FileAST): BodyEngine[] {
       return;
     }
     const node = n as Record<string, unknown>;
+    // Form 1b — a structural engine-decl that `collectHoisted` did not hoist: it walks
+    // only `markup.children`, so an engine under an `if=`/`else` chain branch
+    // (`if-chain.branches[].element` / `elseBranch`) or in an `<each>` row
+    // (`templateChildren`) never reached `machineDecls` and the body compiled clean
+    // (g-engine-in-if-else-chain-branch-renders-nothing-s469). De-duped by span against Form 1.
+    if (node.kind === "engine-decl") {
+      push({
+        varName: typeof node.varName === "string" ? node.varName : undefined,
+        governedType: typeof node.governedType === "string" ? node.governedType : undefined,
+        span: (node.span as Span) ?? undefined,
+      });
+    }
     if (node.kind === "markup" && node.tag === "engine") {
       push({
         governedType: engineGovernedTypeFromAttrs(node.attrs),

@@ -245,16 +245,22 @@ ${extra ?? ""}</program>
       withTmp(source, (file, dir) =>
         promoteEngineOnFile(file, null, { dryRun: true }, dir));
 
-    test("finds the site under an if=/else chain (was status:no-sites)", () => {
+    // The walk FINDS the site under an if=/else chain (it was status:no-sites). The
+    // rewrite is then refused, fail closed: impl#1 cannot lower an `<engine>` under a
+    // chain branch (E-CG-003, g-engine-in-if-else-chain-branch-renders-nothing-s469 —
+    // before S469 the promoted engine compiled clean and rendered NOTHING, so promote
+    // turned a rendering `<match>` into a blank branch). The file is left untouched.
+    test("finds the site under an if=/else chain (was status:no-sites) — and refuses the rewrite impl#1 cannot lower", () => {
       const res = promoteEngine(ifElse);
       expect(res.status).not.toBe("no-sites");
-      expect(res.count).toBe(1);
+      expect(res.status).toBe("failed");
+      expect(res.reason).toContain("rewritten source failed to compile — file left untouched");
+      expect(res.reason).toContain("E-CG-003");
     });
 
-    test("PARITY: if=/else matches lone-if= and plain (the oracles)", () => {
+    test("PARITY: lone-if= and plain promote (the oracles)", () => {
       expect(promoteEngine(plain).count).toBe(1);
       expect(promoteEngine(loneIf).count).toBe(1);
-      expect(promoteEngine(ifElse).count).toBe(1);
     });
   });
 });

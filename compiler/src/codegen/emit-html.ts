@@ -12,7 +12,10 @@ import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement, isHtmlElement, isStandardHtmlRenderElement } from "../html-elements.js";
 import { isAuthorMainTag } from "../landmark-tag.ts";
 import { CGError } from "./errors.ts";
-import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite } from "./refused-lowering-errors.ts";
+import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite, recordRefusedLowering } from "./refused-lowering-errors.ts";
+import {
+  collectEnginesUnderIfChainBranch, engineInIfChainMessage, ENGINE_IN_IF_CHAIN_REFUSED, ENGINE_HOST_SPAN,
+} from "../engine-in-each-row.ts";
 import { ifGateConditionFields } from "./if-gate-condition.ts";
 import { isRawContentElement, encodeRawContentBody } from "../raw-content-encode.ts";
 import * as acorn from "acorn";
@@ -939,6 +942,31 @@ function refuseConditionalInDispatchedArm(
     ));
   }
   return true;
+}
+
+/**
+ * Refuse every `<engine>` under a branch of a §17.1.1 `if-chain` node (E-CG-003; see
+ * `engineInIfChainMessage`). Each engine is reported once — marked, and recorded through
+ * the run-wide refused-lowering sink, which de-duplicates a re-lowering of the same node.
+ */
+function refuseEnginesUnderIfChain(chain: any): void {
+  const branches: Array<{ element: any; form: string }> = [];
+  for (let i = 0; i < (chain.branches?.length ?? 0); i++) {
+    const el = chain.branches[i]?.element;
+    if (el) branches.push({ element: el, form: i === 0 ? "if=" : "else-if=" });
+  }
+  if (chain.elseBranch) branches.push({ element: chain.elseBranch, form: "else" });
+  for (const { element, form } of branches) {
+    for (const engine of collectEnginesUnderIfChainBranch(element)) {
+      if (engine[ENGINE_IN_IF_CHAIN_REFUSED] === true) continue;
+      engine[ENGINE_IN_IF_CHAIN_REFUSED] = true;
+      recordRefusedLowering(new CGError(
+        "E-CG-003",
+        engineInIfChainMessage(engine.governedType, form),
+        engine[ENGINE_HOST_SPAN] ?? engine.span ?? element.span ?? chain.span ?? { file: "", start: 0, end: 0, line: 0, col: 0 },
+      ), engine);
+    }
+  }
 }
 
 // §35 Input state type elements that emit no HTML — handled by emit-reactive-wiring.js
@@ -1891,6 +1919,11 @@ export function generateHtml(
     if (node.kind === "if-chain") {
       // TEMPORARY (E-IF-IN-DISPATCHED-ARM) — remove with the guard.
       if (refuseConditionalInDispatchedArm(registry, node, "if/else-if/else chain", errors)) return;
+      // gap g-engine-in-if-else-chain-branch-renders-nothing-s469 — an `<engine>` anywhere
+      // under a chain branch is refused (E-CG-003), never dropped: the branch `<template>`s
+      // below carry no engine lowering. Decided from the AST (every engine-decl under every
+      // branch element); emission continues so sibling diagnostics still surface.
+      refuseEnginesUnderIfChain(node);
       const chainId = genVar("if_chain");
       parts.push(`<div data-scrml-if-chain="${chainId}">`);
 
