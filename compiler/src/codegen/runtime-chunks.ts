@@ -32,7 +32,8 @@
  *                 _scrml_validator_fire (§55.1, C7) — inlined verbatim from
  *                 compiler/src/runtime-validators.js
  *   derived       _scrml_derived_declare/subscribe/get, flush
- *   lift          _scrml_lift
+ *   lift          _scrml_lift, _scrml_lift_target
+ *   ifrow         _scrml_ifrow_apply (§17.1 if= element/comment swap; S469)
  *   scope         _scrml_cleanup_registry, _scrml_register_cleanup, _scrml_destroy_scope,
  *                 _scrml_active_mount_scope (the if= mount scope FLAG stays here —
  *                 _scrml_region_track reads it on every page; the mount FUNCTIONS
@@ -149,6 +150,7 @@ export const RUNTIME_CHUNK_ORDER = [
   'validators',
   'derived',
   'lift',
+  'ifrow',
   'scope',
   'owner',
   'ifmount',
@@ -285,6 +287,9 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   reset:          "§6.8 reset+default runtime (chunk: 'reset')",
   validators:     "§55.1 Validator predicate runtime catalog (chunk: 'validators')",
   derived:        '§6.6 Derived reactive runtime',
+  // S469 — `_scrml_ifrow_apply`, the §17.1 if= element⇄comment swap (<each> rows, lifted
+  // markup). Shipped by the emitted-helper index / the post-emit gate when a call is emitted.
+  ifrow:          "§17.1 if= render-gate swap (chunk: 'ifrow')",
   scope:          '§6.7.3 Scope-aware cleanup registry',
   // §17.1 if= mount/unmount runtime — `_scrml_create_scope`,
   // `_scrml_find_if_marker`, `_scrml_mount_template`, `_scrml_unmount_scope`,

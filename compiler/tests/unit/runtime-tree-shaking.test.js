@@ -267,7 +267,7 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 45 chunks", () => {
+  test("RUNTIME_CHUNK_ORDER has 46 chunks", () => {
     // 45 chunks after S469: 'owner' (the §6.7.2 owner-scope tree — every <each> row and
     // dispatched arm owns its effects) ADDED, pulled by 'reconciliation' and by a
     // dispatcher's `_scrml_arm_scope` call; the always-included 'scope' chunk is unchanged.
@@ -369,6 +369,7 @@ describe("runtime size", () => {
     // units set.
     //
     // 44 post-S462 md phase 1: 'stdlib-md' (the scrml:md reader's client chunk).
+    //   46 chunks post-S469: 'ifrow' — `_scrml_ifrow_apply`, the §17.1 if= swap, in its own chunk.
     //
     // Prior milestones:
     //   19 chunks post-A-4.3: 'prefetch' chunk for §40.9.7 tier-1 idle-
@@ -376,6 +377,6 @@ describe("runtime size", () => {
     //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
     //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(45);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(46);
   });
 });

@@ -12,8 +12,10 @@
  * This gate covers the TIER-0 for-lift path. (The Tier-1 <each> per-row `if=` shares
  * the staleness but uses a structural append-gate — a separate design decision.)
  *
- * Executed-DOM; visibility measured via inline style.display (the toggle target), not
- * textContent.
+ * Executed-DOM. Since S469 every lifted `if=` is a render gate (§17.1, the
+ * element⇄comment swap), so a row that is "not visible" is NOT IN THE DOM; `visible`
+ * counts the rows present AND (belt and braces, for the pre-S469 display toggle) not
+ * `display: none`.
  */
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
@@ -55,7 +57,7 @@ describe("gap: lift per-item if= directive reactive on REPLACE", () => {
     document.dispatchEvent(new Event("DOMContentLoaded"));
     return {
       set: (n, v) => globalThis.__scrml_set__(n, v),
-      // visible = rows whose inline display is not "none"
+      // visible = rows in the DOM (§17.1 render gate) whose inline display is not "none"
       visible: () => [...document.querySelectorAll("#root .row")].filter((n) => n.style.display !== "none").map((n) => n.textContent.trim()),
     };
   }
