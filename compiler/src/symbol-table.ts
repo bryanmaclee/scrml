@@ -5744,6 +5744,7 @@ function stringLiteralValueOf(arg: any): string | null {
 // create a local binding — referencing it inside this module threw a runtime
 // `ReferenceError: autoDeriveEngineVarName is not defined` (g-derived-engine-autoderive-crash).
 import { autoDeriveEngineVarName } from "./engine-varname";
+import { ENGINE_IN_ROW_CODE, ENGINE_IN_ROW_REFUSED, engineInEachRowMessage } from "./engine-in-each-row.ts";
 export { autoDeriveEngineVarName };
 
 /**
@@ -9199,6 +9200,8 @@ function fireComponentEngineScope(
       : (typeof engineDecl.governedType === "string" && engineDecl.governedType.length > 0)
         ? `\`<engine for=${engineDecl.governedType} ...>\``
         : "`<engine ...>`";
+  // One diagnostic per engine (§51.0.K): codegen's engine-in-row backstops skip a marked engine.
+  engineDecl[ENGINE_IN_ROW_REFUSED] = true;
   errors.push({
     code: "E-COMPONENT-ENGINE-SCOPE",
     message:
@@ -9210,6 +9213,123 @@ function fireComponentEngineScope(
       `via \`<EngineName/>\` (§51.0.D), or use plain reactive cells (\`@cell\`) inside ` +
       `the component for per-instance state. ` +
       `(SPEC §51.0.K + §34.)`,
+    span,
+    severity: "error",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// PASS 13.B — E-COMPONENT-ENGINE-SCOPE for an `<engine>` in an `<each>` row
+// (§51.0.K, S439 ruling #10; gap g-engine-inside-each-row-renders-nothing)
+// ---------------------------------------------------------------------------
+//
+// An `<each>` row template is a multi-instance context, so an `<engine>`
+// declared anywhere inside one is refused with the component case's code. Before
+// this pass impl#1 compiled it at exit 0 and the row renderer
+// (emit-each.ts `renderTemplateChildToJs`) dropped the engine as an unhandled
+// child kind — no state body, no transition table, no diagnostic.
+//
+// "Inside the row" is the WHOLE row subtree, by total descent: a direct row
+// root, a nested element (with or without `if=`), a `<match>` arm, a nested
+// `<each>` row, an engine state-child body, a multi-root row. The `<empty>`
+// fallback of an `<each>` is NOT a row (it renders once, when the collection is
+// empty) — it is walked with the enclosing context, so an `<empty>` of a list
+// that itself sits in a row is still inside that row.
+//
+// A component body is NOT walked here: CE refuses every engine in a component
+// body with this same code (component-expander.ts), and SYM runs before CE, so
+// walking it here would report the same engine twice.
+//
+// Only the OUTERMOST engine in a row is reported — an engine nested in a
+// refused engine's state-child is a consequence of the same mistake.
+
+const ROW_WALK_SKIP_KEYS: ReadonlySet<string> = new Set([
+  "span", "tabSpan", "loc", "parent", "raw", "bodyRaw",
+]);
+// `_`-prefixed fields are pass annotations (resolution back-links, stamps), not children:
+// following one from inside a row could reach a TOP-LEVEL engine-decl and refuse it as if it
+// sat in the row. A row engine the walk misses this way is still refused by the codegen backstop.
+const isRowWalkSkipped = (key: string): boolean => ROW_WALK_SKIP_KEYS.has(key) || key.startsWith("_");
+
+function eachRowTemplateOf(node: any): { row: any[]; empty: any[] } | null {
+  const isEmptyEl = (c: any): boolean =>
+    !!c && typeof c === "object" && c.kind === "markup" && (c.tag ?? c.name) === "empty";
+  if (node.kind === "each-block") {
+    const all: any[] = Array.isArray(node.bodyChildren) ? node.bodyChildren : [];
+    const row: any[] = Array.isArray(node.templateChildren)
+      ? node.templateChildren
+      : all.filter((c) => c !== node.emptyChild && !isEmptyEl(c));
+    const empty: any[] = node.emptyChild ? [node.emptyChild] : all.filter(isEmptyEl);
+    return { row, empty };
+  }
+  // The markup spelling of the same element (a `<each>` the AST builder left as
+  // markup). Its `<empty>` child is the fallback, every other child is the row.
+  if (node.kind === "markup" && (node.tag ?? node.name) === "each" && Array.isArray(node.children)) {
+    return {
+      row: node.children.filter((c: any) => !isEmptyEl(c)),
+      empty: node.children.filter(isEmptyEl),
+    };
+  }
+  return null;
+}
+
+function walkRejectEnginesInEachRows(
+  node: any,
+  inRow: boolean,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  visited: WeakSet<object>,
+): void {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const n of node) walkRejectEnginesInEachRows(n, inRow, errors, filePath, visited);
+    return;
+  }
+  if (visited.has(node)) return;
+  visited.add(node);
+
+  if (node.kind === "component-def") return;
+
+  if (inRow && node.kind === "engine-decl") {
+    fireEngineInEachRow(node, errors, filePath);
+    return;
+  }
+
+  const each = eachRowTemplateOf(node);
+  if (each !== null) {
+    walkRejectEnginesInEachRows(each.row, true, errors, filePath, visited);
+    walkRejectEnginesInEachRows(each.empty, inRow, errors, filePath, visited);
+    // Every other field (an `<each if=>` value node, ...) in the enclosing context.
+    // bodyChildren / children hold the row and the fallback already walked above.
+    for (const key of Object.keys(node)) {
+      if (isRowWalkSkipped(key)) continue;
+      if (key === "bodyChildren" || key === "templateChildren" || key === "emptyChild") continue;
+      if (node.kind === "markup" && key === "children") continue;
+      const v = node[key];
+      if (v && typeof v === "object") walkRejectEnginesInEachRows(v, inRow, errors, filePath, visited);
+    }
+    return;
+  }
+
+  for (const key of Object.keys(node)) {
+    if (isRowWalkSkipped(key)) continue;
+    const v = node[key];
+    if (v && typeof v === "object") walkRejectEnginesInEachRows(v, inRow, errors, filePath, visited);
+  }
+}
+
+function fireEngineInEachRow(
+  engineDecl: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const span: SYMDiagnostic["span"] = engineDecl.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  engineDecl[ENGINE_IN_ROW_REFUSED] = true;
+  errors.push({
+    code: ENGINE_IN_ROW_CODE,
+    message: engineInEachRowMessage(engineDecl.governedType),
     span,
     severity: "error",
   });
@@ -12857,6 +12977,11 @@ export function runSYM(input: SYMInput): SYMResult {
   // (B15 took PASS 11; B16 took PASS 12).
   const visitedB17 = new WeakSet<object>();
   walkRejectEnginesInComponentDefChildren(ast.nodes, errors, filePath, visitedB17);
+
+  // PASS 13.B: an `<engine>` anywhere inside an `<each>` row template is
+  // E-COMPONENT-ENGINE-SCOPE (§51.0.K, S439 ruling #10) — a row is a
+  // multi-instance context. See `walkRejectEnginesInEachRows`.
+  walkRejectEnginesInEachRows(ast.nodes, false, errors, filePath, new WeakSet<object>());
 
   // PASS 14 (B22): `reset(@cell)` target-shape validation per SPEC §6.8.2 +
   // §34. Fires E-RESET-INVALID-TARGET when a `reset-expr` target is not one

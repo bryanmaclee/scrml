@@ -126,6 +126,7 @@ import type {
 import { isMetaKind } from "./types/ast.ts";
 import { classifyFileShape } from "./library-shape.js";
 import { programRoleOptionsOf } from "./program-role.ts";
+import { ENGINE_IN_ROW_REFUSED } from "./engine-in-each-row.ts";
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -242,6 +243,30 @@ function engineGovernedTypeFromAttrs(attrs: unknown): string | undefined {
  *
  * De-duped by span so a node reachable via two walk edges is reported once.
  */
+/**
+ * Stamp ENGINE_IN_ROW_REFUSED on the `engine-decl` nodes of a re-parsed component body that
+ * parseComponentDef REPORTS (matched by span to `collectBodyEngines`) — only those: an engine the
+ * CE walk misses (one in an `<each>` row of the body) stays unmarked, so the codegen row
+ * backstop still refuses it rather than nobody.
+ */
+function markEngineDeclsRefused(root: unknown, reported: BodyEngine[]): void {
+  const keys = new Set(reported.filter((e) => e.span).map((e) => `${e.span!.start}:${e.span!.end}`));
+  if (keys.size === 0) return;
+  const seen = new WeakSet<object>();
+  const visit = (n: any): void => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const x of n) visit(x); return; }
+    if (n.kind === "engine-decl" && n.span && keys.has(`${n.span.start}:${n.span.end}`)) n[ENGINE_IN_ROW_REFUSED] = true;
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k === "parent") continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v);
+    }
+  };
+  visit(root);
+}
+
 function collectBodyEngines(reparsedAst: FileAST): BodyEngine[] {
   const out: BodyEngine[] = [];
   const seenSpanKeys = new Set<string>();
@@ -1466,6 +1491,13 @@ export function parseComponentBody(
       (e) => e.severity !== "warning" && e.severity !== "info" && e.code !== "W-PROGRAM-001"
     )];
 
+    // §51.0.K "one diagnostic per outermost engine" (s469-engine-in-row): every engine in a
+    // component body is refused by parseComponentDef (E-COMPONENT-ENGINE-SCOPE), so mark each
+    // one — the mark travels with every expanded copy — and the codegen engine-in-row
+    // backstops (the component used inside an `<each>` row) do not refuse it a second time.
+    const bodyEngines = collectBodyEngines(reparsed.ast);
+    markEngineDeclsRefused(reparsed.ast, bodyEngines);
+
     return {
       nodes: markupNodes,
       errors: realErrors.map((e) => ({
@@ -1475,7 +1507,7 @@ export function parseComponentBody(
       })),
       // §15.13.5 / §51.0.K — engines declared inside the re-parsed body (both
       // the structural `engine-decl` form and the `${ <engine/> }` lift form).
-      bodyEngines: collectBodyEngines(reparsed.ast),
+      bodyEngines,
       normalizedBody: normalized,
     };
   } catch (e) {
