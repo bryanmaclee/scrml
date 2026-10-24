@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 262 | 5 |
+| HIGH | 261 | 5 |
 | MED | 678 | 8 |
-| LOW | 480 | 0 |
+| LOW | 479 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -522,7 +522,7 @@ position is refused (`E-MATCH-BLOCK-IN-LIFT`); the engine owes the same refusal,
 Found while closing [[g-engine-inside-each-row-renders-nothing]]. `<each in=@xs …>…<empty><engine for=Phase
 initial=.Active>…</></empty></each>` with an empty list rendered nothing at all at exit 0 (the whole fallback
 vanished). The §51.0.K row rule does not reach it — the fallback renders once, while the list is empty, like an
-engine under a lone `if=` (which renders; in an `if=`/`else` chain branch it is dropped, [[g-engine-in-if-else-chain-branch-renders-nothing-s469]]) — so the language question is open: render it (impl work in the list
+engine under a lone `if=` (which renders; in an `if=`/`else` chain branch impl#1 refuses it too, E-CG-003, [[g-engine-in-if-else-chain-branch-renders-nothing-s469]]) — so the language question is open: render it (impl work in the list
 renderer) or refuse it. impl#1 now refuses it as an unsupported emission, **E-CG-003** (fail closed, loud,
 reversible; §17.7.4 carries the ⚑ OPEN). An `<empty>` of a list that is itself in a row IS in that row
 (E-COMPONENT-ENGINE-SCOPE).
@@ -535,10 +535,37 @@ reversible; §17.7.4 carries the ⚑ OPEN). An `<empty>` of a list that is itsel
 (the emit-each row backstop catches it — it compiled at exit 0 with no engine before S469), but the error says
 `1:61`: the CE re-parse of the component body carries body-local spans, and CE's own component-engine check did not
 fire on an engine nested in a list in the body. Refused either way; only the location is wrong.
+S469 (`s469-engine-if-chain-refusal`): CE now reaches that engine (and one under an `if=`/`else` chain in the body)
+and reports it itself, once — still at a body-local offset (`1:28` for the shape above), which is the remaining defect:
+every CE E-COMPONENT-ENGINE-SCOPE uses the re-parse's span (a plain body engine on file line 5 reports `1:6`).
 
-### g-engine-in-if-else-chain-branch-renders-nothing-s469 — an `<engine>` in ANY branch of a top-level `if=` / `else` chain renders nothing at exit 0 (a lone `if=` with no `else` renders) — `NEW S469 (review of s469-engine-in-row); HIGH; open`
+### g-engine-in-if-else-chain-branch-renders-nothing-s469 — an `<engine>` in ANY branch of a top-level `if=` / `else` chain renders nothing at exit 0 (a lone `if=` with no `else` renders) — `NEW S469 (review of s469-engine-in-row); HIGH; RESOLVED S469 by refusal (s469-engine-if-chain-refusal — E-CG-003; rendering owed to the bootstrap)`
 
-<!-- @gap id=g-engine-in-if-else-chain-branch-renders-nothing-s469 sev=HIGH status=open locus=searched:compiler/src/codegen(the if-chain branch template emission — data-scrml-if-chain / _scrml_chain_tpl)—not-traced prov=empirical:S469-review-of-s469-engine-in-row+reproduced-under-happy-dom-on-adcdda368 -->
+<!-- @gap id=g-engine-in-if-else-chain-branch-renders-nothing-s469 sev=HIGH status=resolved locus=compiler/src/codegen/emit-html.ts(if-chain case → refuseEnginesUnderIfChain, E-CG-003)+compiler/src/engine-in-each-row.ts(collectEnginesUnderIfChainBranch, engineInIfChainMessage)+compiler/src/component-expander.ts(collectBodyEngines Form 1b)+root:compiler/src/ast-builder.js(collectHoisted walks only markup.children — an engine-decl under if-chain.branches[].element / elseBranch never reaches machineDecls) prov=empirical:S469-review-of-s469-engine-in-row+reproduced-under-happy-dom-on-adcdda368+S469-s469-engine-if-chain-refusal(executed-under-happy-dom-on-b447b29eb) -->
+
+**Resolved by refusal (S469, `s469-engine-if-chain-refusal`).** impl#1 now refuses an `<engine>` anywhere under a
+chain branch with **E-CG-003** (unsupported emission, not a language rule — the language allows it, §17.1.1 note),
+decided from the AST in emit-html's `if-chain` case; the message names the workaround (declare the engine beside the
+chain with its own `if=`, or replace the chain with separate `if=` elements). In a component body the language rule
+fires instead (**E-COMPONENT-ENGINE-SCOPE**, §51.0.K): CE's `collectBodyEngines` now reaches an engine-decl that
+`collectHoisted` did not hoist. **Rendering is owed to the bootstrap** — which renders it: a `single` declaration
+read with `<*phase/>` in an `if=`, `else-if=` and `else` branch renders its state (executed under happy-dom); the
+bootstrap refuses the `<engine>` element itself (E-BOOTSTRAP-UNSUPPORTED, retired into `single`, §66.13.3) and a
+declaration inside markup (E-BOOTSTRAP-UNSUPPORTED, slice M2).
+Positions measured on `b447b29eb`, every one compiled at exit 0 and mounted an empty branch, every one now refused:
+the `if=` / `else` / `else-if=` branch (with and without a terminal `else`), deep in a branch, a chain at file top level /
+nested in markup / inside `<program>`, a chain or a lone `if=` nested in a chain branch, a chain in a component body
+(used and unused). Already refused, unchanged: a chain in an engine state-child / `<match>` arm
+(E-IF-IN-DISPATCHED-ARM); an engine in an `<each>` row / `<empty>` under a chain (E-COMPONENT-ENGINE-SCOPE / E-CG-003).
+A `<match>` in any chain branch RENDERS (executed). Root cause, for whoever renders it: `collectHoisted`
+(ast-builder.js) walks only `markup.children`, so the engine gets no substrate and no dispatcher.
+Side effects: `scrml promote --engine` on a `<match>` under an `if=`/`else` chain now fails closed (its sanity compile
+hits the refusal) instead of producing an engine that renders nothing; [[g-component-body-each-row-engine-unused-compiles-clean-s469]]
+is closed by the same CE change. Pins: `compiler/tests/browser/engine-in-if-chain-refused-s469.browser.test.js` (24).
+Not covered here, measured in passing: an engine IN a `<match>` arm ([[g-engine-in-match-arm-emits-nothing-s469]]);
+a structural element that IS a chain member (`<engine else>`, see [[g-structural-element-if-chain-and-show-composition-nominal]]).
+
+Original entry:
 
 Pre-existing silent drop, found by the final review of `s469-engine-in-row`.
 `<div if=@f><engine for=Phase initial=.Active>…</></div><div else>b</div>` with `@f = true` mounts `<div></div>`:
@@ -548,9 +575,15 @@ branch templates carry no engine lowering. A lone `<div if=@f><engine …/></div
 silently missing at exit 0, and an `else` fallback is exactly where state-machine UI tends to go. Owed: render it
 (the branch is a singleton position) or refuse it loudly.
 
-### g-component-body-each-row-engine-unused-compiles-clean-s469 — an `<engine>` in an `<each>` row inside the body of a component that is never USED compiles clean — `NEW S469 (review of s469-engine-in-row); LOW; open`
+### g-component-body-each-row-engine-unused-compiles-clean-s469 — an `<engine>` in an `<each>` row inside the body of a component that is never USED compiles clean — `NEW S469 (review of s469-engine-in-row); LOW; RESOLVED S469 (s469-engine-if-chain-refusal)`
 
-<!-- @gap id=g-component-body-each-row-engine-unused-compiles-clean-s469 sev=LOW status=open locus=compiler/src/component-expander.ts(collectBodyEngines does not reach an engine-decl in an each row of the body; the codegen row backstop only runs on an expanded use) prov=empirical:S469-review-of-s469-engine-in-row+reproduced-on-adcdda368 -->
+**Resolved S469.** `collectBodyEngines` (component-expander.ts) now collects every `engine-decl` in the re-parsed body
+by total descent ("Form 1b"), not only `machineDecls`, so an engine in a row (or under an `if=`/`else` chain) of an
+UNUSED component is refused with E-COMPONENT-ENGINE-SCOPE, exactly once (pinned in
+`engine-in-if-chain-refused-s469.browser.test.js`). The location is still body-local
+([[g-component-each-row-engine-refusal-arm-local-span-s469]]).
+
+<!-- @gap id=g-component-body-each-row-engine-unused-compiles-clean-s469 sev=LOW status=resolved locus=compiler/src/component-expander.ts(collectBodyEngines does not reach an engine-decl in an each row of the body; the codegen row backstop only runs on an expanded use) prov=empirical:S469-review-of-s469-engine-in-row+reproduced-on-adcdda368 -->
 
 `const Card = <div><each in=@groups key=@.id as g><li>${g.id}<engine for=Phase …>…</></li></each></div>` with no
 `<Card/>` anywhere compiles at exit 0, with no diagnostic, on both base `c9f8cd25b` and head. Nothing renders, so nothing
@@ -14591,6 +14624,14 @@ not a regression that landing introduced:
 | `<each … if=@a>` then `<p else>` | **`E-CTRL-001`** — *"`else` has no preceding `if=` element at the same level"* |
 | `else-if=` ON a structural element | silently dropped (`E-DG-002` on its cell) |
 | `show=` alongside `if=` on `<engine>` | silently dropped (`E-DG-002`) |
+
+**Re-measured S469 (`s469-engine-if-chain-refusal`, executed under happy-dom on `b447b29eb`) — the `else` / `else-if=`
+leg FAILS OPEN, with no diagnostic:** `<div if=@f>a</div><engine else for=Phase …>…</>` with `@f = true` renders BOTH
+`a` and the engine's arm; the same for `<match else …>`, `<each else …>` and `<engine else-if=@g …>` (the attribute is
+not read — the engine opener's attribute scan keeps `if=` only, and `collapseIfChains` breaks the chain at the first
+non-`markup` sibling). A branch the author gated renders anyway; whether that leaks depends on what the branch holds.
+`<engine if=@f>` followed by `<div else>` still fires E-CTRL-001 (loud). Not fixed in that lane (out of its brief);
+flagged to the PA for a severity review.
 
 Root: the if-chain detector recognizes only `kind:"markup"` nodes as chain members, and
 `engine-decl` / `match-block` / `each-block` are sibling AST kinds.
