@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 262 | 5 |
-| MED | 681 | 8 |
+| MED | 682 | 8 |
 | LOW | 481 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -497,6 +497,14 @@ Pack: n18 goes from base 3 PASS / 14 PASS-REFUSED / 9 PASS-DENY / **19 FAIL** to
 <!-- @gap id=g-engine-in-match-arm-emits-nothing-s469 sev=LOW status=open locus=compiler/src/arm-body-reader.ts(native re-parse of the arm)+compiler/src/symbol-table.ts(PASS 10.A never registers an engine-decl from the arm re-parse) prov=review:S469-6e0770356 -->
 
 The arm body is re-parsed by the native parser (arm-body-reader `readBareArmBody`), which synthesizes an engine-decl (`synthEngineDecl`). That engine-decl never reaches SYM's engine registration, so it has no `engineMeta` and no codegen. Its bodies are not run, so this is no failable hole. It is a silent drop: refuse the form or support it.
+
+**S469 (s469-engine-if-chain-refusal):** inside a COMPONENT BODY this position is no longer silent — `component-expander.ts` `collectBodyEngines` now collects every engine-decl in the re-parsed body, so a `<match>`-arm engine there is refused with E-COMPONENT-ENGINE-SCOPE (§51.0.K). Outside a component body (top level, or under an `if=` chain branch) it still emits nothing.
+
+### g-cross-file-engine-mount-importer-emits-no-html-s469 — a file that imports an exported `<engine>` and mounts it (`<phase/>`) emits no `app.html` at all, at exit 0 — `NEW S469 (review of s469-engine-if-chain-refusal); MED; open (untriaged)`
+
+<!-- @gap id=g-cross-file-engine-mount-importer-emits-no-html-s469 sev=MED status=open locus=untraced(compiler/src — the importer's HTML emission; same on base 2706e430a and head 9935e96c5) prov=review:s469-engine-if-chain-refusal-final -->
+
+Found by the final review of `s469-engine-if-chain-refusal` while probing a cross-file mount in an `if=` chain branch. Not chain-specific: the lone position behaves the same. The importer's whole page is missing with no diagnostic, so nothing could be executed. Owed: triage (it may duplicate an existing cross-file engine-mount entry under another name), then render it or refuse it loudly.
 
 ### g-state-child-duplicate-attr-dropped-s469 — a second `effect=` (or a `class=${…}`) on an engine state-child opener is dropped silently: only the first `effect=` is captured — `NEW S469 (review of 6e0770356); LOW; open`
 
