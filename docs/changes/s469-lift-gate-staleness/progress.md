@@ -65,3 +65,13 @@ that reads the live row's field; a non-literal value side outside a row is no lo
 - MED-2 (a) / (b) kept refused (not structurally fresh: a parameter / the escaped row binder may change unseen).
 - Corpus differential re-run vs origin/main b8911ec3b: error sets identical (3,753 files); 1 visible-set step
   differs (gauntlet-r10-rust-orders, branch correct).
+
+## Round 3 (review of b192c63de: FIX — HIGH-new from the MED-1 region)
+- 3ee576ded: a region is emitted only when the inner loop sits inside an ELEMENT of the row
+  (liftLoopInRowElement, gating liftRegionSafe — structural: the loop node's element ancestry). Among a fragment
+  row's roots (group head, beside sibling roots, inside an arm with a sibling) the row falls back to the round-1
+  plain lowering. Review repros h3/h4/h5/h7: 27/27 correct (b192c63de: 4 wrong; main: 26 wrong). Browser +7
+  (6 fail on b192c63de), pack n23 +4 (801 shapes; the pack's single-click form does not reproduce the frozen-node
+  reorder — the browser cases are the regression guard). Docs: direct-cell `if (@role …)` in a keyed row added to
+  g-keyed-row-control-flow-if-not-reevaluated-s469 (2, want 0, main too); the function-body restriction stated
+  in SPEC §17.1, the §34 row and known-gaps. LOW (region effects run twice at init) not changed.
