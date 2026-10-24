@@ -44,4 +44,43 @@ SPEC §7.2.2 rules 4, 5, 9, 10. impl#1 is unchanged.
 Method: `SCRML_BOOT_SRC_LOG=<file>` (new opt-in recorder in slice-m1/harness.js `logSources`) records every source set
 the slice suite hands `link.parseProgram` / `parse.parseFile`; a replay compiles each distinct set on the old and the new
 bootstrap (codes, spans, messages, printed client + server artifacts or the parse tree) and diffs them.
-See the round-1 report below for the numbers and every changed set.
+
+**Result (old-suite sources, 5,826 distinct sets): 5,812 identical** in codes, spans, messages and printed artifacts
+(1,669 with client/server artifacts); **14 changed, each by one of the four rulings:**
+
+| set | old → new | reason |
+|---|---|---|
+| typer-s460 `const q = @o.n⏎is given }` | MISSING×2, E-SYNTAX-044, E-PARSE-EXPECTED, E-SCOPE-001 → MISSING (before `}`) | rule 4: `is given` attaches |
+| defer.test `defer⏎@n = 1;` | MISSING + E-SCOPE-001 → clean | rule 10: defer across the line |
+| defer.test `defer [1, 2];` (binding `defer` visible) | AMBIGUOUS-LEAD → + NO-EFFECT | rule 9: the deferred `[1, 2];` does nothing |
+| error-rulings LOW-C `fn h() { "a"; }` | E-ERROR-012 → + NO-EFFECT | rule 9 |
+| terminators r3 `match k {…}⏎-1;` / `(@n);` / `[1];` / `` `t`; `` (4 sets) | clean → NO-EFFECT | rule 9: the table's silent row, now loud |
+| templates L1 `const t = s⏎`x${n}`` | E-PARSE-TEMPLATE → SPLIT-CONTINUATION + MISSING (after the template line) | rule 5 |
+| template-slot-fuzz `` `…`()`` on the multi-line template's closing line (parse only) | E-PARSE-TEMPLATE → clean parse (a call; analyze refuses it, E-BOOTSTRAP-UNSUPPORTED) | rule 5's "line above" = the previous token's END line |
+| server-await probe pack, 2 sets `let ok = false⏎[row.pw].forEach(…)` | MISSING → SPLIT-CONTINUATION | rule 5 |
+| server-await probe pack `[check // c⏎(pass, row.pw), …]` | + SPLIT-CONTINUATION | rule 5 (inside brackets) |
+| server-await probe pack `1 :> { ok; ok }` (value match) | + NO-EFFECT on the first `ok;` | rule 9 (a non-last arm-block statement) |
+
+(The probe-pack sets are deliberately broken legacy shapes already carrying 20–40 errors.) The new tests' own source sets
+(95 more) change by construction. Fixed during the replay before landing: a non-handler attribute `{…}` (refused by
+analyze — a value, not a statement list), a one-name handler block `onclick={ f; }` (a reference), the refused value-form
+`if` / `for` read-past, and a `( … ) :>` tuple arm head were each first reported, wrongly, and are now exempt; a doubled
+SPLIT report on a re-read region is deduped; `fail⏎return x;` now refuses the bare `fail` instead of reading `return` as
+an operand (a keyword / string / number operand is read only on `fail`'s line — the s451 E-ERROR-009 path).
+
+## Gates
+- bootstrap-conformance: PASS **218 → 218** (report regenerated: no change; `--check` current).
+- snippet-gate --strict exit 0 (bootstrap ruled: 14 pass, 16 spec-ahead, 0 stale, 0 fail); claim-gate --strict 0 failed.
+- gen-bootstrap-severity regenerated (E-STMT-NO-EFFECT, E-STMT-SPLIT-CONTINUATION — both §34 Error rows).
+- SPEC §7.2.2 rules 5 / 9 status, the five RULED table rows, the two §34 rows, §19.16.1 (`defer` same-line clause struck).
+- known-gaps: g-bootstrap-newline-sensitive-rules-remain-s469 → narrowed (+ unlisted line tests found);
+  g-stmt-no-effect-language-wide-unbuilt bootstrap half built. `state.ts --write`: no count change.
+
+## Owner questions (with recommendations)
+1. A statement-position `match` / `!{}` whose every arm is a pure single expression (`match k { .A :> 1, .B :> 2 }`)
+   computes and drops a value. Built: NOT reported (a block-like statement, like `if`; its arms are value positions).
+   Rec: report it E-STMT-NO-EFFECT (it is `c ? 1 : 2;` in disguise) — newly-rejecting, measured 0 here.
+2. `r?;` alone: built as an effect (propagation can leave the function). Rec: keep.
+3. Bare `fail` code: E-PARSE-EXPECTED (generic). Rec: keep; no new code. A `fail:` label is refused by it too.
+4. Glued `a == 1? 2 : 3`: propagation + E-STMT-MISSING-SEMICOLON (hint names the spaced form) and its cascade
+   (E-ERROR-004, …). Rec: keep the ruled reading; optionally a dedicated message-only refinement later.

@@ -3029,7 +3029,11 @@ ${
         if (!isWord(tp, "fail")) return false
         const nx: PTok = peekAt(tp, 1)
         if (nx.cls == TC.End) return false
-        if (nx.cls == TC.Variant || nx.cls == TC.Ident || nx.cls == TC.Keyword || nx.cls == TC.Str || nx.cls == TC.Num) return true
+        if (nx.cls == TC.Variant || nx.cls == TC.Ident) return true
+        // a keyword / string / number cannot begin a valid operand: read as one only
+        // on `fail`'s own line (s451's E-ERROR-009 path, unchanged) — on a later line
+        // it starts the next statement, and this `fail` has no operand (`bareFail`)
+        if (nx.cls == TC.Keyword || nx.cls == TC.Str || nx.cls == TC.Num) return nx.line == cur(tp).line
         if (nx.cls != TC.Punct) return false
         if (tk(nx, ".")) return true
         const n2: PTok = peekAt(tp, 2)

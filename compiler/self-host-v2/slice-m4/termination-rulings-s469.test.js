@@ -109,7 +109,7 @@ describe("rule 10 — `fail` / `defer` / `transaction` are keywords at statement
   });
 
   test("the bare name `fail` is reserved in statement position — E-PARSE-EXPECTED on `fail`, never E-SCOPE-001", () => {
-    for (const body of [`        fail;`, `        fail = 1;`, `        fail(id);`, `        if (id == "y") { fail }`]) {
+    for (const body of [`        fail;`, `        fail = 1;`, `        fail(id);`, `        if (id == "y") { fail }`, `        if (id == "y") {\n            fail\n            return id;\n        }`]) {
       const src = G(body);
       const ds = run(src).diags;
       expect([body, ds.map((d) => d.code)]).toEqual([body, ["E-PARSE-EXPECTED"]]);
