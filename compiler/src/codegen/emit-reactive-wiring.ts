@@ -6,7 +6,8 @@ import { emitStringFromTree } from "../expression-parser.ts";
 import { emitLogicNode, nodeListContainsTildeRef, beginEmitLogicFile, beginTopLevelLogicEmission } from "./emit-logic.js";
 import { withBoundaryCatchSite, boundaryChecksEmittedCount } from "./emit-expr.ts";
 import { wrapBoundaryRenderLogic, exprContainsBoundaryCheck, type BoundaryCatchInfo } from "./emit-boundary-logic.ts";
-import { pushLiftNonKeyed, popLiftNonKeyed, pushLiftLive, popLiftLive, liftArmDeclaredNames, checkLoopBinderWrites } from "./emit-lift.js";
+import { pushLiftNonKeyed, popLiftNonKeyed, pushLiftLive, popLiftLive, liftArmDeclaredNames, checkLoopBinderWrites, liftOpenGateCount, setLiftGroupWindow, refuseLiftOpenGatesSince, liftOpenGatesBlockFnHazard } from "./emit-lift.js";
+import { liftGroupFnReadsItsBindings } from "./lift-gate-scope.js";
 import { pushIfChainCollector, popIfChainCollector, ifChainArmOpen, ifChainArmClose, type IfChainCollector } from "./emit-control-flow.ts";
 import { liftScopeDeclaredNames, seedOwnConsts, seededConstFallbackCount, withSeededConstsOff } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
@@ -594,7 +595,7 @@ function liftGroupWrapsOuterEffect(combinedCode: string, groupHasReactiveDeps: b
   if (!groupHasReactiveDeps) return false;
   const hasKeyedReconcile = combinedCode.includes("_scrml_reconcile_list(");
   const hasOtherReactiveReads = hasKeyedReconcile
-    ? stripReconcileCalls(combinedCode).includes("_scrml_reactive_get(")
+    ? _liftGroupForceRerender || stripReconcileCalls(combinedCode).includes("_scrml_reactive_get(")
     : true;
   return !(hasKeyedReconcile && !hasOtherReactiveReads);
 }
@@ -936,6 +937,12 @@ const OWNER_TRACKED_MARKERS = ["_scrml_reconcile_list(", "_scrml_mount_track(", 
 let _liftBranchRunUsed = false;
 
 /**
+ * S469 — set while one group is emitted: its statements built an OPEN lifted gate
+ * (emit-lift.js), so the group must re-render through its outer effect.
+ */
+let _liftGroupForceRerender = false;
+
+/**
  * Emit one lift group — the statements of a single `${ … lift … }` block whose
  * placeholder is `pid` — onto `out`, binding its target through `hostExpr`.
  *
@@ -973,7 +980,7 @@ function emitLiftGroup(
     //   separate from Bug 5 and addressed in a follow-on).
     const hasKeyedReconcile = combinedCode.includes("_scrml_reconcile_list(");
     const hasOtherReactiveReads = hasKeyedReconcile
-      ? stripReconcileCalls(combinedCode).includes("_scrml_reactive_get(")
+      ? _liftGroupForceRerender || stripReconcileCalls(combinedCode).includes("_scrml_reactive_get(")
       : true;
     const canSkipOuterEffect = hasKeyedReconcile && !hasOtherReactiveReads;
 
@@ -1423,6 +1430,11 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     let groupHasLift = false;
     let groupHasReactiveDeps = false;
     let skipGroup = false;
+    // S469 — this group's statements are a re-renderable render: an OPEN lifted gate
+    // (emit-lift.js) emitted while the window is set is counted against it.
+    setLiftGroupWindow(true);
+    _liftGroupForceRerender = false;
+    const groupOpenGatesBefore = liftOpenGateCount();
 
     // §32 tilde codegen: pre-scan each group (a contiguous run of statements
     // within a `${}` body — sharing _placeholderId) for `~` references. When
@@ -1735,6 +1747,23 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       }
     }
 
+    // S469 (g-lift-gate-placement-inherits-main-staleness-s469) — a lifted if= / show= the
+    // group's statements built OPEN (its condition reads a value of this render, emit-lift.js
+    // emitLiftGate) is re-evaluated only by re-running the group: the group re-renders
+    // through its outer effect even when its text names no cell (the cell may be read inside
+    // a called function), and even when its only other reads are inside a keyed list.
+    // A group that would otherwise run ONCE at chunk scope cannot be made a re-render effect when a
+    // function it declares reads its bindings (the hoisted function would read them at chunk scope,
+    // where they no longer are — a ReferenceError): those gates are refused instead (fail closed).
+    if (liftOpenGateCount() !== groupOpenGatesBefore) {
+      if (!liftGroupWrapsOuterEffect(codes.join("\n"), groupHasReactiveDeps) && (liftGroupFnReadsItsBindings(stmts) || liftOpenGatesBlockFnHazard(groupOpenGatesBefore))) {
+        refuseLiftOpenGatesSince(groupOpenGatesBefore, "the `${}` block that builds it runs once: making it re-render would move its bindings away from a function it declares");
+      } else {
+        _liftGroupForceRerender = true;
+        groupHasReactiveDeps = true;
+      }
+    }
+
     if (codes.length === 0) continue;
     let combinedCode = codes.join("\n");
 
@@ -1892,6 +1921,8 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       }
     }
   }
+  setLiftGroupWindow(false);
+  _liftGroupForceRerender = false;
   setEachLiftRegistry(prevEachLiftRegistry);
   setEachIfGateEnv(prevEachIfGateEnv);
   setEachMapSetNames(prevEachMapSetNames);

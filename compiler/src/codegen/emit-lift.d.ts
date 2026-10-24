@@ -43,6 +43,15 @@ export declare function liftArmDeclaredNames(root: object): Set<string>;
 export declare function popLiftLive(): void;
 export declare function liftNonKeyedActive(): boolean;
 
+/** S469 — how many OPEN lifted gates have been emitted (a group re-renders when its own emission adds one). */
+export declare function liftOpenGateCount(): number;
+/** S469 — set while a `${}` group's statements are emitted (an open gate outside it is refused). */
+export declare function setLiftGroupWindow(on: boolean): void;
+/** S469 — refuse every open gate emitted since `count` (its group cannot re-render). */
+export declare function refuseLiftOpenGatesSince(count: number, why: string): void;
+/** S469 — true when an open gate emitted since `count` sits in a block whose function reads its bindings. */
+export declare function liftOpenGatesBlockFnHazard(count: number): boolean;
+
 /** Restore every emit-lift module stack / counter to its initial value (head of every runCG). */
 export declare function resetLiftModuleState(): void;
 
@@ -52,6 +61,7 @@ export declare function buildLiftReconcileCtx(
   keyVar: string,
   iterVar: string,
   body: unknown,
+  forNode?: unknown,
 ): LiftReconcileCtx;
 
 export declare function pushLiftRequestIds(set: Set<string> | null | undefined): void;

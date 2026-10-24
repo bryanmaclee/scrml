@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 262 | 5 |
-| MED | 680 | 8 |
-| LOW | 481 | 0 |
+| HIGH | 263 | 5 |
+| MED | 682 | 8 |
+| LOW | 482 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -12453,7 +12453,9 @@ Surfaced while scoping [[g-item-derived-local-stale-in-per-item-effect-paths]]. 
 <!-- @gap id=g-lift-per-item-if-directive-not-reactive-on-reconcile sev=MED status=resolved -->
 
 **S469 round 5 — REOPENED as part of [[g-lift-gate-placement-inherits-main-staleness-s469]]** (main's placement
-kept: the bucket is keyed on the create-time row field). Round 1's text below is the record. ~~**S469 — the narrower
+kept: the bucket is keyed on the create-time row field). **Closed again with it (s469-lift-gate-staleness):** a
+tracked per-item effect reads the live row's field and re-registers the bucket under it — a same-key replace and an
+in-place field write both move the gate (pack `n23` "value-indexed row side", 4 + "in-place field write", 4). Round 1's text below is the record. ~~**S469 — the narrower
 deferred sub-gap (the value-indexed predicate's ITEM side stale after a same-key REPLACE) is RESOLVED** (branch `s469-lift-if-render-gate`): on a render gate it had become fail-OPEN (a row whose own key revoked the gate kept the
 element). A live-keyed render-gate effect now re-reads the row's value and moves the `subscribe_when` bucket;
 the updater re-resolves the row. Pinned by pack `n23` "value-indexed row side" (4) and the browser test.
@@ -26822,8 +26824,8 @@ Found while making the Q18 premise true by effect ordering (S462 round 7). `${ f
 
 
 
-### g-lift-gate-placement-inherits-main-staleness-s469 — a lifted `if=` / `show=` is re-evaluated only at main's display-toggle placements: a cell read inside a called function (outside a row), a value-indexed `@cell == row.field` whose field changes under the same key, and a body local re-read in a keyed row are never re-read — a revoked guard stays OPEN — `NEW S469; HIGH; open`
-<!-- @gap id=g-lift-gate-placement-inherits-main-staleness-s469 sev=HIGH status=open locus=compiler/src/codegen/emit-lift.js(emitLiftIfGate placements A–D, kept from main's display toggle: D subscribes to the `@name` tokens in the attribute text; the value bucket is registered under the create-time row field)+compiler/src/codegen/emit-reactive-wiring.ts(a plain group is effect-wrapped only when its code names a reactive read) prov=review:s469-lift-if-render-gate-round-5;empirical:S469(main 0a2d747d3 and the branch: every position below FAILs / is stale on both) -->
+### g-lift-gate-placement-inherits-main-staleness-s469 — a lifted `if=` / `show=` is re-evaluated only at main's display-toggle placements: a cell read inside a called function (outside a row), a value-indexed `@cell == row.field` whose field changes under the same key, and a body local re-read in a keyed row are never re-read — a revoked guard stays OPEN — `NEW S469; HIGH; RESOLVED S469 (s469-lift-gate-staleness)`
+<!-- @gap id=g-lift-gate-placement-inherits-main-staleness-s469 sev=HIGH status=resolved locus=compiler/src/codegen/emit-lift.js(emitLiftIfGate placements A–D, kept from main's display toggle: D subscribes to the `@name` tokens in the attribute text; the value bucket is registered under the create-time row field)+compiler/src/codegen/emit-reactive-wiring.ts(a plain group is effect-wrapped only when its code names a reactive read) prov=review:s469-lift-if-render-gate-round-5;empirical:S469(main 0a2d747d3 and the branch: every position below FAILs / is stale on both) -->
 
 Filed by s469-lift-if-render-gate round 5, which re-scoped the lane to "main's evaluation placement is the oracle;
 only the DOM operation changes". These positions are stale on main (where the content additionally stayed in the
@@ -26847,6 +26849,107 @@ Fix direction: give every position one re-evaluation rule that tracks everything
 tracking effect rounds 2–4 tried — but decided from the compiler's own scope analysis (the binder / declaration
 tables), not from a second reader of the emitted JS; that is a design change for its own lane, measured against
 this table.
+
+**RESOLVED S469** (branch `s469-lift-gate-staleness`, impl#1 security limb). ONE structural rule replaces the
+placements: a lifted gate is re-evaluated by RE-RUNNING THE CODE THAT PRODUCED WHAT IT READS, under the runtime's
+read tracking (`_scrml_effect` records every cell read at any call depth). The declaration tables decide which
+(`compiler/src/codegen/lift-gate-scope.js`, a pre-pass over the file AST — no name is classified by its spelling):
+- **closed** — the condition reads only cells, FILE-LEVEL bindings no block re-initialises (§7.6 top-level
+  declarations of another `${}` block, imports, types) and the binder of the reconciled row it is built in: its
+  OWN tracked effect (`emit-lift.js` `_emitLiftGate`; in a row, the live-keyed per-item effect — the item looked
+  up by key, so a same-key replace and an in-place field write are seen). The value-indexed row side keeps the
+  O(2) bucket, re-registered under the LIVE row's field by a tracked effect; a non-literal value side outside a row
+  is no longer value-indexed.
+- **open** — it reads a value of the render (a body local, a local closure, an item-derived local, an outer row's
+  binder, a name declared anywhere in the block — over-reporting is the safe direction): evaluated in the render,
+  which re-runs on what it read — an `if … lift` arm's render effect; a plain `${}` group is forced to its
+  re-render effect (`emit-reactive-wiring.ts`, `liftOpenGateCount`); a keyed `for … lift` whose tree holds one is
+  lowered as the plain loop (`liftForTreeGatePins`, folded into `forLiftTreeHasImpureLoop`; a lift whose markup is
+  still TEXT in the AST pins on any `if=` / `show=` in it) — except when the gate sits in a loop nested directly in
+  the row and reads only what that loop declares: that loop alone becomes a REGION of the keyed row, re-run by its
+  own live-keyed tracked effect (`emitForStmtWithContainer`, `liftRegionSafe`), so the row's other nodes keep their
+  state (round 2, review MED-1) — only when that loop sits inside an ELEMENT of the row (`liftLoopInRowElement`):
+  among a fragment row's roots its nodes would be frozen into the row's group arrays, and a reorder re-inserted
+  revoked content (round 3, review of b192c63de); there the row is lowered plain.
+- **known restriction** — a function returning markup gated on a local or parameter
+  (`function pill(q) { return <b if=(q)>x</b> }`) is refused, although on main the caller's `${}` re-ran it.
+- **refused, E-IMPL1-LIFT-GATE-UNTRACKED** (new, provisional name, §34) — an open gate no render re-runs: markup
+  built in a function body, a run-once `${}` block that declares a function reading its own bindings (forcing the
+  re-render would move them out of the hoisted function's reach — M1a's ReferenceError), a lift escaping its row
+  (a `while` in a row — there also a condition that calls a function; one naming every cell it reads keeps main's
+  unowned subscriptions), and the backstop for an open gate the pin prediction left in a keyed row. A gate that
+  reads a local or parameter is open even when its own text names no cell and calls nothing — the value may have
+  been computed from a cell (`let ok = isAdmin()`; review of b57d697a9, HIGH-1: 43a6b7682 briefly evaluated such
+  gates once, so they stayed open; pack `n23` "local from a call", 10).
+Measured: pack `n23` on main 57 FAIL of 152 (the 36 round-5 pins + 21 of the 28 shapes added here), branch 0
+(`n23/open gate in a function body` PASS-REFUSED); the 21 expected-failure browser cases of
+`lift-if-render-gate-s469.browser.test.js` pass, and `lift-gate-staleness-s469.browser.test.js` (47 revoke /
+re-grant cycles) fails 42 on main, 0 here. Corpus differential (3,750 `.scrml` files, both compilers in the same
+environment): error sets identical for every file; the 15 mountable files with a lifted gate, every cell perturbed,
+show ONE visible-set difference — `gauntlet-r10-rust-orders.scrml` at `@selectedOrderId = 1`, where the branch
+shows the order detail whose condition (`selectedOrder()` reads the cell) is TRUE and main left it hidden (main
+stale, fail-closed direction); 0 steps where the branch shows content whose condition is false.
+Residuals (not this gap): a write to a plain (non-cell) `let` notifies nothing, so a gate reading one is re-read
+when a cell it reads changes (M1b's click — [[g-lift-gate-reads-plain-let-written-later-s469]]); the
+previous render's gate effects of a re-rendering group stay subscribed (main's subscriptions did too) —
+[[g-lift-group-rerender-keeps-previous-gate-effects-s469]]; the `while`-in-row escape stays open for gates that
+do not read the counter ([[g-while-lift-in-reconciled-row-escapes-the-row-s469]]).
+
+### g-lift-group-rerender-keeps-previous-gate-effects-s469 — a `${ … lift … }` group that re-renders through its outer effect never disposes what the previous render created: each render's lifted gate effect (and, on main, each `@cell` subscription) stays subscribed to a detached element — `NEW S469 (s469-lift-gate-staleness); LOW; open (pre-existing class)`
+<!-- @gap id=g-lift-group-rerender-keeps-previous-gate-effects-s469 sev=LOW status=open locus=compiler/src/codegen/emit-reactive-wiring.ts(emitLiftGroup: the outer `_scrml_effect(function() { target.innerHTML = ""; … })` owns nothing it creates)+compiler/src/codegen/emit-lift.js(_emitLiftGate: `_scrml_mount_track(_scrml_effect(…))` registers with no scope at top level) prov=empirical:S469(s469-lift-gate-staleness, happy-dom) -->
+
+Found while measuring [[g-lift-gate-placement-inherits-main-staleness-s469]]'s fix. `${ lift <div><i>${@n}</i><b if=@ok>x</b></div> }`
+re-renders on every `@n` write; `_scrml_ifrow_apply` calls on one `@ok` off → on after 5 / 10 re-renders: main 15 / 29
+(text subscriptions), branch 12 / 22 (tracked effects) — linear in the number of renders, though only one `b` is in the
+page. With the gate reading the cell inside a function (`if=okf()`), main stays at 2 because it never re-read the gate at
+all (the staleness the parent gap fixed); the branch is at 12 / 22 like the direct form. Not fail-open: the stale effects
+act on detached elements. Fix direction: make a re-rendering group an owner of what its render creates (the arm run's
+`own(mkEffect)` shape, client code only) so the next render disposes the previous one's effects — without pulling the
+`owner` chunk into list-free pages (runtime-size ratchet §4).
+
+### g-keyed-row-control-flow-if-not-reevaluated-s469 — (security) a control-flow `if` inside a keyed `for … lift` row is evaluated once, when the row is built: `for (r of @xs) { if (@role == "admin") { lift <b>x</b> } }` — the most direct authorization shape — keeps both rows' `<b>` after `@role` is revoked (2, want 0), and `for (r of @xs) { if (r.ok) { lift <b>x</b> } }` stays visible after a same-key replace with `ok: false` (and after an in-place write) — a guard that stays open — `NEW S469 (review of b57d697a9); HIGH; open (pre-existing, identical on main)`
+<!-- @gap id=g-keyed-row-control-flow-if-not-reevaluated-s469 sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts(the keyed row factory emits the body's if-stmt inline; nothing re-runs it)+compiler/src/codegen/emit-lift.js(emitIfStmtWithContainer) prov=review:s469-lift-gate-staleness-round-2;empirical:S469(main 14a788227 and branch: off=2 want 0, in-place off=2 want 0) -->
+
+Found by the review of `b57d697a9`; reproduced on main and the branch (happy-dom): two rows granted, a same-key
+replace with `ok: false` → 2 `b` still in the page; an in-place `ok = false` → still 2. Widened by the review of
+`b192c63de`: the direct-cell form `if (@role == "admin") { lift … }` in a keyed row stays 2 after the revoke (want 0). The row-binder sibling of
+[[g-for-lift-item-does-not-rerender-on-body-condition-cell-s465]] (a cell read there). The lifted-gate machinery
+of [[g-lift-gate-placement-inherits-main-staleness-s469]] does not cover it: an `if` STATEMENT is not a gate attribute.
+Not fixed in that lane because neither cheap structural option is free: (a) lowering every keyed row whose body
+holds an `if` as the plain loop costs every filtered list its keying (row identity, input state, perf); (b) re-running
+the `if` as a REGION of the row (the shape that lane added for an inner loop) does not work at a row's TOP level —
+the arm's nodes are the row's roots, which the reconciler moves and removes as a group (`_scrml_group`), so the
+region would need reconciler support for a row whose root set changes (measured: a region among a fragment row's
+roots re-inserted revoked content on a reorder — review of `b192c63de` — so regions are emitted only inside a row
+element). Fix direction: (b) with a stable anchor
+root per row, or (a) for the rows whose `if` reads the row or a cell, measured against the corpus.
+
+### g-lift-group-and-arm-call-reads-not-reactive-s469 — a `${ … lift … }` group or an `if … lift` arm condition that reads a cell only through a called function is never re-rendered: `${ lift <i>${isAdmin() ? "ADMIN" : "no"}</i> }` keeps "ADMIN", and `${ if (isAdmin()) { lift <b>x</b> } }` keeps `<b>` after the cell is revoked — `NEW S469 (review of b57d697a9); HIGH; open (pre-existing, identical on main)`
+<!-- @gap id=g-lift-group-and-arm-call-reads-not-reactive-s469 sev=HIGH status=open locus=compiler/src/codegen/emit-reactive-wiring.ts(a group is a re-render effect only when its emitted text names a reactive read — `_scrml_reactive_get(` — so a cell read inside a called function never wraps it) prov=review:s469-lift-gate-staleness-round-2;empirical:S469(main 14a788227 and branch) -->
+
+Found by the review of `b57d697a9`; reproduced on main and the branch. The text interpolation is a correctness
+defect; the arm CONDITION is a guard that stays open (HIGH). The lifted-gate fix
+([[g-lift-gate-placement-inherits-main-staleness-s469]]) tracks a gate attribute's reads at any call depth; a group's
+own text and an `if` statement's condition still decide re-rendering from the text. Fix direction: make a group
+whose render CALLS a function a tracked re-render effect too (the forced re-render that lane added for open gates)
+— which moves a run-once group's declarations off chunk scope (the M1a hazard: refuse when a function the group
+declares reads its bindings, as the lane does), measured against the corpus.
+
+### g-lift-of-markup-returning-call-renders-nothing-s469 — `lift pill(x)`, where `pill` returns markup, renders nothing — `NEW S469 (review of b57d697a9); MED; open (pre-existing, identical on main)`
+<!-- @gap id=g-lift-of-markup-returning-call-renders-nothing-s469 sev=MED status=open locus=compiler/src/codegen/emit-lift.js(_emitLiftExpr: a lift-expr whose expression is a call is not lowered as a markup value) prov=review:s469-lift-gate-staleness-round-2;empirical:S469(main 14a788227 and branch: 0 elements) -->
+
+Found by the review of `b57d697a9`: `${ function pill(q: bool) { return <span><b>x</b></span> } }` +
+`${ lift pill(true) }` puts no element in the page, at exit 0, on main and on the branch (`${ pill(true) }` renders it).
+Silent loss of content; not fail-open.
+
+### g-lift-gate-reads-plain-let-written-later-s469 — a lifted gate that reads a plain (non-cell) `let` some later code writes is re-evaluated only when a CELL it reads changes: after `mode = mode + 1` in a handler, `if=(matches())` (`mode == @n`) stays visible while false until `@n` moves — `NEW S469 (s469-lift-gate-staleness); MED; open (owner question)`
+<!-- @gap id=g-lift-gate-reads-plain-let-written-later-s469 sev=MED status=open locus=compiler/src/codegen/emit-lift.js(_emitLiftGate: a closed gate's own effect tracks cells only)+compiler/tests/browser/lift-if-render-gate-s469.browser.test.js(M1b pins this residual) prov=review:s469-lift-gate-staleness-round-2(M1b) -->
+
+The language residual named by [[g-lift-gate-placement-inherits-main-staleness-s469]]: a write to a plain `let`
+notifies nothing (the same holds for `${x}`), so a gate reading one directly or through a function is re-read only
+when a cell it reads changes. Browser case "M1b" pins the current behaviour and says so. **Owner question:** should
+impl#1 refuse a gate that reads (directly, or through a function it calls) a plain `let` that some code writes after
+the render, or should such writes notify (make the binding reactive)?
 
 ### g-lift-gate-not-released-on-outer-owner-teardown-s469 — a lifted row gate whose row is removed by an OUTER owner (an `if … lift` arm switching away, an outer lift row removed) is never released: its value-bucket registration and gate effects stay live — `NEW S469; MED; RESOLVED S469`
 <!-- @gap id=g-lift-gate-not-released-on-outer-owner-teardown-s469 sev=MED status=resolved locus=compiler/src/codegen/emit-lift.js(maybeWrapLiftPerItemEffect gate self-dispose fires only when the row's OWN key stops resolving)+compiler/src/runtime-template.js(_scrml_effect has no dispose/cleanup hook; _scrml_lift_arm_run disposes owned effects, not value buckets) prov=review:s469-lift-if-render-gate-round-2(F2);empirical:S469 -->

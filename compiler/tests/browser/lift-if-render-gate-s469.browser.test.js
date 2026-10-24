@@ -27,36 +27,13 @@ if (!globalThis.document) GlobalRegistrator.register();
 
 const tmpRoot = resolve(tmpdir(), "scrml-lift-if-render-gate-s469");
 
-// S469 round 5 — main's evaluation PLACEMENT is the oracle (only the DOM operation changed:
-// display toggle -> swap). These positions are stale on main — the condition is not re-read when
-// what it depends on changes (a cell read inside a called function or a `show=visible()` with no
-// `@` in the text, a body local re-read later, a value bucket keyed on a create-time row field, a
-// group re-render replacing a sibling input) — so they are stale here too, kept as EXPECTED
-// FAILURES: each goes red when its position is fixed. Filed as
-// g-lift-gate-placement-inherits-main-staleness-s469 (docs/known-gaps.md).
-const STALE_ON_MAIN = new Set([
-  "value-indexed, the ROW side: a same-key replace that changes the row's field moves the gate",
-  "a bare `${ lift … }`: a sibling input keeps its node and value across flips",
-  "a bare lift, if=isAdmin(): revoked through the function, the element leaves (and returns)",
-  "a bare lift, if=(isAdmin() && true): revoked through the function, the element leaves (and returns)",
-  "a `for` over a non-reactive iterable, if=isAdmin(): revoked through the function, the element leaves (and returns)",
-  "a `for` over a non-reactive iterable, if=(isAdmin() && true): revoked through the function, the element leaves (and returns)",
-  "an `if … lift` arm, if=isAdmin(): revoked through the function, the element leaves (and returns)",
-  "an `if … lift` arm, if=(isAdmin() && true): revoked through the function, the element leaves (and returns)",
-  "a reactive `for … lift` row, if=isAdmin(): revoked through the function, the element leaves (and returns)",
-  "a reactive `for … lift` row, if=(isAdmin() && true): revoked through the function, the element leaves (and returns)",
-  "a bare lift: hidden while false, shown while true, the element stays mounted",
-  "a `for … lift` row: hidden while false, shown while true, the element stays mounted",
-  "an `if … lift` arm: hidden while false, shown while true, the element stays mounted",
-  "a reconciled row: a flag set after the lift",
-  "a reconciled row's own local written after the lift: the snapshot holds the render-time value",
-  "an `if … lift` arm: a mutated local array (if=)",
-  "an `if … lift` arm: a mutated local array (show=)",
-  "a reconciled row: a closure over a flag set after the lift (if=)",
-  "a reconciled row: a closure over a flag set after the lift (show=)",
-  "a reconciled row: a mutated local array (if=)",
-  "a reconciled row: a mutated local array (show=)"
-]);
+// S469 round 5 kept main's evaluation PLACEMENT, so the positions stale on main stayed stale (21 cases here
+// were expected failures). s469-lift-gate-staleness fixed them (g-lift-gate-placement-inherits-main-staleness-s469):
+// a lifted gate re-evaluates by re-running the code that produced what it reads, under the runtime's read
+// tracking — its own tracked effect when it reads only cells, file-level bindings and its row's binder; the
+// enclosing render's re-run (an arm, a group made a re-render effect, a keyed row lowered plain) otherwise.
+// Every case below must pass; none is expected to fail.
+const STALE_ON_MAIN = new Set([]);
 const gateTest = (name, fn) => (STALE_ON_MAIN.has(name) ? test.failing : test)(name, fn);
 
 function compileAndMount(source, baseName = "app", runtimePatch = "") {
@@ -772,14 +749,22 @@ describe("S469 round 5 — the review's H1–H4 / M1 shapes: the gate's RESULT i
  t = t + 10
  lift <b class="g" if=(t == @n)>\${r.id}</b> } }</div>
 `, [["n", 12], ["n", 1], ["n", 11], ["rows", [{ id: 2 }, { id: 1 }]], ["n", 2]], ["1", "2", "", "1", "1", ""]],
-    // M1 — stale on main and here (a cell read only inside a file function the group never re-reads):
-    // the content stays after the guard is revoked. g-lift-gate-placement-inherits-main-staleness-s469.
+    // M1 — stale on main (a cell read only inside a file function the group never re-read: "m" at every
+    // step). Now the gate's own effect tracks the cell `matches()` reads, and reads the file-level `mode`
+    // at its current value whenever it re-runs — what a re-run of the block would read.
+    // ⚠ KNOWN RESIDUAL, NOT THE CONDITION'S TRUTH: after the click `mode` is 2 and `@n` is 1, so
+    // `matches()` is FALSE, yet the expectation below pins "m" VISIBLE at that step. A write to a plain
+    // (non-cell) `let` notifies nothing, so nothing re-evaluates the gate until a cell it reads changes.
+    // That is the language's non-reactive-`let` residual, filed as
+    // g-lift-gate-reads-plain-let-written-later-s469 (owner question: should impl#1 refuse a gate that reads
+    // a plain `let` some code writes later, or should such writes notify?). Change this expectation when
+    // that is ruled.
     ["M1b a file function reading a file-level let mutated after render", `<n> = 1
 \${ let mode = 1 }
 \${ function matches() { return mode == @n } }
 <button id="bump" onclick=\${ mode = mode + 1 }>b</button>
 <div id="out">\${ lift <span><b class="g" if=(matches())>m</b></span> }</div>
-`, [["n", 2], ["n", 1], ["click", "#bump"], ["n", 2], ["n", 1]], ["m", "m", "m", "m", "m", "m"]],
+`, [["n", 2], ["n", 1], ["click", "#bump"], ["n", 2], ["n", 1]], ["m", "", "m", "m", "m", ""]],
   ];
   for (const [name, source, steps, mainResults] of CASES) {
     gateTest(name, async () => {
@@ -807,11 +792,18 @@ describe("S469 round 5 — the review's H1–H4 / M1 shapes: the gate's RESULT i
 <rows> = [{ id: 1 }, { id: 2 }]
 <div id="out">\${ for ({ id } of @rows) { lift <b class="g" if=(id == @n)>\${id}</b> } }</div>
 `);
-    expect(app.errors).toContain("E-CODEGEN-INVALID-LOGIC");
+    // Main refused it E-CODEGEN-INVALID-LOGIC (the per-item effect re-declared the pattern); the row's
+    // live item cannot be re-destructured there, so the gate is refused before that emission now.
+    expect(app.errors).toContain("E-IMPL1-LIFT-GATE-UNTRACKED");
   });
 });
 
 describe("S469 round 6 — a `while` inside a reconciled row: head's visible set is main's at every step", () => {
+  // s469-lift-gate-staleness — the six `__counter` cases read the while counter `i` (a body local): their
+  // keyed row is lowered as the plain loop, which the enclosing render re-runs, so each gate reads the counter's
+  // render-time value. MAIN_STEPS there are the condition's truth for each element (main hid `S2` at `@n = 2`
+  // and duplicated the escaped markup on every render). The nested / arm-in-row lifts still land outside
+  // their row's element (the escape below), in the list's host.
   // The while body lifts to the AMBIENT target, outside the row (g-while-lift-in-reconciled-row-escapes-the-row-s469,
   // HIGH, main too). Round 5 registered those escaped gates' subscriptions with the row's owner scope, which the
   // reconciler drops at mount (the factory returns nothing): the gate never re-ran and SECRET stayed. MAIN_STEPS is the
@@ -1071,21 +1063,21 @@ describe("S469 round 6 — a `while` inside a reconciled row: head's visible set
    ]
   ],
   [
-   "div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[]",
-   "div[] span[] div[]",
-   "div[] span[] div[]",
-   "div[] span[] div[]",
-   "div[] span[] div[] b.g[S0] b.g[S0]",
-   "div[] span[] div[] b.g[S0] b.g[S0]",
-   "div[] span[] div[] b.g[S0] b.g[S0]",
-   "div[] span[] div[]",
-   "div[] span[] div[]",
-   "div[] span[] div[]"
+   "div[] span[] b.g[S1]",
+   "div[] span[] b.g[S1]",
+   "div[] span[] b.g[S1]",
+   "div[] span[] b.g[S1]",
+   "div[] span[] b.g[S1]",
+   "div[] span[] b.g[S2]",
+   "div[] span[] b.g[S0]",
+   "div[] span[] b.g[S0]",
+   "div[] span[] b.g[S0]",
+   "div[] span[] b.g[S0] b.g[S0]",
+   "div[] span[] b.g[S0] b.g[S0]",
+   "div[] span[] b.g[S0] b.g[S0]",
+   "div[] span[] b.g[S1] b.g[S1]",
+   "div[] span[]",
+   "div[] span[]"
   ]
  ],
  [
@@ -1329,21 +1321,21 @@ describe("S469 round 6 — a `while` inside a reconciled row: head's visible set
    ]
   ],
   [
-   "div[] span[] div[] div.o[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] div.o[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] div.o[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] div.o[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] div.o[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] div.o[] div[]",
-   "div[] span[] div[] div.o[] div[]",
-   "div[] span[] div[] div.o[] div[]",
-   "div[] span[] div[] div.o[] div[]",
-   "div[] span[] div[] div.o[] div[] div.o[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
-   "div[] span[] div[] div.o[] div[] div.o[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
-   "div[] span[] div[] div.o[] div[] div.o[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
-   "div[] span[] div[] div.o[] div[] div.o[] div[]",
-   "div[] span[] div[]",
-   "div[] span[] div[]"
+   "div[] span[] b.g[S1] div.o[]",
+   "div[] span[] b.g[S1] div.o[]",
+   "div[] span[] b.g[S1] div.o[]",
+   "div[] span[] b.g[S1] div.o[]",
+   "div[] span[] b.g[S1] div.o[]",
+   "div[] span[] b.g[S2] div.o[]",
+   "div[] span[] b.g[S0] div.o[]",
+   "div[] span[] b.g[S0] div.o[]",
+   "div[] span[] b.g[S0] div.o[]",
+   "div[] span[] b.g[S0] b.g[S0] div.o[] b.g[S0] b.g[S0] div.o[]",
+   "div[] span[] b.g[S0] b.g[S0] div.o[] b.g[S0] b.g[S0] div.o[]",
+   "div[] span[] b.g[S0] b.g[S0] div.o[] b.g[S0] b.g[S0] div.o[]",
+   "div[] span[] b.g[S1] b.g[S1] div.o[] b.g[S1] b.g[S1] div.o[]",
+   "div[] span[]",
+   "div[] span[]"
   ]
  ],
  [
@@ -1587,21 +1579,21 @@ describe("S469 round 6 — a `while` inside a reconciled row: head's visible set
    ]
   ],
   [
-   "div[] div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] div[] span[] div[]",
-   "div[] div[] span[] div[]",
-   "div[] div[] span[] div[]",
-   "div[] div[] span[] div[]",
-   "div[] div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
-   "div[] div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
-   "div[] div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
-   "div[] div[] span[] div[]",
-   "div[] div[] span[] div[]",
-   "div[] div[] span[] div[]"
+   "div[] div[] span[] b.g[S1]",
+   "div[] div[] span[] b.g[S1]",
+   "div[] div[] span[] b.g[S1]",
+   "div[] div[] span[] b.g[S1]",
+   "div[] div[] span[] b.g[S1]",
+   "div[] div[] span[] b.g[S2]",
+   "div[] div[] span[] b.g[S0]",
+   "div[] div[] span[] b.g[S0]",
+   "div[] div[] span[] b.g[S0]",
+   "div[] div[] span[] b.g[S0] b.g[S0]",
+   "div[] div[] span[] b.g[S0] b.g[S0]",
+   "div[] div[] span[] b.g[S0] b.g[S0]",
+   "div[] div[] span[] b.g[S1] b.g[S1]",
+   "div[] div[] span[]",
+   "div[] div[] span[]"
   ]
  ],
  [
@@ -1845,21 +1837,21 @@ describe("S469 round 6 — a `while` inside a reconciled row: head's visible set
    ]
   ],
   [
-   "div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[]",
-   "div[] span[] div[]",
+   "div[] span[] b.g[S1]",
+   "div[] span[] b.g[S1]",
+   "div[] span[] b.g[S1]",
+   "div[] span[] b.g[S1]",
+   "div[] span[] b.g[S1]",
+   "div[] span[] b.g[S2]",
+   "div[] span[] b.g[S0]",
    "div[] span[]",
-   "div[] span[] div[] b.g[S0] b.g[S0]",
-   "div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
-   "div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
-   "div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
-   "div[] span[] div[]",
-   "div[] span[] div[]",
-   "div[] span[] div[]"
+   "div[] span[] b.g[S0]",
+   "div[] span[] b.g[S0] b.g[S0]",
+   "div[] span[] b.g[S0] b.g[S0]",
+   "div[] span[] b.g[S0] b.g[S0]",
+   "div[] span[] b.g[S1] b.g[S1]",
+   "div[] span[]",
+   "div[] span[]"
   ]
  ],
  [
@@ -2103,21 +2095,21 @@ describe("S469 round 6 — a `while` inside a reconciled row: head's visible set
    ]
   ],
   [
-   "div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[] b.g[S1] b.g[S1]",
-   "div[] span[] div[]",
-   "div[] span[] div[]",
+   "div[] span[] b.g[S1]",
+   "div[] span[] b.g[S1]",
+   "div[] span[] b.g[S1]",
+   "div[] span[] b.g[S1]",
+   "div[] span[] b.g[S1]",
+   "div[] span[] b.g[S2]",
+   "div[] span[] b.g[S0]",
    "div[] span[] p[off]",
-   "div[] span[] div[] b.g[S0] b.g[S0]",
-   "div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
-   "div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
-   "div[] span[] div[] b.g[S0] b.g[S0] b.g[S0] b.g[S0]",
-   "div[] span[] div[]",
-   "div[] span[] div[]",
-   "div[] span[] div[]"
+   "div[] span[] b.g[S0]",
+   "div[] span[] b.g[S0] b.g[S0]",
+   "div[] span[] b.g[S0] b.g[S0]",
+   "div[] span[] b.g[S0] b.g[S0]",
+   "div[] span[] b.g[S1] b.g[S1]",
+   "div[] span[]",
+   "div[] span[]"
   ]
  ],
  [
@@ -2361,21 +2353,21 @@ describe("S469 round 6 — a `while` inside a reconciled row: head's visible set
    ]
   ],
   [
-   "div[] span[] div[] div[] b.g[S3]",
-   "div[] span[] div[] div[] b.g[S3]",
-   "div[] span[] div[] div[] b.g[S3]",
-   "div[] span[] div[] div[] b.g[S3]",
-   "div[] span[] div[] div[] b.g[S3]",
-   "div[] span[] div[] div[]",
-   "div[] span[] div[] div[]",
-   "div[] span[] div[] div[]",
-   "div[] span[] div[] div[]",
-   "div[] span[] div[] div[] div[] b.g[S0]",
-   "div[] span[] div[] div[] div[] b.g[S0]",
-   "div[] span[] div[] div[] div[] b.g[S0]",
-   "div[] span[] div[] div[] div[]",
+   "div[] span[] b.g[S1] div[]",
+   "div[] span[] b.g[S1] div[]",
+   "div[] span[] b.g[S1] div[]",
+   "div[] span[] b.g[S1] div[]",
+   "div[] span[] b.g[S1] div[]",
+   "div[] span[] b.g[S2] div[]",
+   "div[] span[] b.g[S0] div[]",
    "div[] span[] div[]",
-   "div[] span[] div[]"
+   "div[] span[] b.g[S0] div[]",
+   "div[] span[] b.g[S0] div[] b.g[S0] div[]",
+   "div[] span[] b.g[S0] div[] b.g[S0] div[]",
+   "div[] span[] b.g[S0] div[] b.g[S0] div[]",
+   "div[] span[] b.g[S1] div[] b.g[S1] div[]",
+   "div[] span[]",
+   "div[] span[]"
   ]
  ]
 ];

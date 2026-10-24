@@ -20,45 +20,10 @@
 // callee position except a `const` alias by name (E-IMPL1-FAILABLE-FN-VALUE, an impl#1 limitation,
 // carried as `g-impl1-failable-fn-value-refused-s469`).
 export const KNOWN_FAIL = {
-  // S469 round 5 (s469-lift-if-render-gate) — main's evaluation PLACEMENT is the lane's oracle: only the
-  // DOM operation changed (display toggle -> swap). These n23 positions are stale on main too (FAIL there,
-  // or the harness crashes first), so they log in here as well, until their placement is fixed.
-  "n23/indirect (for-lift nested)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect (for-lift nested 2 deep)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect (for-lift multi-root, gated head)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect (for-lift multi-root, gated tail)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect (for-lift in for-lift, nested)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect (for over a literal, nested)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect (if-lift root)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect (if-lift nested)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect (bare lift root)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect (bare lift nested)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect (function returning markup)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect (ternary markup value)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect (lift in each in match arm)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect (component in for-lift, gated)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect (component in for-lift, gate in its body)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect and (for-lift nested)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect and (for-lift nested 2 deep)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect and (for-lift multi-root, gated head)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect and (for-lift multi-root, gated tail)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect and (for-lift in for-lift, nested)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect and (for over a literal, nested)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect and (if-lift root)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect and (if-lift nested)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect and (bare lift root)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect and (bare lift nested)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect and (function returning markup)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect and (ternary markup value)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect and (lift in each in match arm)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect and (component in for-lift, gated)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/indirect and (component in for-lift, gate in its body)": "g-lift-gate-placement-inherits-main-staleness-s469: the cell is read only inside the called function; main's placement subscribes to the `@` names in the text (none), so the revoke is never seen",
-  "n23/value-indexed row side (sole root), id keys": "g-lift-gate-placement-inherits-main-staleness-s469: the value bucket is keyed on the create-time row field (main's placement); a same-key row revoke is not seen",
-  "n23/value-indexed row side (nested), id keys": "g-lift-gate-placement-inherits-main-staleness-s469: the value bucket is keyed on the create-time row field (main's placement); a same-key row revoke is not seen",
-  "n23/value-indexed row side (sole root), index keys": "g-lift-gate-placement-inherits-main-staleness-s469: the value bucket is keyed on the create-time row field (main's placement); a same-key row revoke is not seen",
-  "n23/value-indexed row side (nested), index keys": "g-lift-gate-placement-inherits-main-staleness-s469: the value bucket is keyed on the create-time row field (main's placement); a same-key row revoke is not seen",
-  "n23/body local (row): flag set after the lift": "g-lift-gate-placement-inherits-main-staleness-s469: in a keyed row the updater re-reads the body local's final value (main's placement)",
-  "n23/body local (row): closure over a flag set after the lift": "g-lift-gate-placement-inherits-main-staleness-s469: in a keyed row the updater re-reads the body local's final value (main's placement)",
+  // S469 s469-lift-gate-staleness: EMPTY again. The 36 n23 entries of round 5 (a cell read inside a called
+  // function; the value-indexed row side; a body local in a keyed row) owed to
+  // g-lift-gate-placement-inherits-main-staleness-s469 are fixed: a lifted gate re-evaluates by re-running the
+  // code that produced what it reads, under the runtime's read tracking (emit-lift.js emitLiftGate).
 };
 
 // Shapes this instrument CANNOT judge: client pages with no #wrong button (a client function calling
