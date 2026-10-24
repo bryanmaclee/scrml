@@ -2,7 +2,7 @@ ${
     type Phase:enum = { Idle, Done }
     <phase>: Phase = .Idle
     <extracted>: string = "none"
-    const <label> = match @phase { .Idle :> "idle"  .Done :> "done" }
+    const <label> = match @phase { .Idle :> "idle",  .Done :> "done" }
     function run() {
         const match = "id-42".match(/(\d+)/)
         @extracted = match is given ? match[1] : "none"

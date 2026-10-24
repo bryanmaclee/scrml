@@ -44,7 +44,7 @@ import { rewriteExpr, rewriteServerExpr, rewriteExprArrowBody, rewriteServerExpr
 import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.ts";
 import { isRefineCall } from "../refinement-obligations.ts";
 import { emitRefineExpr, emitRefineUpdate, emitRefineMerge } from "./emit-predicates.ts";
-import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts";
+import { emitMatchExpr as emitStructuredMatchExpr, splitMultiArmString, parseMatchArm } from "./emit-control-flow.ts";
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { ARRAY_MUTATING_METHODS } from "../derived-mutation-ops.ts";
 import { CGError } from "./errors.ts";
@@ -114,7 +114,8 @@ import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
 import { iterDestructuredNames } from "../type-system.ts";
 import { lowerPresenceCheck, lowerAbsenceCheck, lowerVariantCheck } from "./is-predicate-lowering.ts";
-import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw, droppedStatementTextOf, hasLostTrailingContent } from "../expression-parser.ts";
+import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw, droppedStatementTextOf, hasLostTrailingContent, rawArmHasStrayComma } from "../expression-parser.ts";
+import { armHasDivisionSlash, rawArmHasLeadingPipeArm, armPiecesCover } from "../arm-list-split.ts";
 import { sqlQueryExprShape, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { emitSqlQueryShape, emitNestedGuardExpr, emitServerFnValueFromText, emitServerFnValue } from "./emit-logic.js";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
@@ -5098,12 +5099,84 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
   // expressions are uncommon (they appear only in server-handler bodies
   // referencing request-body shapes) and continue using the existing
   // rewrite pipeline.
+  // S469 (dpa-073 F2) — the arm list is a comma list; the expression parser has
+  // already split every `,` that separates two arms (`splitArmSeparatorCommas`). A
+  // depth-0 `,` still inside a raw arm separates nothing: `,,`, a leading `,`, or a
+  // comma sequence in an arm body (`.A :> f(x), 2`). Refuse it — never emit it as a
+  // JS comma operator (scrml has none, §40.8).
+  // S469 r5 — an arm led by `|` (`| 1 :> …`): §18.2's `match` has no leading `|` (the `!{}`
+  // handler's legacy spelling, §19.4.5). Refused here as the statement parser refuses it, never
+  // read past (it used to drop arms or dispatch on the wrong one).
+  // Read per ARM, as the lowering splits them (a raw arm can hold several juxtaposed arms, and a
+  // `|` after one arm's body is only a leading `|` relative to that arm).
+  // r6 — also on the WHOLE raw arm text, for a `|` that starts it (a splitter that drops a prefix
+  // must not be able to hide it).
+  for (const arm of node.rawArms) {
+    if (typeof arm !== "string" || !arm.includes("|")) continue;
+    const text = arm.trim().replace(/-\s*>/g, "->");
+    const pieces = splitMultiArmString(text);
+    if (!rawArmHasLeadingPipeArm(text, { startOnly: true }) && !pieces.some((p) => rawArmHasLeadingPipeArm(p))) continue;
+    recordRefusedLowering(new CGError(
+      "E-PARSE-001",
+      `E-PARSE-001: the \`match\` arm \`${excerptRaw(arm)}\` is led by \`|\` — a \`match\` arm takes no leading ` +
+        "`|` (§18.2); write it as `<pattern> :> body`. The `|`-led arm is the legacy spelling of a `!{}` " +
+        "handler arm only (§19.4.5).",
+      (node as { span?: object }).span ?? {},
+    ), node as object);
+    return "null /* E-PARSE-001 */";
+  }
+  for (const arm of node.rawArms) {
+    if (typeof arm !== "string" || !rawArmHasStrayComma(arm)) continue;
+    recordRefusedLowering(new CGError(
+      "E-PARSE-001",
+      `E-PARSE-001: the \`match\` arm \`${excerptRaw(arm)}\` holds a \`,\` that separates no two arms. ` +
+        "An arm list puts one `,` after each arm, the trailing one optional (`{ .A :> 1, .B :> 2, }`); " +
+        "a leading `,`, a doubled `,,`, or a comma sequence inside an arm body (scrml has no comma " +
+        "operator, §40.8) is not an arm list. Remove the `,` (§18.2)." +
+        (armHasDivisionSlash(arm)
+          ? " If the `,` is inside a regular expression written after `+`, `-`, `*` or `%`, impl#1 reads that " +
+            "`/` as division (g-impl1-regex-after-binary-operator-lexed-as-division-s469): wrap the regular " +
+            "expression in parentheses — `(/a,b/)`."
+          : ""),
+      (node as { span?: object }).span ?? {},
+    ), node as object);
+    return "null /* E-PARSE-001 */";
+  }
+  // S469 r6 — the COVERAGE invariant (arm-list-split.ts `armPiecesCover`): the arms the lowering
+  // splits a raw arm text into, plus separators and whitespace, must account for every
+  // non-whitespace character of it. A split that loses text (three shipped: a quote in a regex, a
+  // negative alternate, a `|`-led prefix) is refused here — never emitted with an arm missing.
+  for (const arm of node.rawArms) {
+    if (typeof arm !== "string") continue;
+    const text = arm.trim().replace(/-\s*>/g, "->");
+    if (armPiecesCover(text, splitMultiArmString(text))) continue;
+    recordRefusedLowering(new CGError(
+      "E-PARSE-001",
+      `E-PARSE-001: the \`match\` arm text \`${excerptRaw(arm)}\` cannot be read as arms without losing part of it. ` +
+        "Write one arm per `<pattern> :> body`, separated by `,` or a line break (§18.2).",
+      (node as { span?: object }).span ?? {},
+    ), node as object);
+    return "null /* E-PARSE-001 */";
+  }
   if (ctx.mode === "server") {
     const subject = emitExpr(node.subject, ctx);
     const arms = node.rawArms.join(" ");
     const reconstructed = `match ${subject} { ${arms} }`;
+    // S469 r7 (F3) — the no-call-in-server-text check reads the arm BODIES (as the one arm reader
+    // splits and parses them): an arm HEAD holds no call — `.Circle(r)` is a payload binder, not a
+    // call of `Circle`. If any arm cannot be read, the whole arm text is checked (fail closed).
+    let bodies: string[] | null = [];
+    for (const raw of node.rawArms) {
+      if (typeof raw !== "string") { bodies = null; break; }
+      for (const piece of splitMultiArmString(raw.trim().replace(/-\s*>/g, "->"))) {
+        const parsed = parseMatchArm(piece.replace(/^\|\s*(?=(?:_|else)\b)/, ""));
+        if (!parsed) { bodies = null; break; }
+        bodies.push(parsed.result);
+      }
+      if (bodies === null) break;
+    }
     return serverTextLowering(reconstructed, ctx, "a server `match` expression's arms", {
-      checkText: arms,
+      checkText: bodies === null ? arms : bodies.join(" ; "),
       noReparse: true,
       span: (node as { span?: object }).span ?? null,
     });

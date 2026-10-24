@@ -4,7 +4,7 @@ ${
 }
 <program>
     <p id="p">${ match @status {
-        .Active :> "active"
+        .Active :> "active",
         .Inactive :> "inactive"
     } }</>
 </>

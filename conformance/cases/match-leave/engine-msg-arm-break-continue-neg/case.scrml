@@ -4,11 +4,11 @@ ${
 }
 <engine for=Phase initial=.Idle accepts=Msg>
   <Idle rule=.Busy>
-    .Go :> break
+    .Go :> break,
     _   :> @phase
   </>
   <Busy rule=.Idle>
-    .Stop :> { continue }
+    .Stop :> { continue },
     _     :> @phase
   </>
 </>

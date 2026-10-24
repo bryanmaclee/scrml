@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 262 | 5 |
-| MED | 678 | 8 |
-| LOW | 480 | 0 |
+| HIGH | 263 | 5 |
+| MED | 681 | 8 |
+| LOW | 482 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -169,11 +169,224 @@ Found by the public-docs lane (PR #1485). Reproduced S469 (s469-spec-catchup) on
 
 Found by the public-docs lane (PR #1485). Reproduced S469 (s469-spec-catchup): `for (let i: int = 0; i < 3; i = i + 1) { … }` in a function → `E-CODEGEN-INVALID-LOGIC`. It fails closed, but the message calls it a compiler defect; the honest diagnostic is a labelled impl#1 refusal naming the ruled form (S469 "Split + audit"). Not fixed (S435): filed under the owner's "File as gaps" ruling (S469), which named two other impl#1 bugs; the PA applies it here (a PA application, not a separate ruling).
 
-### g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469 — impl#1 REFUSES a comma between arms (`E-MATCH-ARM-SEPARATOR`), but dpa-073 F5(1) ruled that impl#1 ACCEPTS arm commas (an S435 exception that powers the `;` / `,` codemod) — `NEW S469 (filed); MED; open (owed impl#1 change, bootstrap-serving)`
+### g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469 — impl#1 REFUSES a comma between arms (`E-MATCH-ARM-SEPARATOR`), but dpa-073 F5(1) ruled that impl#1 ACCEPTS arm commas (an S435 exception that powers the `;` / `,` codemod) — `NEW S469 (filed); MED; RESOLVED S469 (s469-impl1-arm-commas)`
 
-<!-- @gap id=g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469 sev=MED status=open locus=compiler/src(the E-MATCH-ARM-SEPARATOR check — fires on `,` after a match arm) prov=ruling:user-voice-scrml.md(S469 "⭐ RULED — dpa-073 F5 Bootstrap enforces (Recommended)" — "(1) impl#1 ACCEPTS arm commas — an S435 exception (S452 precedent), and powers the codemod");ruling:user-voice-scrml.md(S469 dpa-073 F2 "Comma list (Recommended)");dispatch:s469-public-docs(PR #1485);spec:§18.2 -->
+<!-- @gap id=g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469 sev=MED status=resolved locus=compiler/src(the E-MATCH-ARM-SEPARATOR check — fires on `,` after a match arm) prov=ruling:user-voice-scrml.md(S469 "⭐ RULED — dpa-073 F5 Bootstrap enforces (Recommended)" — "(1) impl#1 ACCEPTS arm commas — an S435 exception (S452 precedent), and powers the codemod");ruling:user-voice-scrml.md(S469 dpa-073 F2 "Comma list (Recommended)");dispatch:s469-public-docs(PR #1485);spec:§18.2 -->
+
+RESOLVED S469 (s469-impl1-arm-commas): impl#1 ACCEPTS `,` between arms, the trailing one optional, in every arm list it reads — a `match` (statement, value, `return`, `const`, markup `${…}`, call argument, derived cell, engine `derived=`; expression position via the expression parser's arm split), a `!{}` handler (`parseErrorTokens`) and an engine message-arm list (`parseMessageArms`) — for every arm form (variant, binder, literal, alternation, `else` / `_`, `not`, `given`, product, block, leaving arms). It keeps reading newline-separated arms (the carried divergence; it never enforces commas) and a mixed list. A depth-0 `,` ends an arm body (scrml has no comma operator); a `,` inside a call, object, string, template or product pattern is the body's own. Fail closed: a leading `,`, a `,,`, or a comma sequence left in an arm body is E-PARSE-001. The S144 typer check that refused the `,` (E-MATCH-ARM-SEPARATOR, old meaning) is retired; impl#1 no longer emits that code. Measured: the corpus emit differential (2860 sources, 8609 artifacts) shows zero differences for existing input. Pinned by `compiler/tests/unit/match-arm-commas-s469.test.js` (49 tests) and the rewritten §1–§3 of `match-arm-separator-and-value-unused-s144.test.js`. Original entry:
 
 Found by the public-docs lane (PR #1485). Reproduced S469 (s469-spec-catchup): `match @k { "a" :> 1, else :> 2 }` → `E-MATCH-ARM-SEPARATOR` ("Match arms are separated by newlines, not commas (§18.2)"). This is NOT a stays-a-gap bug: it is an owed impl#1 change, ruled under the S435 exception because the migration route needs it — impl#1 must accept arm commas (match, `!{}` and engine message arms, trailing comma optional) so the `scrml fix` codemod can insert them and verify by emit diff (dpa-073 F5 steps 1–2). impl#1 does not ENFORCE commas (newline-separated arms stay accepted, a carried divergence). SPEC §18.2 / §19.4.5 state the comma list (s469-spec-catchup).
+
+### g-impl1-expr-match-literal-alternation-first-alternate-dropped-s469 — in an expression-position `match` (`@cell = match …`) written as a NEWLINE list, a literal alternation arm followed by another literal arm loses its first alternate (`1 | 2 :> "low"` matches only `2`), silently — `NEW S469; HIGH; RESOLVED S469 (s469-impl1-arm-commas r3)`
+
+<!-- @gap id=g-impl1-expr-match-literal-alternation-first-alternate-dropped-s469 sev=HIGH status=resolved locus=compiler/src/codegen/emit-control-flow.ts(splitMultiArmString — a number / string arm head preceded by `|` is registered as an arm start, and the text before the first registered start is dropped) prov=dispatch:s469-impl1-arm-commas(r2, review of 2f9176de0 F3 — repro sent);review:s469-impl1-arm-commas(F3) -->
+
+RESOLVED S469 (s469-impl1-arm-commas r3, the S435 security limb — a silent miscompile that decides an auth outcome): `splitMultiArmString` reads a string / number head through its `| literal` alternate chain to the arm arrow, and an alternate (the previous non-space character a lone `|`) is never an arm start — the guard its variant branch already had. Pinned by `compiler/tests/unit/match-literal-alternation-s469.test.js` (number / string / mixed alternations of 2 and 3 alternates × `@cell = match`, `return match`, `const v = match`, derived cell, derived `const` cell, call argument, markup `${}` × newline / comma / mixed spellings, byte-identical; before the fix the `@cell`, derived-cell and call-argument rows failed) and security-failable-pack n24 (27 deny-list shapes; on c4233fa33 every newline-spelled `@cell` / call-argument shape logged the wrong password in). Corpus emit differential c4233fa33 → fix: no artifact changed (no corpus program used the shape). Original entry:
+
+Reproduced S469 (s469-impl1-arm-commas r2) on the batch-5 base `aa341cda0` and on this branch, exit 0, no diagnostic:
+
+```scrml
+<k> = 1
+<n> = ""
+${
+  function go() {
+    @n = match @k {
+      1 | 2 :> "low"
+      3 :> "mid"
+      _ :> "hi"
+    }
+  }
+}
+<button onclick=go()>go</>
+<p>${@n}</>
+```
+
+emits `if (_scrml_match_4 === 2) return "low";` — the `1` alternate is gone, so `@k = 1` reads `"hi"`. Mechanism (number heads): the expression parser's line split (`splitMatchArms`) does not start an arm at a literal head, so the first two lines arrive as ONE raw arm `1 | 2 :> "low" 3 :> "mid"`; `splitMultiArmString` registers `2 :>` (a standalone number before an arrow) as an arm start and slices from there, dropping `1 |`. Variant alternations are guarded (`isAlternate`), literal ones are not. A STRING alternation is worse: `"a" | "b" :> "low"` (then `"c" :> "mid"`, `_ :> "hi"`) emits `=== "b"` only in BOTH the newline and the comma spelling, on base and on this branch — the first alternate is dropped even when the arm arrives alone. Measured: the number case as a comma list is correct (each arm arrives as its own raw arm); `const v = match …` with the number arms lowers `=== 1 || === 2` correctly. The reviewer of 2f9176de0 probed other positions and did not reproduce it; `@cell = match …` (a reactive assignment, the raw-arm path) is the position. Not fixed (S435: impl#1 non-security bugs stay gaps unless ruled).
+
+### g-impl1-match-primitive-cell-subject-e-type-025-s469 — a `match` on a reactive cell of a primitive type (`<k>: string`, `number`, `int`, `bool`, or an inferred `<k> = "a"`) is refused as E-TYPE-025 "Cannot match on `asIs`-typed subject" in the statement, `const v =`, derived `const <n>`, cell-initializer and markup `${}` positions, although §18.16 says `match` SHALL accept `string`, `number` and `boolean` values — `NEW S469; MED; open (valid program refused)`
+
+<!-- @gap id=g-impl1-match-primitive-cell-subject-e-type-025-s469 sev=MED status=open locus=compiler/src/type-system.ts(checkMatchDiagnostics — the E-TYPE-025 subject check: an `@cell` subject of a primitive type resolves to `asIs`) prov=dispatch:s469-impl1-arm-commas(r3 test matrix, measured);spec:§18.16,§18.8,§14.13.6 -->
+
+**SPEC.** §18.16 (Literal Match Arms): "`match` SHALL accept values of type `string`, `number`, and `boolean`", and its normative statements repeat it per type ("`match` SHALL accept `string`-typed values" / "`number`-typed values" / "`boolean`-typed values"). §14.13.6 spells the integer and boolean types `int` and `bool`; `int` is a refinement of `number` (S404) and an `int` is a `number` wherever a `number` is expected (§14.13). §18.8's E-TYPE-025 rule is about `asIs` (and `unknown`, §7.5.2) subjects only: "A `match` SHALL NOT be valid over `asIs`-typed values." No SPEC text makes a primitive-typed CELL an `asIs` subject, so each refusal below is a valid program rejected.
+
+**Measured S469 (s469-impl1-arm-commas r3, branch head 6f35fa4bb).** Subject `@k`, a cell declared `<k>: T = v`. Each arm list is `<literal> :> "x"` then `_ :> "y"`; the refused codes are the only Error-severity diagnostics:
+
+| position | `string` | `number` | `int` | `bool` | `number \| string` |
+|---|---|---|---|---|---|
+| statement `match @k { … }` in a function | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | ok |
+| `const v = match @k { … }` in a function | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | ok |
+| derived `const <n> = match @k { … }` | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | ok |
+| cell initializer `<n> = match @k { … }` | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | ok |
+| markup `<p>${match @k { … }}</p>` | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | E-TYPE-025 | ok |
+| `@n = match @k { … }` in a function | ok | ok | ok | ok | ok |
+| `@n = f(match @k { … })` (call argument) | ok | ok | ok | ok | ok |
+| `return match k { … }` (`k` a typed parameter) | ok | ok | ok | ok | ok |
+
+Repros, one per refused position (`T` / `v` / `L` = `string` / `"a"` / `"a"`, `number` / `1` / `1`, `int` / `1` / `1`, `bool` / `true` / `true`):
+
+```scrml
+// statement
+<k>: T = v
+<n> = ""
+${
+  function go() {
+    match @k {
+      L :> { @n = "x" }
+      _ :> { @n = "y" }
+    }
+  }
+}
+<button onclick=go()>go</>
+<p>${@n}</>
+```
+
+```scrml
+// const v = match
+<k>: T = v
+<n> = ""
+${
+  function go() {
+    const v = match @k {
+      L :> "x"
+      _ :> "y"
+    }
+    @n = v
+  }
+}
+<button onclick=go()>go</>
+<p>${@n}</>
+```
+
+```scrml
+// derived const cell
+<k>: T = v
+const <n> = match @k {
+  L :> "x"
+  _ :> "y"
+}
+<p>${@n}</>
+```
+
+```scrml
+// cell initializer
+<k>: T = v
+<n> = match @k {
+  L :> "x"
+  _ :> "y"
+}
+<p>${@n}</>
+```
+
+```scrml
+// markup ${}
+<k>: T = v
+<p>${match @k {
+  L :> "x"
+  _ :> "y"
+}}</p>
+```
+
+An untyped cell with an inferred primitive (`<k> = "a"`) is refused the same way in markup. A typed LOCAL (`const s: string = "a"; match s { … }`) and a typed PARAMETER (`function go(s: string) { match s { … } }`) are accepted, so the refusal is specific to an `@cell` subject. The two positions that accept the cell (`@n = match`, the call argument) lower through the expression parser's raw-arm path, which does not run this subject check. Fails closed (the build fails), but on valid code. A union-typed cell (`number | string`) is accepted in every position (the round-3 alternation matrix uses it to stay clear of this gap). Owed: resolve a primitive-typed cell subject to its declared or inferred type in `checkMatchDiagnostics`. Not fixed (S435: impl#1 non-security bugs stay gaps).
+
+### g-impl1-false-e-value-function-stored-expr-match-into-cell-s469 — `@cell = match …` (an expression-position value match stored into a cell) is refused with E-VALUE-FUNCTION-STORED ("stores a function a `match` arm yields") when no arm yields a function — `NEW S469; MED; open (valid program refused)`
+
+<!-- @gap id=g-impl1-false-e-value-function-stored-expr-match-into-cell-s469 sev=MED status=open locus=searched:compiler/src/value-function-stored.ts(the raw-arm read of a `match` stored into a cell — `rawArms` text)—not-traced prov=review:s469-impl1-arm-commas(final review of 6f35fa4bb);dispatch:s469-impl1-arm-commas(r4, measured) -->
+
+Reported by the final review of 6f35fa4bb (s469-impl1-arm-commas) in the negative-alternate shape; measured S469 r4. At this branch's head the negative-alternate shape (`@n = match @k {⏎ 1 | -3 :> "neg"⏎ 3 :> "p"⏎ _ :> "z"⏎ }`) compiles correctly — its false positive was a symptom of the raw-arm mis-split fixed in r4. The class is still live for a multi-scrutinee match stored into a cell, which lowers correctly but is refused:
+
+```scrml
+type A:enum = { X, Y }
+<a>:A = .X
+<b>:A = .Y
+<n> = 0
+${
+  function go() {
+    @n = match (@a, @b) {
+      (.X, .X) :> 1
+      (.X, .Y) :> 2
+      (_, _) :> 3
+    }
+  }
+}
+<button onclick=go()>go</>
+<p>${@n}</>
+```
+
+→ E-VALUE-FUNCTION-STORED (both arm spellings, on 6f35fa4bb and at head). It also fires on a mis-lexed arm body (`42 -> /"/.source,` — see g-impl1-regex-after-binary-operator-lexed-as-division-s469). The detector reads arm text that is not a function as one; owed: decide "the arm yields a function" from the lowered arm, not the raw text.
+
+### g-impl1-legacy-pipe-literal-match-arms-s469 — `match` arms written with a leading legacy `|` before a LITERAL pattern (`| 1 :> "one"`) are not read as arms: a statement `match` silently runs the LAST arm's body for every subject, and a value `match` is refused with E-VALUE-FUNCTION-STORED + E-CG-003 — `NEW S469; HIGH; RESOLVED S469 (s469-impl1-arm-commas r5)`
+
+<!-- @gap id=g-impl1-legacy-pipe-literal-match-arms-s469 sev=HIGH status=resolved locus=compiler/src/ast-builder.js(the match arm level — a `|`-led literal head is no arm form; the `|` skip in _parseRecursiveBodyInner covers only `| _` / `| else` / `| ( … )`) prov=review:s469-impl1-arm-commas(final review of 6f35fa4bb — "refused on head, broken on base");dispatch:s469-impl1-arm-commas(r4, measured);spec:§18.2,§19.4.5 -->
+
+RESOLVED S469 (s469-impl1-arm-commas r5, the S435 security limb — a silent miscompile that decided an auth outcome): a `|`-led `match` arm (literal, string, negative or variant head; first, later or every arm) is refused with E-PARSE-001 in EVERY position and spelling — never read past. Statement parser: at the arm level the `|` ends the previous arm body (collectExpr) and is refused (`_parseRecursiveBodyInner`); raw-arm lowering: `rawArmHasLeadingPipeArm` (arm-list-split.ts, the lexer's tokens) per split arm in `emitMatchExpr`; the raw-arm splitter no longer reads an operator's operand (`x + "|"`) as a head. Refusal, not dispatch: SPEC §19.4.5 says §18.2's `match` grammar never admitted a leading `|`. Unchanged: `| _` / `| else` / `| ( … )` (g-impl1-multi-scrutinee-pipe-wildcard-accepted-s452) and the `!{}` / engine message-arm `|`. Some value-position compiles are refused by the typer first (the filed false E-VALUE-FUNCTION-STORED) — still a refusal. Pinned by `compiler/tests/unit/match-leading-pipe-arm-s469.test.js` (7 positions × 8 lists × newline / comma / one-line), the seeded differential (`|`-led arms generated, refused in every spelling), and security-failable-pack n24 (18 shapes; on be0a7799d the 9 statement shapes logged the wrong password in). Corpus emit differential be0a7799d's arm code → fix: no artifact changed. Original entry:
+
+The leading `|` is a legacy spelling of a `!{}` handler arm (§19.4.5); a `match` arm takes no leading `|` (the bootstrap refuses it as E-PARSE-ARM). impl#1 measured S469 r4 on 6f35fa4bb and at this branch's head:
+
+```scrml
+<k>: number | string = 1
+<n> = ""
+${
+  function go() {
+    match @k {
+      | 1 :> { @n = "one" }
+      | 2 :> { @n = "two" }
+      | _ :> { @n = "z" }
+    }
+  }
+}
+<button onclick=go()>go</>
+<p>${@n}</>
+```
+
+compiles with NO diagnostic and emits `{ _scrml_cs_reactive_set("n", "z"); }` unconditionally — the `1` and `2` arms are gone. The value form (`@n = match @k { | 1 :> "one"⏎ | 2 :> "two"⏎ | _ :> "z" }`) is refused (E-VALUE-FUNCTION-STORED, E-CG-003 "match expression had no lowerable arms"). Owed: refuse a `|`-led literal (and variant) arm head in a `match` with a named code — never read past it.
+
+### g-impl1-stmt-match-arm-bare-handled-call-dropped-s469 — a statement-match arm whose body is a BARE handled call (`1 :> risky(2) !{ … }`, no braces) was silently DROPPED: the `!{}` was read as the handler of the whole ARM, wrapping it in a guarded-expr no match lowering reads; in value positions (`const v = match`, `return match`) the arm vanished too — `NEW S469; HIGH; RESOLVED S469 (s469-impl1-arm-commas r6)`
+
+<!-- @gap id=g-impl1-stmt-match-arm-bare-handled-call-dropped-s469 sev=HIGH status=resolved locus=compiler/src/ast-builder.js(_parseRecursiveBodyInner — the GUARDED-EXPR wrap after parseOneStatement took a match ARM as the guarded node) prov=review:s469-impl1-arm-commas(final review of fc046f011, F2 — pre-existing, also on main);dispatch:s469-impl1-arm-commas(r6);spec:§18.5,§19.4.3 -->
+
+RESOLVED S469 (s469-impl1-arm-commas r6, the S435 security limb — a dropped arm decided an auth outcome). Found by the final review of fc046f011 (pre-existing, also on main): `match @k { 1 :> risky(2) !{ | ::Bad e -> {…} | _ e -> {…} }⏎ 2 :> …⏎ else :> @n = 0 }` emitted no `=== 1` branch, exit 0. The arm parser's `1 :> risky(2)` ended at the `!{}` BLOCK_REF (a statement boundary) and the body loop's GUARDED-EXPR wrap then took the whole ARM node as the guarded expression. Fix: at a match's arm level a bare handled-call body (`bareHandledArmBody`) is wrapped in zero-width braces before the arm is parsed, so a STATEMENT match's arm parses, checks and lowers exactly as `1 :> { risky(2) !{ … } }` (byte-identical output, measured); a VALUE match (`const v = match`, `return match`) has no braced equivalent (a block arm yields with `lift`) and is refused, E-PARSE-001 ("bind the handled call first"). `@n = match …` (the raw-arm path) was already refused (E-ERROR-002). Pinned by `compiler/tests/unit/match-arm-bare-handled-call-s469.test.js` (21; 20 fail on fc046f011) and security-failable-pack n24 (8 shapes; on fc046f011 the 4 first-arm shapes logged the wrong password in, the 4 wildcard-arm shapes were refused E-TYPE-006).
+
+### g-impl1-text-lowered-match-arms-dropped-s469 — a `match` lowered from TEXT by `rewriteMatchExpr` — a server function's `v = match …` / `String(match …)`, and an engine's `derived=match` — used a private arm splitter / parser that silently dropped literal alternates (`"a" | "b" :>` lost `"a"`), number and boolean arms, and any piece it could not read — `NEW S469; HIGH; RESOLVED S469 (s469-impl1-arm-commas r7)`
+
+<!-- @gap id=g-impl1-text-lowered-match-arms-dropped-s469 sev=HIGH status=resolved locus=compiler/src/codegen/rewrite.ts(rewriteMatchExpr — the deleted _splitMultiArmString / parseInlineMatchArm copies; unparsed pieces were skipped) prov=review:s469-impl1-arm-commas(final review of 6c9f99474, F1 / F2 — fuzz7: 30 BAD-SEQ at server positions);dispatch:s469-impl1-arm-commas(r7);spec:§18.2,§18.16 -->
+
+RESOLVED S469 (s469-impl1-arm-commas r7, the S435 security limb — dropped arms decided auth outcomes). Pre-existing, made reachable by the canonical comma spelling (the comma / one-line spellings were the silent ones). Fix — ONE arm reader: `rewriteMatchExpr` now reads its arm text with the same token-based reader every client expression-position match uses (`splitArmSeparatorCommas`, codegen `splitMultiArmString` / `parseMatchArm`) under the `armPiecesCover` coverage invariant; rewrite.ts's private `_splitMultiArmString` / `parseInlineMatchArm` are deleted. A piece no arm form reads, a split that loses text, a `|`-led arm or a stray `,` is refused (E-PARSE-001) — never skipped; literal alternations lower to an OR-chain. Text with no arm arrow is left as written (not an arm list). F3 (a server call-argument match with a payload-binder head `.Circle(r) :>` refused by the no-call-in-server-text check, which read the binder as a call) is fixed too: the check reads the arm BODIES the one reader parses. Pinned by `compiler/tests/unit/match-arm-list-server-differential-s469.test.js` (seeded; sret / sconst / scall / slet + engine `derived=`; 12 fail on the pre-r7 reader), security-failable-pack s3 (18 server shapes; on 6c9f99474 6 FAIL, 6 refused) and n24 (6 engine `derived=` shapes, all FAIL on 6c9f99474). Reviewer fuzzers fuzz5 / fuzz6 / fuzz7 on seeds 91–100: 0 BAD-SEQ, 0 DIFF-OUT. Corpus emit differential: no program changed.
+
+### g-impl1-text-lowered-match-payload-variant-misdispatch-s469 — a `match` lowered from TEXT (`rewriteMatchExpr`: a server function's `v = match …` / `String(match …)`, an engine `derived=match`) compared a PAYLOAD variant value (`{ variant: "Circle", data: { r: 5 } }`) with the name `"Circle"` — never equal — so the else arm ran silently, and `.Circle(r)` never bound `r` — `NEW S469; HIGH; RESOLVED S469 (s469-impl1-arm-commas r8)`
+
+<!-- @gap id=g-impl1-text-lowered-match-payload-variant-misdispatch-s469 sev=HIGH status=resolved locus=compiler/src/codegen/rewrite.ts(rewriteMatchExpr — `${tmpVar} === "<Variant>"` against the subject value; arm.binding never bound) prov=review:s469-impl1-arm-commas(final review of 45208d9c7, F1 — main has it in most spellings; r7's F3 fix removed main's refusal of the newline `.Circle(r)` form);dispatch:s469-impl1-arm-commas(r8);spec:§18.7 -->
+
+RESOLVED S469 (s469-impl1-arm-commas r8, the S435 security limb — a payload variant decided a login). Repro (review): a server function `let v = ""; v = match k { .Circle(r) :> "c"⏎ .Square(s) :> "s"⏎ else :> "o" }` over `Shape = { Circle(r: number), Square(s: number), Tri, Dot }` returned "o" for `{variant: "Circle", data: {r: 5}}`. Fix: when an arm names a payload variant, the text lowering dispatches on the TAG — `(v != null && typeof v === "object") ? v.variant : v`, as the structured emitters do (`emitMatchTagDiscriminator`) — and binds the payload from `.data` by the declared field order (positional and named binders; an unresolvable positional binder is refused, E-PARSE-001). Unit-variant-only matches keep the direct comparison (a unit value IS its name; output unchanged). Pinned by `compiler/tests/unit/match-text-lowered-payload-variant-s469.test.js` (EXECUTES the emitted server route on payload and unit values; reassignment / call argument / return × newline / comma), the server differential (now asserts that a payload variant is compared on a tag variable — its earlier dispatch regex accepted the bug), and security-failable-pack s3 (6) + n24 (3 engine `derived=`) payload-variant deny-list shapes — all 9 FAIL on 16d03e9fa.
+
+### g-impl1-nested-inline-value-match-in-raw-arm-invalid-logic-s469 — an expression-position `match` whose arm body is another multi-line value `match` (`@n = match @a { .X :> match @b {⏎ .X :> 1⏎ .Y :> 2⏎ }⏎ .Y :> 3 }`) fails as E-CODEGEN-INVALID-LOGIC (a compiler-defect code), in both arm spellings and on base — `NEW S469; MED; open (fails closed)`
+
+<!-- @gap id=g-impl1-nested-inline-value-match-in-raw-arm-invalid-logic-s469 sev=MED status=open locus=compiler/src/expression-parser.ts(preprocessMatchExprs — a nested `match … { … }` in a raw arm is masked inner-first but the outer arm text keeps the inner match source) prov=dispatch:s469-impl1-arm-commas(round 1 probe);review:s469-impl1-arm-commas(review of 2f9176de0) -->
+
+Found S469 (s469-impl1-arm-commas): the emitted JS holds `return match _…` — the inner `match` reaches the output as text. Fails closed (the build fails), but under E-CODEGEN-INVALID-LOGIC, which names a compiler defect rather than the construct. The same nesting as a statement `match` with block arms compiles. Owed: lower the inner match as a nested match-expr, or refuse it with a construct-naming code.
+
+### g-engine-msg-arm-target-template-interp-split-as-markup-s469 — a `${…}` inside a template literal in an engine message-arm target is split as a markup interpolation instead of staying part of the template — `NEW S469; MED; open (reported by review; repro owed)`
+
+<!-- @gap id=g-engine-msg-arm-target-template-interp-split-as-markup-s469 sev=MED status=open locus=searched:compiler/src(engine state-child body: the block splitter / parseMessageArms read of a template literal in a message-arm target)—not-traced prov=review:s469-impl1-arm-commas(review of 2f9176de0, filed at the PA's request) -->
+
+Reported by the review of 2f9176de0 (s469-impl1-arm-commas). The lane's probe of the BLOCK form (`.Inc :> { @total = \`n=${@total}x\`; .Counting }`) compiles correctly in both arm spellings, so the reviewer's shape (a template in the arm TARGET) is the one to record here; the exact repro is owed from the reviewer.
+
+### g-impl1-expr-match-arm-after-else-generic-invalid-logic-s469 — an arm after the `else` arm of an expression-position `match` (`@n = match @k { "a" :> 1⏎ else :> 2⏎ "b" :> 3 }`) fails as a generic E-CODEGEN-INVALID-LOGIC, while the statement form gets the dedicated E-SYNTAX-010 (§18.6) — `NEW S469; LOW; open (fails closed, wrong code)`
+
+<!-- @gap id=g-impl1-expr-match-arm-after-else-generic-invalid-logic-s469 sev=LOW status=open locus=compiler/src/codegen/emit-control-flow.ts(emitMatchExpr — the raw-arm path lowers arms after the wildcard into an `else … else if` chain) prov=review:s469-impl1-arm-commas(review of 2f9176de0);dispatch:s469-impl1-arm-commas(r2 probe);spec:§18.6 -->
+
+Reproduced S469 on base and on this branch, both arm spellings: the emitted `else return 2; else if (…)` does not parse, so validate-emit reports E-CODEGEN-INVALID-LOGIC ("a compiler defect"). The statement form (`match @a { .X :> {…}⏎ else :> {…}⏎ .Y :> {…} }`) reports E-SYNTAX-010 "`else` arm must be the last arm". Owed: the same E-SYNTAX-010 for the expression-position raw-arm path.
+
+### g-spec-stray-arm-comma-code-bootstrap-e-parse-arm-vs-impl1-e-parse-001-s469 — a `,` in an arm list that separates nothing (a leading `,`, `,,`) is `E-PARSE-ARM` in the bootstrap (a code not in the §34 catalog) and `E-PARSE-001` in impl#1 — `NEW S469; LOW; open (for the SPEC lane)`
+
+<!-- @gap id=g-spec-stray-arm-comma-code-bootstrap-e-parse-arm-vs-impl1-e-parse-001-s469 sev=LOW status=open locus=compiler/self-host-v2/parse.scrml(parseArms — `E-PARSE-ARM` "a `,` with no arm before it");compiler/SPEC.md(§34 — E-PARSE-001 row, S469 stray-`,` limb; no E-PARSE-ARM row) prov=dispatch:s469-impl1-arm-commas(round 1 report, deferred item 4);review:s469-impl1-arm-commas(review of 2f9176de0) -->
+
+The two implementations refuse the same input under different codes. §34 catalogs E-PARSE-001 (its S469 limb names the impl#1 stray-`,` sites) and has no E-PARSE-ARM row. Owed (SPEC lane): pick one code for the stray arm separator — catalog E-PARSE-ARM (and move impl#1 to it), or move the bootstrap to E-PARSE-001.
+
+### g-impl1-regex-after-binary-operator-lexed-as-division-s469 — impl#1's lexer reads a `/` right after a binary `+` / `-` / `*` / `%` as DIVISION, so a regular expression written there is re-spelled space-padded — a different regex (`"x" + /a,b/.source` emits `/ a , b /`) — silently, in any position — `NEW S469; HIGH; open (silent miscompile)`
+
+<!-- @gap id=g-impl1-regex-after-binary-operator-lexed-as-division-s469 sev=HIGH status=open locus=compiler/src/tokenizer.ts(isRegexContext — PUNCT `+` `-` `*` `%` are not in REGEX_PUNCT, so the next `/` is division) prov=dispatch:s469-impl1-arm-commas(r2, review of 2f9176de0 F1 case 3) -->
+
+Found S469 (s469-impl1-arm-commas r2) while fixing review F1. `@s = "x" + /a,b/.source` in a function emits `"x" + / a , b /.source` (exit 0, no diagnostic): the regex now matches `" a , b "`. The same holds for a `match` arm body (`"a" :> "x" + /a.b/.source` emits `/ a . b /`). The lexer comment says `+ - * %` were left out "to avoid false positives like `x * /foo/.test()`", but after a binary operator a `/` cannot be division. In an expression-position match arm the lane's stray-`,` guard now REFUSES the shape when the regex holds a `,` (E-PARSE-001, naming this gap and the parenthesized spelling `(/a,b/)`, which compiles correctly); every other position still miscompiles. The deprecated `->` arm arrow is the same class: at the SOURCE it is two PUNCT tokens (`-`, `>`), so `.A -> /"/.source` re-spells the regex (`/ "/.source`), and the arm list's meaning then depends on its layout (measured S469 r4; the seeded differential `match-arm-list-differential-s469.test.js` keeps regex bodies away from `->` for that reason). Owed: put `+ - * %` (and the other binary operators) in regex context — a lexer-wide change, measured by the corpus emit differential.
 
 ### g-spec-class-attr-string-coercion-vs-s469-s469 — SPEC §5.5.4 still says a `class=(expression)` result "SHALL be coerced with `String()`" and writes `[]` as its `String()` form (an array joins as `"a,b"`), which contradicts the S469 conversions rule that a non-primitive never reaches a text sink implicitly (`E-TEXT-NON-PRIMITIVE`, §14.13.2) — `NEW S469; LOW; RESOLVED S469 (s469-spec-catchup r2 — ruled "string or tape of strings")`
 
@@ -199,7 +412,7 @@ Owed: the bootstrap parses a `<db>` body and a `<channel>` body as item position
 
 <!-- @gap id=g-bootstrap-newline-arm-lists-accepted-s469 sev=MED status=resolved resolved-by=s469-boot-semicolons locus=compiler/self-host-v2/parse.scrml(the arm-list parser — reports only a list that mixes `,` and newline boundaries) prov=ruling:user-voice-scrml.md(S469 "⭐ RULED — dpa-073 F5 Bootstrap enforces (Recommended)" — "(4) the BOOTSTRAP enforces `;` + commas by construction");review:s469-spec-catchup(fidelity review of 5245b8854, F4);spec:§18.2 -->
 
-The bootstrap's parser accepts both spellings and reports `E-MATCH-ARM-SEPARATOR` only for a list that MIXES them (its comment: the newline list "is still read during the migration … the bootstrap's own source is newline-separated, and impl#1, which builds it, does not read arm commas yet"). The ruled end state is that the bootstrap refuses every missing `,`; only impl#1 keeps the newline list (a carried divergence). Sequencing: enforcing it needs the bootstrap's own source migrated first (6,139 arm boundaries, by the `scrml fix` codemod — dpa-073 F5 steps 2–3), and impl#1 to accept commas (`g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469`), since impl#1 builds the bootstrap. Filed so the interim is not mistaken for the rule.
+The bootstrap's parser accepts both spellings and reports `E-MATCH-ARM-SEPARATOR` only for a list that MIXES them (its comment: the newline list "is still read during the migration … the bootstrap's own source is newline-separated, and impl#1, which builds it, does not read arm commas yet"). The ruled end state is that the bootstrap refuses every missing `,`; only impl#1 keeps the newline list (a carried divergence). Sequencing: enforcing it needs the bootstrap's own source migrated first (6,139 arm boundaries, by the `scrml fix` codemod — dpa-073 F5 steps 2–3), and impl#1 to accept commas (`g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469` — resolved S469, s469-impl1-arm-commas), since impl#1 builds the bootstrap. Filed so the interim is not mistaken for the rule.
 
 **RESOLVED S469 (s469-boot-semicolons, #1510).** The bootstrap now reports every arm after the first that does not follow a `,` (`compiler/self-host-v2/parse.scrml` `parseArms` / `missingArmComma`), including a `!{}` list separated only by leading `|` (probed s469-spec-small: `!{ | .A :> 0 | .B :> 1 }` → E-MATCH-ARM-SEPARATOR; `!{ | .A :> 0, | .B :> 1 }` compiles with two W-ARM-PIPE-LEGACY). SPEC §18.2 / §19.4.5 / the §34 row updated.
 

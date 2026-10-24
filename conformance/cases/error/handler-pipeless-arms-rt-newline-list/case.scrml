@@ -1,0 +1,26 @@
+${
+    type LoadError:enum = {
+        NotFound(reason: string)
+        Pair(a: number, b: number)
+        Empty
+    }
+
+    function risky(n: number)! -> LoadError {
+        if (n == 0) { fail LoadError.NotFound("was-zero"); }
+        return "ok";
+    }
+
+    <result> = "init"
+
+    function go() {
+        @result = risky(0) !{
+            .NotFound(reason) :> "recovered: " + reason
+            .Pair(a, b)       :> "pair"
+            else              :> "other"
+        };
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@result}</p>
+</program>

@@ -5,7 +5,7 @@ type Phase:enum = { Idle, Busy }
 ${
   function toggle() {
     @phase = match @phase {
-      .Idle :> .Busy
+      .Idle :> .Busy,
       .Busy :> .Idle
     };
   }

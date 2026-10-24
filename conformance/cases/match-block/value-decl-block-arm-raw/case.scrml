@@ -1,7 +1,7 @@
 fn grade(k: int) -> string {
     const r = match k {
-        1 :> { const base = "gr"; base + "een"; }
-        2 :> { "red"; }
+        1 :> { const base = "gr"; base + "een"; },
+        2 :> { "red"; },
         _ :> "gray"
     };
     return r;

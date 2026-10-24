@@ -15,8 +15,8 @@ ${
         for (const x of ks) {
             const k: K = x;
             match k {
-                .A :> continue
-                .B :> break
+                .A :> continue,
+                .B :> break,
                 .C :> n = n + 1
             }
         }

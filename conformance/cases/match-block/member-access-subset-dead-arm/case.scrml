@@ -4,8 +4,8 @@ ${
 
   fn label(p: Post) -> string {
     match p.role {
-      .Admin  :> "admin"
-      .Editor :> "editor"
+      .Admin  :> "admin",
+      .Editor :> "editor",
       .Viewer :> "viewer"
     }
   }

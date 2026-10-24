@@ -3,7 +3,7 @@ ${
     <out> : string = "none"
     function pick(k: K) {
         match k {
-            .A :> break
+            .A :> break,
             .B :> continue
         }
         @out = "ran"

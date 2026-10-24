@@ -16,7 +16,7 @@ ${
 
     function go() {
         @result = risky(0) !{
-            | .NotFound reason :> "recovered: " + reason
+            | .NotFound reason :> "recovered: " + reason,
             | .Empty           :> "was-empty"
         };
     }
