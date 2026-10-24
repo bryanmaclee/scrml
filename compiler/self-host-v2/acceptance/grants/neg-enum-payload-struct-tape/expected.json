@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-grants-neg-enum-payload-struct-tape",
+  "description": "A whole-value write of an enum whose payload holds a struct with a `replace`-less tape field: refused, fail closed.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rules 1 and 4",
+  "rationale": "The tape is reached through a payload and a struct field; a variant switch may discard it, and whether that is a `replace` is an owner question (review F1).",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

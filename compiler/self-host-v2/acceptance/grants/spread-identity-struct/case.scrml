@@ -1,0 +1,13 @@
+// an override that names a struct field's own value keeps the tape inside it (review F4).
+<program>
+    type In:struct = { ys: int[free, append] }
+    type O:struct = { title: string, let inner: In }
+    let <o:O=({ title: "t", inner: { ys: [1] } })/>
+    function go() {
+        @o = { ...@o, title: "u", inner: @o.inner };
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@o.title}:${@o.inner.ys.length}</p>
+    </main>
+</program>

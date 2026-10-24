@@ -1,0 +1,14 @@
+// a whole-value write of an enum whose variant payload holds an append-only tape (review F1).
+<program>
+    type E:enum = { Dot, A(xs: int[free, append]) }
+    let <e:E=.Dot/>
+    function mk()! E {
+        fail .A([1, 2, 3]);
+    }
+    function grow() {
+        mk() !{ _ x :> @e = x };
+    }
+    <main>
+        <button id="go" onclick=grow()>go</button>
+    </main>
+</program>

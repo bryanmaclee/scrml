@@ -164,6 +164,17 @@ const STATUS = {
   // review r2 H1: a `persist="local"` cross-tab value is a whole-struct write — refused over an append-only tape field
   "grants/neg-persist-local-struct-tape": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "grants/persist-session-struct-tape": ["PASS", []],
+  // s469-boot-tape-grants-2 F1: an enum payload is a tape position — a whole enum write over a
+  // `replace`-less payload tape is refused (fresh value vs `replace` is an owner question)
+  "grants/neg-enum-payload-write": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "grants/neg-enum-payload-persist-local": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "grants/neg-enum-payload-reset": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "grants/neg-enum-payload-struct-tape": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "grants/enum-payload-replace-granted": ["PASS", []],
+  // F3: Core reads a spread snapshot as the place it snapshots (no raw C3); F4: identity overrides keep
+  "grants/spread-override-nested-keep": ["PASS", []],
+  "grants/spread-identity-tape": ["PASS", []],
+  "grants/spread-identity-struct": ["PASS", []],
   // the W-STRING-INTERP-LITERAL lint (§34 row landed s469-spec-followup; name still provisional)
   "interp/logic-literal-warns": ["PASS", ["W-STRING-INTERP-LITERAL"]],
   "interp/attr-expression-warns": ["PASS", ["W-STRING-INTERP-LITERAL"]],
@@ -279,7 +290,8 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
   test("s469-boot-tape-grants: every positive grant case RAN on the bootstrap (output checked)", () => {
     for (const rel of ["grants/struct-spread-keeps-tape", "grants/struct-genuine-keep", "grants/struct-replace-granted",
                        "grants/local-sort-write", "grants/local-replace-granted", "grants/callsite-superset",
-                       "grants/persist-session-struct-tape"]) {
+                       "grants/persist-session-struct-tape", "grants/enum-payload-replace-granted",
+                       "grants/spread-override-nested-keep", "grants/spread-identity-tape", "grants/spread-identity-struct"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });

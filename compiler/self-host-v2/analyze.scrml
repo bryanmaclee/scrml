@@ -1191,8 +1191,6 @@ ${
             const rt: RType = resolveType(te, f.ty, st)
             const unresolved: boolean = rt.unresolved
             st = rt.st
-            let grants: GrantSet = noGrants()
-            if (!payload) grants = { replace: f.isLet || seqReplace(f.ty), edits: typeEdits(rt.t) }
             // s469-boot-tape-grants (g-bootstrap-let-struct-field-tape-no-let-on-sequence-s469):
             // a struct field whose type is a tape is a rule-1 position (§66.12.6) — `let` on it
             // is `let` on a sequence, exactly as on a cell (fieldOf; through `| not` too). The
@@ -1209,7 +1207,7 @@ ${
                 st = rm.st
             }
             if (unresolved) st = badField(st, fsym.id)     // r8: never checked against
-            out = out.concat([{ sym: fsym, ty: rt.t, grants: grants }])
+            out = out.concat([{ sym: fsym, ty: rt.t, grants: fieldDefGrants(payload, f.isLet || seqReplace(f.ty), typeEdits(rt.t)) }])
             i = i + 1
         }
         return { fs: out, st: st }
@@ -3074,7 +3072,8 @@ ${
         let elemEdits: EditKind[] = []
         const et: Type | not = seqElem(ty)
         if (et is given) elemEdits = subFieldEdits(g, et)
-        const grants: GrantSet = { replace: isLet || seqRep, edits: edits.concat(subFieldEdits(g, ty)).concat(elemEdits) }
+        const grantRep: boolean = isLet || seqRep
+        const grantEdits: EditKind[] = edits.concat(subFieldEdits(g, ty)).concat(elemEdits)
         const reads: string[] = valueReads(init)
         let mode: FieldMode = FieldMode.Locked
         if (isLet) {
@@ -3087,7 +3086,7 @@ ${
             mode = FieldMode.Derived
         }
         let wcap: Sym | not = not
-        if (grantsAny(grants)) {
+        if (grantsAny(fieldGrantSet(grantRep, grantEdits))) {
             const rw: RSym = mint(st, name)
             wcap = rw.s
             st = rw.st
@@ -3105,7 +3104,7 @@ ${
         const rv: RVals = fieldVals(te.file, name, ty, mode, vals, where, st)
         st = rv.st
         const f: FieldInfo = {
-            nid: nid, span: span, annotated: aty is given, trusted: resolved, typeSpan: typeSpanOf(aty), sym: rs.s, ty: ty, mode: mode, role: role, grants: grants, graph: rg.graph,
+            nid: nid, span: span, annotated: aty is given, trusted: resolved, typeSpan: typeSpanOf(aty), sym: rs.s, ty: ty, mode: mode, role: role, grants: fieldGrantSet(grantRep, grantEdits), graph: rg.graph,
             exported: exported, wcap: wcap, init: init, reads: reads, shrink: shrinkOf(aty), vals: rv.vs, valsWritten: vals.length,
             origin: origin,
         }
@@ -6943,6 +6942,9 @@ ${
         const g: TransitionGraph | not = f.graph
         const cap: Sym | not = f.wcap
         if (g is given && cap is given) {
+            // s469 F1: a transition writes the enum WHOLE — a variant payload's tape too
+            const stp: AS = checkStructTapes(env, f.ty, value, key, writtenLabel(key, f.sym.hint), span, st)
+            if (stp.diags.length > st.diags.length) return { w: not, st: stp }
             const rc: RCheck = transitionCheck(env, g, value, initialVariant(env, g, f.init), st)
             return { w: { cap: cap, inst: p.inst, edit: EditKind.Transition, check: rc.check }, st: rc.st }
         }
@@ -6996,7 +6998,9 @@ ${
                 const p: WPlace = { decl: d.info, inst: inst, idx: i, path: [], ty: f.ty, maybe: maybe }
                 st = writeGuards(env, p, pr.span, st)
                 st = resolveExpr(env, pr.value, f.ty, st).st
-                const rw: RWriteFact = wholeFieldWrite(env, p, f, pr.value, memberKey(placeKey(ps[0].value), pr.name), st, pr.span)
+                const okey: string = memberKey(placeKey(ps[0].value), pr.name)
+                let rw: RWriteFact = { w: not, st: st }
+                if (!isOwnValue(pr.value, okey)) rw = wholeFieldWrite(env, p, f, pr.value, okey, st, pr.span)     // s469 F4: as resolveSpread
                 st = rw.st
                 const w: WriteFact | not = rw.w
                 if (w is given) {
@@ -7089,7 +7093,7 @@ ${
         // s469-boot-tape-grants: a TAPE field is judged by its own grants alone —
         // the owning struct's `replace` never admits replacing it (§66.12.6
         // rules 1 and 4; S469 limit on O57). The write is classified first.
-        if (tapeGrants(target.ty) is given) {
+        if (seqElem(unMaybe(target.ty)) is given) {
             const shape: int = seqEditShapeKey(key, value)
             let tedit: EditKind = EditKind.Replace
             let what: string = "a `replace` of it (an unclassified whole-value write, §66.11.2)"
@@ -7193,6 +7197,11 @@ ${
         }
     }
 
+    // s469 F4: is `v` the place spelled `key` itself (`xs: @b.xs` in `{ ...@b, … }`)?
+    fn isOwnValue(v: AExpr, key: string) -> boolean {
+        return key != "" && placeKey(v) == key
+    }
+
     fn memberKey(base: string, n: string) -> string {
         if (base == "") return ""
         return base + "." + n
@@ -7230,7 +7239,11 @@ ${
             } else {
                 const sub: WPlace = { decl: p.decl, inst: p.inst, idx: p.idx, path: [{ owner: s, idx: idx }], ty: fs[idx].ty, maybe: p.maybe }
                 const rv: RX = resolveExpr(env, pr.value, fs[idx].ty, st)
-                const rw: RWriteFact = fieldAtWrite(env, sub, f, pr.value, memberKey(placeKey(ps[0].value), pr.name), rv.st, pr.span)
+                const okey: string = memberKey(placeKey(ps[0].value), pr.name)
+                // s469 F4: `f: @x.f` names the field's own value — the spread already keeps
+                // it, so it is no write at all (never a `replace` of a tape it holds)
+                let rw: RWriteFact = { w: not, st: rv.st }
+                if (!isOwnValue(pr.value, okey)) rw = fieldAtWrite(env, sub, f, pr.value, okey, rv.st, pr.span)
                 st = rw.st
                 const w: WriteFact | not = rw.w
                 if (w is given) {
@@ -7464,7 +7477,29 @@ ${
     // not judged here is refused (E-BOOTSTRAP-UNSUPPORTED: in-place edits of a
     // local, a parameter or a sub-field tape), never let through.
     // slice-m4/tape-write-forms.test.js enumerates the write forms.
+    //
+    // s469 F2 — THE RANGE IS STRUCTURAL: outside it a GrantSet is never named,
+    // held or read (slice-m4/grant-scan.js, run by tape-write-forms.test.js):
+    // `x.grants` appears only as a whole argument of a function declared here,
+    // or copied whole into a `grants:` slot; `.replace` / `.edits` are never
+    // read; `GrantSet` names only a struct's `grants` field; a GrantSet-
+    // returning call (`tapeGrants`, `noGrants`, `fieldGrantSet`, …) is only
+    // such an argument or slot value. A new admission decision is a new
+    // function HERE.
     // =========================================================================
+    // A declaration field's GrantSet (fieldOf): `replace` from `let` / the
+    // type's `replace` token, the edits its type and contract grant.
+    fn fieldGrantSet(replace: boolean, edits: EditKind[]) -> GrantSet {
+        return { replace: replace, edits: edits }
+    }
+
+    // A type field's GrantSet (fieldDefsOf): a payload field is a value and
+    // carries none (its tape TYPE's grants judge it — payloadTapeWrites).
+    fn fieldDefGrants(payload: boolean, replace: boolean, edits: EditKind[]) -> GrantSet {
+        if (payload) return noGrants()
+        return { replace: replace, edits: edits }
+    }
+
     fn grantsAdmit(gs: GrantSet, edit: EditKind) -> boolean {
         return gs.replace || hasEditKind(gs.edits, edit)
     }
@@ -7508,24 +7543,32 @@ ${
     // One tape field a whole-struct write replaces: where it is (for the
     // message), its type, and its OWN grants (the FieldDef's — never the
     // owning struct's `replace`).
-    type TapeHit:struct = { path: string, ty: Type, grants: GrantSet }
+    // `payload`: the tape is reached through an ENUM variant's payload (s469
+    // F1) — see `payloadTapeWrites`.
+    type TapeHit:struct = { path: string, ty: Type, grants: GrantSet, payload: boolean }
 
     // §66.12.6 rule 4: the tape fields a whole value `v` of type `ty`, written
     // at the place spelled `key` ("" when it has no spelling), REPLACES. Every
     // tape field reached through struct fields is written, except one the new
     // value leaves as it was — `xs: @b.xs`, or a spread of the place itself
     // that does not override it (§66.11.3 rule 1). A value that is not an
-    // object literal (`loadBox()`, a name, …) replaces every tape field. The
-    // elements of a tape are not walked: replacing a tape is that tape's own
-    // write, judged where it is written. `seen` stops a recursive struct.
+    // object literal (`loadBox()`, a name, …) replaces every tape field; a
+    // value that IS the place (`@b`, s469 F4) replaces none. The elements of a
+    // tape are not walked: replacing a tape is that tape's own write, judged
+    // where it is written. An ENUM's variant payloads are tape positions too
+    // (rule 1, "wherever the tape is held"; s469 F1): payloadTapeWrites.
+    // `seen` stops a recursive type.
     fn structTapeWrites(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string, seen: int[]) -> TapeHit[] {
         const s: Sym | not = namedOf(unMaybe(ty))
         if (s is not) return []
         if (seen.indexOf(s.id) >= 0) return []
+        if (v is given) {
+            if (key != "" && placeKey(v) == key) return []
+        }
         const ti: TypeInfo | not = typeInfoOf(types, s)
         if (ti is not) return []
         const fs: FieldDef[] | not = structFieldDefs(ti.def)
-        if (fs is not) return []
+        if (fs is not) return payloadTapeWrites(types, ti.def, label, seen.concat([s.id]))
         let props: AProp[] = []
         if (v is given) props = propsOf(v)
         // a spread of the place itself keeps the fields no LATER property names —
@@ -7550,9 +7593,37 @@ ${
             }
             if (!kept) {
                 if (tapeGrants(fd.ty) is given) {
-                    out = out.concat([{ path: at, ty: fd.ty, grants: fd.grants }])
+                    out = out.concat([{ path: at, ty: fd.ty, grants: fd.grants, payload: false }])
                 } else {
                     out = out.concat(structTapeWrites(types, fd.ty, fv, sub, at, seen.concat([s.id])))
+                }
+            }
+        }
+        return out
+    }
+
+    // s469 F1 (g-bootstrap-enum-payload-tape-not-a-tape-position-s469): a whole
+    // value of an ENUM may hold any variant, so writing one may replace every
+    // tape held in a variant payload (directly, or inside a payload struct /
+    // enum). Each is a hit, judged by the TAPE TYPE's own grants (a payload
+    // field has no `let`, so its FieldDef carries none — fieldDefsOf). There is
+    // no "kept" spelling for a payload: `.A(@e…)` does not exist. Whether a
+    // variant SWITCH (`.Dot` → `.A([…])`, or `.A(xs)` → `.Dot`) is a fresh
+    // value or a `replace` of the payload tape the SPEC does not say (§66.12.6
+    // rule 1 lists no enum payload), so a payload hit that lacks `replace` is
+    // refused E-BOOTSTRAP-UNSUPPORTED, not judged (structTapeProblems).
+    fn payloadTapeWrites(types: TypeInfo[], td: TypeDef, label: string, seen: int[]) -> TapeHit[] {
+        let out: TapeHit[] = []
+        for (const vd of enumVariants(td)) {
+            for (const fd of vd.fields) {
+                const at: string = label + "." + vd.sym.hint + "(" + fd.sym.hint + ")"
+                const tg: GrantSet | not = tapeGrants(fd.ty)
+                if (tg is given) {
+                    out = out.concat([{ path: at, ty: fd.ty, grants: tg, payload: true }])
+                } else {
+                    for (const h of structTapeWrites(types, fd.ty, not, "", at, seen)) {
+                        out = out.concat([{ path: h.path, ty: h.ty, grants: h.grants, payload: true }])
+                    }
                 }
             }
         }
@@ -7577,11 +7648,18 @@ ${
     fn structTapeProblems(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string) -> TapeDiag[] {
         let out: TapeDiag[] = []
         for (const h of structTapeWrites(types, ty, v, key, label, [])) {
-            if (!grantsAdmit(h.grants, EditKind.Replace)) {
+            if (!grantsAdmit(h.grants, EditKind.Replace) && h.payload) {
+                out = out.concat([{ code: "E-BOOTSTRAP-UNSUPPORTED", msg: payloadTapeMessage("`" + label + " = …`", h.path, h.ty) }])
+            } else if (!grantsAdmit(h.grants, EditKind.Replace)) {
                 out = out.concat([{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` replaces the tape field `" + h.path + "` (`" + tapeTypeName(h.ty) + "`), whose type does not grant `replace` — a whole-struct write that changes a tape field is a `replace` of THAT field, judged by the field's own grants, not the struct's (§66.12.6 rule 4). Keep the field as it was (`" + lastSegment(h.path) + ": " + h.path + "`), or spread the struct (`{ ..." + label + ", f: v }`)" }])
             }
         }
         return out
+    }
+
+    // s469 F1: a write that may replace a tape held in an enum variant's payload.
+    fn payloadTapeMessage(what: string, path: string, ty: Type) -> string {
+        return what + " writes an enum value, and a variant's payload holds the tape `" + path + "` (`" + tapeTypeName(ty) + "`), whose type does not grant `replace` — a payload is a tape position like any other (§66.12.6 rule 1: \"wherever the tape is held\"), but whether writing another variant (or the same one anew) is a fresh value or a `replace` of that tape the SPEC does not say yet (owner question, s469); the bootstrap refuses it rather than guess — grant `replace` on the payload's tape type"
     }
 
     fn checkStructTapes(env: Env, ty: Type, v: AExpr | not, key: string, label: string, span: ASpan, st0: AS) -> AS {
@@ -18369,9 +18447,11 @@ ${
         } else if (!grantsAdmit(f.grants, EditKind.Replace)) {
             st = addDiag(st, prog.file, a.span, "E-RESET-ON-NOT-WRITABLE", notWritableMessage(d.name, f.mode))
             ok = false
-        } else {
+        }
+        if (ok) {
             // s469-boot-tape-grants: as `reset(@x)` — a reset of a struct with an
-            // ungranted tape field is not judged statically (resetTapeMessage)
+            // ungranted tape field is not judged statically (resetTapeMessage); s469 F1:
+            // along a `rule=` graph too (an enum's payload may hold the tape)
             const tp: string = resetTapeProblem(g.types, f.ty, "@" + d.name)
             if (tp != "") {
                 st = addDiag(st, prog.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", resetTapeMessage("`reset-on=` on `@" + d.name + "`", tp))

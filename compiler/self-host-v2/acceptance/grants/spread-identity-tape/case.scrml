@@ -1,0 +1,12 @@
+// an override that names the tape field's own value is a keep, not a `replace` (review F4).
+<program>
+    type Box:struct = { title: string, xs: int[free, append] }
+    let <b:Box=({ title: "t", xs: [1, 2, 3] })/>
+    function go() {
+        @b = { ...@b, title: "u", xs: @b.xs };
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@b.title}:${@b.xs.length}</p>
+    </main>
+</program>

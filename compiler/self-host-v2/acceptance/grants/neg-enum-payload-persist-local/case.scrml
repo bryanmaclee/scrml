@@ -1,0 +1,8 @@
+// a cross-tab value of an enum cell would replace the append-only tape in a payload (review F1).
+<program>
+    type E:enum = { Dot, A(xs: int[free, append]) }
+    let <e:E=.Dot persist="local" key="acc.f1.e"/>
+    <main>
+        <p id="out">x</p>
+    </main>
+</program>
