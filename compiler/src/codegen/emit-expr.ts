@@ -44,7 +44,7 @@ import { rewriteExpr, rewriteServerExpr, rewriteExprArrowBody, rewriteServerExpr
 import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.ts";
 import { isRefineCall } from "../refinement-obligations.ts";
 import { emitRefineExpr, emitRefineUpdate, emitRefineMerge } from "./emit-predicates.ts";
-import { emitMatchExpr as emitStructuredMatchExpr, splitMultiArmString } from "./emit-control-flow.ts";
+import { emitMatchExpr as emitStructuredMatchExpr, splitMultiArmString, parseMatchArm } from "./emit-control-flow.ts";
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { ARRAY_MUTATING_METHODS } from "../derived-mutation-ops.ts";
 import { CGError } from "./errors.ts";
@@ -5162,8 +5162,21 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
     const subject = emitExpr(node.subject, ctx);
     const arms = node.rawArms.join(" ");
     const reconstructed = `match ${subject} { ${arms} }`;
+    // S469 r7 (F3) — the no-call-in-server-text check reads the arm BODIES (as the one arm reader
+    // splits and parses them): an arm HEAD holds no call — `.Circle(r)` is a payload binder, not a
+    // call of `Circle`. If any arm cannot be read, the whole arm text is checked (fail closed).
+    let bodies: string[] | null = [];
+    for (const raw of node.rawArms) {
+      if (typeof raw !== "string") { bodies = null; break; }
+      for (const piece of splitMultiArmString(raw.trim().replace(/-\s*>/g, "->"))) {
+        const parsed = parseMatchArm(piece.replace(/^\|\s*(?=(?:_|else)\b)/, ""));
+        if (!parsed) { bodies = null; break; }
+        bodies.push(parsed.result);
+      }
+      if (bodies === null) break;
+    }
     return serverTextLowering(reconstructed, ctx, "a server `match` expression's arms", {
-      checkText: arms,
+      checkText: bodies === null ? arms : bodies.join(" ; "),
       noReparse: true,
       span: (node as { span?: object }).span ?? null,
     });
