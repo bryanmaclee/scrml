@@ -41,6 +41,10 @@ that reads the live row's field; a non-literal value side outside a row is no lo
   gap resolved; g-lift-group-rerender-keeps-previous-gate-effects-s469 filed; state.ts --write (gap-counts).
 - merge origin/main (78b0e1fe6): pack 758 + 28 = 786; full pack PASS=437 REFUSED=332 DENY=15 UNJUDGED=2 FAIL=0.
 - 3e69ce87d: .d.ts for types-gate.
+- 43a6b7682: a run-once block declaring a function that reads its own bindings refuses its open gates (forcing
+  the re-render would move them out of the hoisted function's reach — M1a ReferenceError); an open condition that
+  names no cell and calls nothing is evaluated once and not refused (a function body included).
+- 9ffc64a5c: merge origin/main 14a788227. CI blocking commands all exit 0 (facts --check exit 1 = WARN-only).
 
 ## Differential
 - Corpus: 3,750 `.scrml` (self-host excluded), both compilers copied to the same directory layout: error sets
