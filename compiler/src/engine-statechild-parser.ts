@@ -2232,7 +2232,22 @@ export function parseMessageArms(
     return { variantName, isWildcard, p };
   }
 
+  // S469 (dpa-073 F2 / F5(1)) — a message-arm list is a comma list, the same arm
+  // list as a `match` (§18.2, §51.0.S.2.3): a `,` after each arm, the trailing one
+  // optional. impl#1 keeps reading newline-separated arms too (it never enforces
+  // commas). Is an arm head (`|`-led or pipe-less) at `at`?
+  const armHeadAt = (at: number): boolean =>
+    at < len && (bodyRaw[at] === "|" || pipelessHeadAt(at) !== null);
+  // A `,` that separates nothing — a leading one, or the second of `,,` — is
+  // recorded on the arm entry (`strayArmCommas`, bodyRaw offsets) for the
+  // symbol table to refuse (E-PARSE-001): this recognizer reports nothing itself.
+  let leadingStrayComma: number | null = null;
+
   pos = skipTrivia(pos);
+  if (bodyRaw[pos] === ",") {
+    const q = skipTrivia(pos + 1);
+    if (armHeadAt(q)) { leadingStrayComma = pos; pos = q; }
+  }
   // If the body does not open with an arm (`|`-led or a pipe-less head), there
   // is no message-arm table.
   if (pos >= len || (bodyRaw[pos] !== "|" && !pipelessHeadAt(pos))) {
@@ -2242,16 +2257,19 @@ export function parseMessageArms(
   // `renderBodyStart` defaults to "end of arm region"; updated after each arm.
   let renderBodyStart = pos;
   let isFirstArm = true;
+  // S469 — the previous arm ended with its `,` separator, so the next head may
+  // follow on the same line.
+  let afterComma = false;
 
   while (pos < len) {
     const triviaStart = skipTrivia(pos);
     // S452 — the leading run of arm heads, piped, pipe-less or mixed. A
-    // pipe-less head is only recognised at the START of a line (or the body):
-    // one arm per line (§18.2), so arm-shaped text later on a line — e.g. after
-    // a block body's `}` — is never read as a new arm, and a `.`/`::` glued to a
-    // preceding token can never reach this check.
+    // pipe-less head is only recognised at the START of a line (or the body),
+    // or (S469) after the `,` arm separator: arm-shaped text later on a line —
+    // e.g. after a block body's `}` with no `,` — is never read as a new arm,
+    // and a `.`/`::` glued to a preceding token can never reach this check.
     const pipelessHead = (triviaStart < len && bodyRaw[triviaStart] !== "|" &&
-      (isFirstArm || bodyRaw.slice(pos, triviaStart).includes("\n")))
+      (isFirstArm || afterComma || bodyRaw.slice(pos, triviaStart).includes("\n")))
       ? pipelessHeadAt(triviaStart)
       : null;
     if (triviaStart >= len || (bodyRaw[triviaStart] !== "|" && !pipelessHead)) {
@@ -2383,6 +2401,9 @@ export function parseMessageArms(
         if (c === "`") { inTick = true; p++; continue; }
         if (c === "(" || c === "[" || c === "{") { depth++; p++; continue; }
         if (c === ")" || c === "]" || c === "}") { if (depth > 0) depth--; p++; continue; }
+        // S469 — the `,` arm separator ends a bare target (scrml has no comma
+        // operator; a `,` inside `( … )` is the target's own).
+        if (depth === 0 && c === ",") break;
         if (depth === 0 && c === "|") {
           // A `||` logical-or is NOT an arm separator; only a lone `|` that
           // begins the next arm. Peek: an arm `|` is followed (after trivia)
@@ -2423,6 +2444,26 @@ export function parseMessageArms(
         },
       }),
     });
+    // S469 — the arm's `,` separator. Taken when it sits on the arm's own line,
+    // or (a `,` written at the start of the next line) when an arm head follows
+    // it; otherwise it is left for the render body, as before.
+    afterComma = false;
+    {
+      const strays: number[] = [];
+      if (leadingStrayComma !== null) { strays.push(leadingStrayComma); leadingStrayComma = null; }
+      const q = skipTrivia(p);
+      if (bodyRaw[q] === "," && (!bodyRaw.slice(p, q).includes("\n") || armHeadAt(skipTrivia(q + 1)))) {
+        p = q + 1;
+        afterComma = true;
+        for (;;) {
+          const q2 = skipTrivia(p);
+          if (bodyRaw[q2] !== ",") break;
+          strays.push(q2);
+          p = q2 + 1;
+        }
+      }
+      if (strays.length > 0) arms[arms.length - 1]!.strayArmCommas = strays;
+    }
     renderBodyStart = p;
     // Advance the outer cursor past this arm. Guard against a non-advancing
     // iteration (defensive — every successful arm advances `p` past the arm

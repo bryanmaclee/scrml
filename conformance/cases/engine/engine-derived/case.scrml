@@ -1,7 +1,7 @@
 ${
     type Light:enum = { Red, Green }
     const <label> = match @light {
-        .Red :> "STOP"
+        .Red :> "STOP",
         .Green :> "GO"
     }
 }

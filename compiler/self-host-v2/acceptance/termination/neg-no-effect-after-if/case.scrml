@@ -1,0 +1,12 @@
+// §7.2.2 rule 9 (S469 "Build both"): a pure expression after a block-like `}` is its own statement, and it does nothing — E-STMT-NO-EFFECT.
+<program>
+    let <n:int=0/>
+    function go() {
+        if (@n == 0) { @n = 1; }
+        -1;
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="n">${@n}</p>
+    </main>
+</program>

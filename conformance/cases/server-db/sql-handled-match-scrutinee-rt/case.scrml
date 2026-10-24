@@ -21,32 +21,32 @@
     // arrives as `::Ok`; a query that fails to run arrives as its SqlError variant.
     function matchHit() {
         const r = match ?{`SELECT id, body FROM notes`}.get() {
-            ::Ok(row)        :> row is not ? "none" : row.body
-            ::QueryFailed(m) :> "failed"
+            ::Ok(row)        :> row is not ? "none" : row.body,
+            ::QueryFailed(m) :> "failed",
             _                :> "other"
         }
         return r
     }
     function matchMiss() {
         const r = match ?{`SELECT id, body FROM empties`}.get() {
-            ::Ok(row)        :> row is not ? "none" : row.body
-            ::QueryFailed(m) :> "failed"
+            ::Ok(row)        :> row is not ? "none" : row.body,
+            ::QueryFailed(m) :> "failed",
             _                :> "other"
         }
         return r
     }
     function matchFailed() {
         const r = match ?{`SELECT id, body FROM gone`}.get() {
-            ::Ok(row)        :> row is not ? "none" : row.body
-            ::QueryFailed(m) :> "failed"
+            ::Ok(row)        :> row is not ? "none" : row.body,
+            ::QueryFailed(m) :> "failed",
             _                :> "other"
         }
         return r
     }
     function matchAllFailed() {
         const r = match ?{`SELECT id FROM gone`}.all() {
-            ::Ok(rows)       :> "rows:" + rows.length
-            ::QueryFailed(m) :> "failed:" + m
+            ::Ok(rows)       :> "rows:" + rows.length,
+            ::QueryFailed(m) :> "failed:" + m,
             _                :> "other"
         }
         return r

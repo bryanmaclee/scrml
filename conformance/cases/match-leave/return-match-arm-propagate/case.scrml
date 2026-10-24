@@ -9,17 +9,17 @@ ${
     }
     function viaReturn(k: K, n: number)! E {
         return match k {
-            .A :> risky(n)?
+            .A :> risky(n)?,
             .B :> 0
         };
     }
     function go() {
         viaReturn(K.A, -1) !{
-            .Boom(m) :> @seen = "boom:" + m
+            .Boom(m) :> @seen = "boom:" + m,
             .Other :> @seen = "other"
         };
         const ok = viaReturn(K.A, 4) !{
-            .Boom(m) :> 0
+            .Boom(m) :> 0,
             .Other :> 0
         };
         @out = "ok=" + ok;

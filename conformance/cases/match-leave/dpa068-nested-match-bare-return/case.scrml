@@ -12,11 +12,11 @@ ${
     function nest(k: K, j: K) -> string {
         const y = match k {
             .A :> match j {
-                .A :> return "early"
-                .B :> "ab"
+                .A :> return "early",
+                .B :> "ab",
                 .C :> "ac"
-            }
-            .B :> "b"
+            },
+            .B :> "b",
             .C :> "c"
         };
         return "got:" + y;

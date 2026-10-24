@@ -27,7 +27,7 @@
     }
     function loadFailed() {
         @failed = ?{`SELECT id, body FROM gone`}.get() !{
-            .QueryFailed(m) :> "failed"
+            .QueryFailed(m) :> "failed",
             _ :> not
         }
     }

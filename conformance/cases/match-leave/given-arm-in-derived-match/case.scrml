@@ -3,8 +3,8 @@ ${
     <k> : K = .A
     <x> : number | not = 5
     const <dv> = match @k {
-        given @x :> 1
-        .A :> 2
+        given @x :> 1,
+        .A :> 2,
         .B :> 3
     }
     <seen> : number = 0

@@ -1,0 +1,18 @@
+// §7.2.2 rule 4 (S469 "Attach to the line above"): a `?` is decided by adjacency only — a SPACED `?` is the conditional, so `load(id) ?;` is a conditional with no branches, refused; propagation is the glued `load(id)?`.
+<program>
+    type LoadError:enum = { NotFound(id: string), Timeout }
+    let <out:string=""/>
+    function load(id: string)! LoadError {
+        if (id == "x") fail LoadError.NotFound(id);
+        return id;
+    }
+    function relay(id: string)! LoadError {
+        const v = load(id) ?;
+        return v;
+    }
+    function go() { @out = relay("x") !{ .NotFound(m) :> "nf:" + m, .Timeout :> "to" }; }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@out}</p>
+    </main>
+</program>

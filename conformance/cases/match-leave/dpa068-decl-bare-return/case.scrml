@@ -11,8 +11,8 @@ ${
     }
     function lab(k: K) -> string {
         const y = match k {
-            .A :> "a"
-            .B :> return "early"
+            .A :> "a",
+            .B :> return "early",
             .C :> "c"
         };
         return "got:" + y;

@@ -18,6 +18,7 @@ import { tenantFloorTouchesSql } from "./rewrite.js";
 import { SQL_ERROR_VARIANT_FIELDS, sqlQueryExprShape, unhandledFailureThrow, handledSqlGuardInner, SQL_ATTEMPT_FN } from "./sql-attempt.ts";
 import { HOIST_VALUES_PLACEHOLDER } from "../hoist-sql-shape.ts";
 import { programStatementRefusal, sqlHoldsOneStatement } from "./sql-one-statement-guard.ts";
+import { literalSpans, armPiecesCover } from "../arm-list-split.ts";
 
 // ---------------------------------------------------------------------------
 // Module-level Tier 2 hoist registry (§8.10)
@@ -2228,15 +2229,11 @@ export function propagateOperandOfArmText(text: string): string | null {
 
 function _matchArmInlineToMatchArm(node: any): MatchArm | null {
   const test: string = node.test ?? "";
-  // S144 Cluster D (Bug Y) — strip a stray trailing comma arm-separator.
-  // §18.2 has NO comma separator between arms; when source writes `.A => x,`
-  // the AST builder folds the `,` into this arm's `result` (`"x" ,`). Left
-  // intact it emits invalid JS (`return "x" ,;`) which the validate-emit gate
-  // reports as the GENERIC E-CODEGEN-INVALID-LOGIC. The typer already fires the
-  // clean source-anchored E-MATCH-ARM-SEPARATOR (type-system.ts) — that error
-  // is what fails the build. Here we only sanitize so the never-meant-to-ship
-  // emitted JS still PARSES, leaving E-MATCH-ARM-SEPARATOR as the sole
-  // diagnostic the developer sees (no duplicate generic invalid-JS report).
+  // S144 Cluster D (Bug Y) stripped a `,` the AST builder folded into an arm's
+  // `result`. S469 (dpa-073 F2): the arm list is a comma list and the AST builder
+  // reads the `,` as the separator, so it no longer reaches `result`; the strip
+  // stays as a belt-and-braces guard (a trailing `,` is never part of an arm body
+  // — scrml has no comma operator, §40.8).
   const result: string = String(node.result ?? "").replace(/,\s*$/, "");
   const binding: string | null = node.binding ?? null;
   // errarm-refail: a bare re-`fail` value-arm carries a fail-expr node.
@@ -2313,13 +2310,99 @@ function _matchArmInlineToMatchArm(node: any): MatchArm | null {
  * Returns [s] when only zero or one arm boundary is found.
  */
 export function splitMultiArmString(s: string): string[] {
+  const pieces = _splitMultiArmStringImpl(s);
+  // S469 r6 — test-observable COVERAGE audit (arm-list-split.ts `armPiecesCover`). When a test sets
+  // `globalThis.__scrmlArmSplitAudit = []`, every split records whether its pieces account for
+  // every non-whitespace character of the input, so a suite can fail on ANY dropped text — from
+  // every caller, including the analyses that do not refuse — even where the dispatch looks right.
+  const audit = (globalThis as { __scrmlArmSplitAudit?: unknown }).__scrmlArmSplitAudit;
+  if (Array.isArray(audit)) audit.push({ text: s, pieces, covered: armPiecesCover(s, pieces) });
+  return pieces;
+}
+
+function _splitMultiArmStringImpl(s: string): string[] {
   const armStartPositions: number[] = [];
   let inString: string | null = null;
   let braceDepth = 0; // skip arm detection inside nested { } blocks
   let i = 0;
+  // S469 r2 (F2) — the literals as the LEXER reads them (arm-list-split.ts): a quoted string,
+  // a template, a regular expression. Each is skipped whole, so a quote inside `/"/` or a
+  // brace inside `"}"` can no longer flip the scan and hide the next arm head (an arm was
+  // silently dropped). `null` (the text does not lex) keeps the character scan below.
+  const lits = literalSpans(s);
+
+  // S469 r3 (g-impl1-expr-match-literal-alternation-first-alternate-dropped-s469) — a
+  // LITERAL arm head is a literal, then any `| literal` alternates, then the arm arrow
+  // (§18.2, §18.16). Before, a string / number head counted only when the arrow followed it
+  // directly, so in `1 | 2 :> r` the LAST alternate (`2 :>`) was taken as the arm start and
+  // the text before it — the other alternates — was sliced off: `@k = 1` fell through to
+  // the next arm, silently. The variant branch below already guards this (`isAlternate`).
+  const LIT_RE = /^(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|-?\s*(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)(?![\w$])|true(?![\w$])|false(?![\w$]))/;
+  const literalEndAt = (p: number): number => {
+    const sp = lits ? lits.get(p) : undefined;
+    if (sp) return sp.kind === "string" ? sp.end : -1;
+    const m = LIT_RE.exec(s.slice(p));
+    return m ? p + m[0].length : -1;
+  };
+  /** From just past a literal: skip `| literal` alternates, then is an arm arrow next? */
+  const literalChainArrowAt = (p: number): boolean => {
+    let k = p;
+    for (;;) {
+      while (k < s.length && /\s/.test(s[k])) k++;
+      if (s[k] === "|" && s[k + 1] !== "|") {
+        k++;
+        while (k < s.length && /\s/.test(s[k])) k++;
+        const e = literalEndAt(k);
+        if (e < 0) return false;
+        k = e;
+        continue;
+      }
+      break;
+    }
+    const a = s.slice(k, k + 2);
+    return a === "=>" || a === ":>" || a === "->";
+  };
+  /** S469 r4 — does an arm arrow end right before `p`? Then `p` begins an arm BODY, never a head:
+   *  in `1 :> "one" | 2 :> "two"` the `"one"` is the first arm's body, not an alternation head. */
+  const isAfterArmArrowAt = (p: number): boolean => {
+    let b = p - 1;
+    while (b >= 0 && /\s/.test(s[b])) b--;
+    if (b < 1 || s[b] !== ">") return false;
+    let a = b - 1;
+    while (a >= 0 && /\s/.test(s[a])) a--;
+    return a >= 0 && (s[a] === ":" || s[a] === "=" || s[a] === "-");
+  };
+  /** S469 r5 — does an operator that wants an OPERAND end right before `p` (`x + "|"`, `f("a"`,
+   *  `c ? "a"`)? Then the literal at `p` is that operand — part of an arm body — never an arm head. */
+  const isOperandOfOperatorAt = (p: number): boolean => {
+    let b = p - 1;
+    while (b >= 0 && /\s/.test(s[b])) b--;
+    if (b < 0) return false;
+    const c = s[b];
+    if (c === ">") return false; // `:>` / `=>` / `->` — isAfterArmArrowAt's case; `a > "x"` is rare
+    if (c === "|" && s[b - 1] !== "|") return false; // an alternate — isAlternateAt's case
+    return "+-*/%<=!&|?:(".includes(c);
+  };
+  /** Is position `p` an ALTERNATE (the previous non-space char is a lone `|`)? */
+  const isAlternateAt = (p: number): boolean => {
+    let b = p - 1;
+    while (b >= 0 && /\s/.test(s[b])) b--;
+    return b >= 0 && s[b] === "|" && s[b - 1] !== "|";
+  };
 
   while (i < s.length) {
     const ch = s[i];
+
+    const lit = inString === null && lits ? lits.get(i) : undefined;
+    if (lit) {
+      if (lit.kind === "string" && braceDepth === 0) {
+        // String literal arm: "..." :> / => / -> (or `"a" | "b" :>`) — an arm head when an
+        // arrow follows its alternate chain, and it is not itself an alternate.
+        if (!isAlternateAt(i) && !isAfterArmArrowAt(i) && !isOperandOfOperatorAt(i) && literalChainArrowAt(lit.end)) armStartPositions.push(i);
+      }
+      i = lit.end;
+      continue;
+    }
 
     // Track string literal boundaries (skip content inside strings)
     if (inString !== null) {
@@ -2413,10 +2496,8 @@ export function splitMultiArmString(s: string): string[] {
         j++;
       }
       if (j < s.length) {
-        let k = j + 1;
-        while (k < s.length && /\s/.test(s[k])) k++;
-        const strArrow2 = s.slice(k, k + 2);
-        if (strArrow2 === "=>" || strArrow2 === ":>" || strArrow2 === "->") {
+        // S469 r3 — through a `| literal` alternate chain, and never at an alternate.
+        if (!isAlternateAt(i) && !isAfterArmArrowAt(i) && !isOperandOfOperatorAt(i) && literalChainArrowAt(j + 1)) {
           armStartPositions.push(i);
           inString = q;
           i++;
@@ -2451,14 +2532,17 @@ export function splitMultiArmString(s: string): string[] {
         let k = i;
         if (ch === "-") { k = i + 1; while (k < s.length && /\s/.test(s[k])) k++; }
         while (k < s.length && /[0-9a-fA-FxXbBoO._]/.test(s[k])) k++;
-        let a = k;
-        while (a < s.length && /\s/.test(s[a])) a++;
-        const numArrow = s.slice(a, a + 2);
-        if (numArrow === "=>" || numArrow === ":>" || numArrow === "->") {
+        // S469 r3 — through a `| literal` alternate chain, and never at an alternate.
+        if (!isAlternateAt(i) && !isAfterArmArrowAt(i) && !isOperandOfOperatorAt(i) && literalChainArrowAt(k)) {
           armStartPositions.push(i);
           i = k;
           continue;
         }
+        // S469 r4 — not an arm start: skip the WHOLE literal. Stepping one character let
+        // the magnitude of a spaced negative alternate (`1 | - 3 :>`, `"a" | -1.5 :>`) be
+        // read as an arm head of its own — the sign and every alternate before it dropped.
+        i = k;
+        continue;
       }
     }
 
@@ -3883,8 +3967,25 @@ function collectMatchArms(body: any[], opts?: any): MatchArm[] {
     // be invisible to it). `->` is never a value-expression operator in scrml,
     // so a global collapse of `- >` is safe.
     const _armsBefore = arms.length;
-    const armStrings = splitMultiArmString(trimmed.replace(/-\s*>/g, "->"));
-    for (const armStr of armStrings) {
+    const armText = trimmed.replace(/-\s*>/g, "->");
+    const armStrings = splitMultiArmString(armText);
+    // S469 r6 — the COVERAGE invariant (arm-list-split.ts `armPiecesCover`): the split must
+    // account for every non-whitespace character of the arm text, or the match is refused —
+    // never lowered with text (an arm, an alternate, a sign) silently missing.
+    if (!armPiecesCover(armText, armStrings)) {
+      const refusal = new CGError(
+        "E-PARSE-001",
+        `E-PARSE-001: the \`match\` arm text \`${armText.length > 60 ? armText.slice(0, 60) + "…" : armText}\` cannot be read ` +
+        "as arms without losing part of it. Write one arm per `<pattern> :> body`, separated by `,` or a line break (§18.2).",
+        (child?.span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as ConstructorParameters<typeof CGError>[2],
+      );
+      if (opts?.errors) opts.errors.push(refusal); else recordRefusedLowering(refusal, child);
+      continue;
+    }
+    for (const armStrRaw of armStrings) {
+      // S469 (dpa-073 F2) — a raw arm list is a comma list: the `,` that ends an
+      // arm is its separator, not part of its body (scrml has no comma operator).
+      const armStr = armStrRaw.replace(/,\s*$/, "");
       const arm = parseMatchArm(armStr);
       if (arm) arms.push(stampLeave(stampPropagateOperand(arm)));
     }

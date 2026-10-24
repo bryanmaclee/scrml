@@ -597,6 +597,11 @@ export interface MessageArmEntry {
    *  (between the `|` and the arm arrow), `patternStart` its `bodyRaw` offset.
    *  Drives the W-ARM-PIPE-LEGACY lint and `scrml fix`'s arm-pipe rule. */
   legacyPipe?: { pattern: string; patternStart: number };
+  /** S469 (dpa-073 F2) — `bodyRaw` offsets of `,` arm separators around this arm
+   *  that separate nothing: a leading `,` before the first arm, or the second
+   *  `,` of a doubled `,,` after this one. Refused as E-PARSE-001. Absent when
+   *  there is none. */
+  strayArmCommas?: number[];
 }
 
 /**
@@ -7670,7 +7675,8 @@ export function validateEngineStateChildrenAndRules(
     // The arm's own span (S452 review r1): `rulesRawPos` (ast-builder.js)
     // places `rulesRaw` in the file; the arm sits `bodyRawOffset +
     // spanStart` into it. Falls back to the engine's span when unplaced.
-    const messageArmSpan = (arm: MessageArmEntry): SYMDiagnostic["span"] => {
+    const messageArmSpan = (arm: MessageArmEntry): SYMDiagnostic["span"] => bodyOffsetSpan(arm.spanStart);
+    const bodyOffsetSpan = (bodyOffset: number): SYMDiagnostic["span"] => {
       const rp = (engineDecl as { rulesRawPos?: { start: number; line: number; col: number } } | undefined)?.rulesRawPos;
       const rulesRawText = typeof (engineDecl as { rulesRaw?: unknown } | undefined)?.rulesRaw === "string"
         ? (engineDecl as { rulesRaw: string }).rulesRaw : null;
@@ -7678,7 +7684,7 @@ export function validateEngineStateChildrenAndRules(
         file: filePath, start: 0, end: 0, line: 1, col: 1,
       };
       if (rp && rulesRawText !== null && typeof sc.bodyRawOffset === "number") {
-        const rel = sc.bodyRawOffset + arm.spanStart;
+        const rel = sc.bodyRawOffset + bodyOffset;
         const before = rulesRawText.slice(0, rel);
         const nl = before.lastIndexOf("\n");
         span = {
@@ -7703,6 +7709,24 @@ export function validateEngineStateChildrenAndRules(
         span,
         severity: "info",
       });
+    }
+
+    // -- E-PARSE-001 -- S469 (dpa-073 F2, §18.2 / §51.0.S.2.3): a message-arm
+    // list is a comma list; a `,` that separates nothing (a leading `,`, or the
+    // second of `,,`) is refused, never read past silently.
+    for (const arm of arms) {
+      for (const at of arm.strayArmCommas ?? []) {
+        errors.push({
+          code: "E-PARSE-001",
+          message:
+            `E-PARSE-001: a \`,\` with no message arm before it in state-child \`<${sc.tag}>\`. ` +
+            "An arm list puts one `,` after each arm, the trailing one optional " +
+            "(`.Start(id) :> .Dragging(id), .Drop :> .Idle,`) — a leading `,` or a doubled `,,` " +
+            "separates nothing. Remove this `,` (§18.2, §51.0.S.2.3).",
+          span: bodyOffsetSpan(at),
+          severity: "error",
+        });
+      }
     }
 
     // -- E-STMT-RETURN-OUTSIDE-FUNCTION -- §51.0.S.2.3: a message arm is not a

@@ -6,7 +6,7 @@ ${
         let s = ""
         outer: for (const i of [1, 2]) {
             s = show(match k {
-                .A :> { for (const j of [1, 2]) { if (j == 2) { break outer } } 1 }
+                .A :> { for (const j of [1, 2]) { if (j == 2) { break outer } } 1 },
                 .B :> 2
             })
         }

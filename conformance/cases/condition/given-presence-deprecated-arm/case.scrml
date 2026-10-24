@@ -4,7 +4,7 @@
 ${
     function greet(name: string | not) -> string {
         return match name {
-            not :> "nobody"
+            not :> "nobody",
             given name :> "hello " + name
         }
     }
