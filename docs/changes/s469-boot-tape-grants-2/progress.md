@@ -37,6 +37,11 @@ Gap: `g-bootstrap-enum-payload-tape-not-a-tape-position-s469` (HIGH, narrowed â€
       `tape-grants-r3.test.js`.
 - [x] Slice tests: `slice-m4/tape-grants-r3.test.js` (F1 / F3 / F4, 36), `tape-write-forms.test.js` (F2 scan).
 
+- [x] Commit 1 (`fix(bootstrap): enum payload tapes, â€¦`); merged origin/main once #1528 landed (`4e1983534`).
+- [x] Every blocking `ci.yml` `run:` command exits 0 (types-gate after `bun install --frozen-lockfile`;
+      bootstrap-conformance `--check` current, no `--write` needed; s34-census `--check-new` against the merge base;
+      slices m1 / m2 / m1-lowered / m3 / m4 / codec; e2e-render-map; host-global 1/2 and 2/2).
+
 ## Before / after
 
 | F | Before (`772f6726b`) | After |
