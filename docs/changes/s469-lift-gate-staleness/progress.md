@@ -53,3 +53,15 @@ that reads the live row's field; a non-literal value side outside a row is no lo
   detail whose condition is TRUE (main stale). "Branch shows content whose condition is false": 0.
 - Leak measurement (group re-render, LOW, filed): swap calls per @ok off+on after 5/10 re-renders — main 15/29,
   branch 12/22 (direct); indirect main 2/2 (stale: never re-read), branch 12/22.
+
+## Round 2 (review of b57d697a9: FIX — HIGH-1, MED-1, MED-2, M1b)
+- a69607112: merge origin/main (b8911ec3b).
+- f9ac20bb8: HIGH-1 — the "names no cell, calls nothing" carve-out (43a6b7682) removed: a local can hold a value
+  computed from a cell. Every open gate re-runs its render; in a function body it is refused. MED-1 — an inner
+  loop holding an open gate that reads only its own declarations becomes a REGION of the keyed row (own live-keyed
+  tracked effect, child owner scope); the outer row stays keyed. Pack n23 +11 (797). Browser +16. Gaps filed:
+  keyed-row control-flow if (HIGH), group/arm call reads (HIGH), lift of markup-returning call (MED), plain-let
+  residual (MED, owner question). M1b test comment names the residual.
+- MED-2 (a) / (b) kept refused (not structurally fresh: a parameter / the escaped row binder may change unseen).
+- Corpus differential re-run vs origin/main b8911ec3b: error sets identical (3,753 files); 1 visible-set step
+  differs (gauntlet-r10-rust-orders, branch correct).
