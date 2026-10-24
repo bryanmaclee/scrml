@@ -1,5 +1,5 @@
 import { genVar } from "./var-counter.ts";
-import { splitMultiArmString, parseMatchArm } from "./emit-control-flow.ts";
+import { splitMultiArmString, parseMatchArm, parseBindingList } from "./emit-control-flow.ts";
 import { splitArmSeparatorCommas, armPiecesCover, rawArmHasStrayComma, rawArmHasLeadingPipeArm } from "../arm-list-split.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { currentLoweringSpan } from "./sql-one-statement-guard.ts";
@@ -82,6 +82,8 @@ interface InlineMatchArm {
    * For singleton arms this field is omitted/null. (§18 follow-on to S83 B3.)
    */
   tests?: string[] | null;
+  /** S469 r8 — a payload variant arm's raw binding list (`r`, `w: a, h: b`), bound from `.data`. */
+  binding?: string | null;
   result: string;
 }
 
@@ -1760,6 +1762,26 @@ function splitInlineArms(armsStr: string): string[] {
 }
 
 /**
+ * S469 r8 — `const local = <tmp>.data.<field>;` for a payload variant arm's binding list
+ * (`.Circle(r)`, `.Rect(w: a, h: b)`, `_` discards), the field of a positional binder read from the
+ * declared field order. null when a positional binder's field cannot be resolved (unknown or
+ * ambiguous variant) — the caller refuses rather than bind the wrong field.
+ */
+function payloadBindingPrelude(variant: string, binding: string, tmpVar: string): string | null {
+  const bindings = parseBindingList(binding);
+  const schema = getVariantFieldSchemaFromRewriter(variant);
+  const out: string[] = [];
+  for (let i = 0; i < bindings.length; i++) {
+    const b = bindings[i];
+    if (b.discard) continue;
+    const field = b.sourceField || (schema && i < schema.length ? schema[i] : null);
+    if (!field) return null;
+    out.push(`const ${b.localName} = ${tmpVar}.data.${field};`);
+  }
+  return out.length > 0 ? out.join(" ") + " " : "";
+}
+
+/**
  * S469 r7 — read an inline match's arm text with the canonical reader. Returns the arms, or null
  * when any part of the text cannot be read as arms (the caller refuses the match).
  */
@@ -1783,6 +1805,7 @@ function readInlineArms(armsStr: string): InlineMatchArm[] | null {
           kind: a.kind as InlineMatchArm["kind"],
           test: a.test,
           ...(a.tests && a.tests.length > 1 ? { tests: a.tests } : {}),
+          ...(a.kind === "variant" && a.binding ? { binding: a.binding } : {}),
           result: stripTrailingComma(a.result),
         });
       }
@@ -1792,12 +1815,14 @@ function readInlineArms(armsStr: string): InlineMatchArm[] | null {
 }
 
 /** Record the E-PARSE-001 refusal for an inline match the reader could not read; the placeholder. */
-function refuseInlineMatch(armsStr: string): string {
+function refuseInlineMatch(armsStr: string, why: string = ""): string {
   const one = armsStr.replace(/\s+/g, " ").trim();
   recordRefusedLowering(new CGError(
     "E-PARSE-001",
     `E-PARSE-001: the \`match\` arms \`${one.length > 60 ? one.slice(0, 57) + "..." : one}\` cannot be read as an ` +
-      "arm list without losing part of it (an arm no arm form reads, a `|`-led arm, or a stray `,`). " +
+      (why === "payload binding"
+        ? "arm list: a payload binder's field could not be resolved (an unknown or ambiguous variant). "
+        : "arm list without losing part of it (an arm no arm form reads, a `|`-led arm, or a stray `,`). ") +
       "Write one arm per `<pattern> :> body`, separated by `,` or a line break (§18.2).",
     currentLoweringSpan() as object,
   ), null);
@@ -1847,9 +1872,21 @@ export function rewriteMatchExpr(expr: string): string {
   if (arms.length === 0) return expr;
 
   const tmpVar = genVar("match");
+  // S469 r8 (g-impl1-text-lowered-match-payload-variant-misdispatch-s469) — a PAYLOAD variant
+  // value is `{ variant, data }`, not its name: comparing the value with `"Circle"` never matched,
+  // so the else arm ran silently (and `.Circle(r)` never bound `r`). When an arm names a payload
+  // variant, dispatch on the TAG, as the structured emitters do (emitMatchTagDiscriminator), and
+  // bind the payload from `.data` by the declared field order. Unit-variant-only matches keep the
+  // direct comparison (a unit variant value IS its name) — their output is unchanged.
+  const payloadVariant = (n: string | null | undefined) =>
+    !!n && (!!_rewriterVariantFields?.has(n) || !!_rewriterVariantFieldCollisions?.has(n));
+  const useTag = arms.some((a) => a.kind === "variant" &&
+    (!!a.binding || (a.tests && a.tests.length > 1 ? a.tests : [a.test]).some(payloadVariant)));
+  const tagVar = useTag ? genVar("tag") : tmpVar;
   const lines: string[] = [];
   lines.push(`(function() {`);
   lines.push(`  const ${tmpVar} = ${matchTarget};`);
+  if (useTag) lines.push(`  const ${tagVar} = (${tmpVar} != null && typeof ${tmpVar} === "object") ? ${tmpVar}.variant : ${tmpVar};`);
 
   let conditionIndex = 0;
   for (const arm of arms) {
@@ -1860,6 +1897,7 @@ export function rewriteMatchExpr(expr: string): string {
     } else {
       const kw = conditionIndex === 0 ? "if" : "else if";
       let condition: string;
+      let prelude = "";
       if (arm.kind === "not") {
         // §42: `not` match arm checks for absence (null or undefined)
         condition = `${tmpVar} === null || ${tmpVar} === undefined`;
@@ -1867,9 +1905,14 @@ export function rewriteMatchExpr(expr: string): string {
         // §18 pipe-alternation: `.A | .B | .C => result` emits OR-chain.
         // Singleton variant arms use a single equality check (unchanged path).
         if (arm.tests && arm.tests.length > 1) {
-          condition = arm.tests.map(t => `${tmpVar} === "${t}"`).join(" || ");
+          condition = arm.tests.map(t => `${tagVar} === "${t}"`).join(" || ");
         } else {
-          condition = `${tmpVar} === "${arm.test}"`;
+          condition = `${tagVar} === "${arm.test}"`;
+        }
+        if (arm.binding) {
+          const bound = payloadBindingPrelude(arm.test ?? "", arm.binding, tmpVar);
+          if (bound === null) return prefix + refuseInlineMatch(armsStr, "payload binding");
+          prelude = bound;
         }
       } else if (arm.tests && arm.tests.length > 1) {
         // S469 r7 — a literal alternation (`"a" | "b" :>`, `1 | 2 :>`, mixed): every alternate.
@@ -1877,7 +1920,9 @@ export function rewriteMatchExpr(expr: string): string {
       } else {
         condition = `${tmpVar} === ${arm.test}`;
       }
-      lines.push(`  ${kw} (${condition}) return ${result};`);
+      lines.push(prelude
+        ? `  ${kw} (${condition}) { ${prelude}return ${result}; }`
+        : `  ${kw} (${condition}) return ${result};`);
       conditionIndex++;
     }
   }
