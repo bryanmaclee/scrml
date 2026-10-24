@@ -35,7 +35,8 @@
  *             + reactive_get/set/subscribe).
  *
  *       §B.3  `if=@expr` inside lift template — FIXED by LIFT-3 (`14e21de`).
- *             Display-style toggle + reactive subscription emitted.
+ *             Display-style toggle + reactive subscription emitted; since S469 a
+ *             render gate (element⇄comment swap, §17.1) instead of the toggle.
  *
  *       §B.4  `onkeydown=fn()` bare-call inside lift template — FIXED by
  *             LIFT-4 (`14e21de`). `event` argument auto-injected.
@@ -116,7 +117,7 @@ beforeAll(() => {
 `);
 
   // §B.3 — if=@expr inside lift template
-  // EXPECTED-BROKEN: literal setAttribute("if", "...") instead of display:none toggle.
+  // Originally broken: literal setAttribute("if", "..."); now the §17.1 render gate.
   liftIfExprFx = fix("lift-if-expr.scrml", `<program>
 \${
   @items = [{id: 1}, {id: 2}]
@@ -258,14 +259,16 @@ describe("§B: lift-template attribute parser — current-broken-output repros",
     expect(js).toMatch(/_scrml_reactive_subscribe\("editText"/);
   });
 
-  test("§B.3 if=@expr inside lift emits display toggle (FIXED by LIFT-3 patch)", () => {
+  test("§B.3 if=@expr inside lift emits a render gate (LIFT-3; structural since S469)", () => {
     const result = compile(liftIfExprFx);
     expect(result.errors).toEqual([]);
     const js = foldChunkNamespacing(result.outputs.get(liftIfExprFx).clientJs);
     // LIFT-3 FIX: no literal setAttribute("if", ...) call.
     expect(js).not.toMatch(/setAttribute\("if"/);
-    // Display-style toggle + subscription to the reactive cell.
-    expect(js).toMatch(/style\.display\s*=/);
+    // §17.1 (S469) — the element⇄comment swap, not a display toggle (the element is
+    // absent while the condition is false) + a subscription to the reactive cell.
+    expect(js).toMatch(/_scrml_ifrow_apply\(/);
+    expect(js).not.toMatch(/style\.display\s*=/);
     // S103 Phase 3 (Candidate A) — when the bind shape is a STRICTEST-scope
     // predicate (`@cell == closure-expr`), emit-lift now routes through
     // _scrml_reactive_subscribe_when (value-indexed sub-registry) instead of

@@ -12,7 +12,7 @@ import { iterableHasReactiveRefs, forBodyLiftsMarkup } from "./reactive-deps.ts"
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { liftScopeDeclaredNames, markDeclaredMutable } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
-import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite, refuseUnloweredElseChain } from "./refused-lowering-errors.ts";
+import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite, refuseUnloweredElseChain, recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { isRawContentElement, rawContentDomLines, sealRawContentBody, unsealRawContentBody } from "../raw-content-encode.ts";
 import { isExecutableEventHandlerAttrName } from "../attr-injection-sink.ts";
 import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
@@ -453,20 +453,11 @@ function scanItemDerivedLocals(body, newIterVar) {
 // top-level Tier-0 path) capture aliases uniformly. MUST be called BEFORE the ctx
 // is pushed (the scan reads the ancestor-only stack).
 export function buildLiftReconcileCtx(wrapperVar, keyVar, iterVar, body) {
-  // g-lift-tier0-if-reactive-structural — the SOLE-structural-root discriminant
-  // for the reactive per-item `if=` STRUCTURAL swap (SPEC §17.1), the Tier-0
-  // for-lift sibling of the Tier-1 <each> fix (emit-each.ts). A structural root
-  // is any top-level body child that RENDERS DOM — a `lift-expr` (markup / text
-  // interp), a nested `for-stmt` (inner list), or an `if-stmt` (conditional
-  // block). Bare logic (assignments / let-decls) render nothing. When exactly
-  // ONE structural root exists AND it is a MARKUP lift-expr, that markup node IS
-  // the single reconcile-tracked item root: a per-item `if=` on it lowers to the
-  // element⇄comment swap (mirroring Tier-1's isSoleItemRoot). With >1 structural
-  // root the item is a multi-node group; a naive swap would leave sibling roots
-  // mis-tracked, so a per-item `if=` on one of them is DEFERRED to the display
-  // toggle (see emit at ~1378 + docs/known-gaps.md). Node identity (not a param)
-  // carries the discriminant to emitCreateElementFromMarkup — the same node
-  // object flows through emitLiftExpr(child.expr.node) into the emit site.
+  // g-lift-tier0-if-reactive-structural — the SOLE-structural-root discriminant (S297,
+  // as on main): when exactly ONE structural root exists AND it is a MARKUP lift-expr,
+  // that markup node IS the single reconcile-tracked item root; its `if=` is evaluated
+  // in a live-keyed per-item effect (emitLiftIfGate placement A). Node identity carries
+  // the discriminant to emitCreateElementFromMarkup.
   const _structuralRoots = (Array.isArray(body) ? body : []).filter(
     (c) => c && (c.kind === "lift-expr" || c.kind === "for-stmt" || c.kind === "if-stmt"),
   );
@@ -481,7 +472,6 @@ export function buildLiftReconcileCtx(wrapperVar, keyVar, iterVar, body) {
     iterVar,
     itemDerivedLocals: scanItemDerivedLocals(body, iterVar),
     soleRootMarkupNode,
-    itemRootMarkupNodes: _rootMarkupNodes,
   };
 }
 
@@ -669,43 +659,171 @@ function pushLiftAttrSet(lines, setStmt) {
 // the user types) and the arm run disposes the sync with the arm.
 function pushLiftBind(lines, elVar, flavor, eventName, varJSON) {
   const initStmt = `${elVar}.${flavor} = _scrml_reactive_get(${varJSON});`;
+  // The input → cell listener is guarded like every lifted handler: a DETACHED element
+  // (an `if=`-gated input while the gate is off, a removed row) writes nothing when an
+  // event is dispatched on a held reference (S469 round 2, F4).
+  const writeListener = guardDetachedListener(`function(_scrml_event) { _scrml_reactive_set(${varJSON}, ${elVar}.${flavor}); }`);
   if (liftLiveWraps(initStmt)) {
     lines.push(`_scrml_effect(function() { ${initStmt} });`);
-    lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function() { _scrml_reactive_set(${varJSON}, ${elVar}.${flavor}); });`);
+    lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${writeListener});`);
     return;
   }
   lines.push(initStmt);
-  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function() { _scrml_reactive_set(${varJSON}, ${elVar}.${flavor}); });`);
+  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${writeListener});`);
   lines.push(`_scrml_reactive_subscribe(${varJSON}, function() { ${elVar}.${flavor} = _scrml_reactive_get(${varJSON}); });`);
 }
 
-// S293 — a per-item `if=` conditional-display toggle whose predicate reads the
-// reconciled item must re-evaluate on a same-key reconcile: the per-item factory
-// does NOT rebuild a reused node, so the pre-fix "updater called once + @cell
-// subscription" left an item-reading predicate STALE (the factory-rebuilds-per-item
-// assumption in the S88 comment is false under reconcile). When a reconcile ctx is
-// active AND the predicate reads the item (iter var or an item-derived local), drive
-// the toggle from a live-keyed `_scrml_effect` (via maybeWrapLiftPerItemEffect —
-// re-resolves the item + replays locals; the effect ALSO auto-tracks any @cell reads
-// in the predicate, so cell reactivity is preserved). Returns true when it emitted
-// the reactive form; false → the caller emits the legacy updater + @cell-subscription
-// path (byte-identical to pre-fix; keeps the value-indexed @cell optimization for a
-// cell-only predicate). (g-lift-per-item-if-directive-not-reactive-on-reconcile.)
-function tryEmitLiftIfReactive(lines, elVar, exprJS, rawText) {
-  if (!currentLiftReconcileCtx()) return false;
-  if (computeItemDerivedReplay(exprJS, [], 'return;').length === 0) return false; // cell-only → legacy path
-  // Preserve the S103 value-indexed select-row optimization: a `@cell == item.field`
-  // predicate keeps its `_scrml_reactive_subscribe_when` O(2) path (firing only the
-  // OLD+NEW value buckets on a cell write, not O(N) over all rows). Routing it to the
-  // effect would auto-track the cell read → O(N) per write, regressing the deliberate
-  // opt. Its item-side reconcile-staleness (item.field stale after a same-key REPLACE)
-  // is a NARROWER deferred sub-gap noted on g-lift-per-item-if-directive. Only NON-
-  // value-indexed per-item predicates (e.g. `e.active is some`) route to the effect.
-  const refs = [...new Set((rawText.match(/@([A-Za-z_$][A-Za-z0-9_$.]*)/g) || []).map(r => r.replace(/^@/, "").split(".")[0]))];
+// §17.1 — a markup `if=` in LIFTED markup is a RENDER GATE, wherever the element
+// sits: while the condition is false the element is NOT in the DOM — a placeholder
+// comment holds its place — so its subtree is unmounted and its listeners are
+// unreachable. The swap is `_scrml_ifrow_apply` (the `ifrow` runtime chunk), the one
+// `<each>` rows use.
+//
+// S469 round 5 — WHERE the condition is evaluated is main's, unchanged; only WHAT is
+// done to the element changed (main toggled `style.display`). Main's placements, kept
+// exactly (the oracle — rounds 2–4 moved evaluation and each time opened a hole):
+//   A. the SOLE root of a reconciled row, non-value-indexed: a live-keyed per-item
+//      effect (main already swapped here);
+//   B. any other element of a reconciled row whose condition reads the row (item or
+//      item-derived local), non-value-indexed: a live-keyed per-item effect;
+//   C. LIVE mode (an `if … lift` arm; the condition reads a cell and no arm-declared
+//      name — liftLiveWraps): its own effect, owned by the arm;
+//   D. otherwise: evaluated where the element is built (so the enclosing group / arm
+//      render tracks it), plus main's updater subscriptions — the value-indexed
+//      `@cell == v` bucket (`_scrml_reactive_subscribe_when`, O(2)) or one
+//      `_scrml_reactive_subscribe` per `@name` in the text.
+// A position stale on main is stale here; it is filed, not re-engineered (known-gaps:
+// g-lift-gate-placement-inherits-main-staleness-s469).
+//
+// The element is built once; `cur` is the node currently in the DOM. Returns its name.
+function _liftGateRefs(rawText) {
+  return [...new Set((rawText.match(/@([A-Za-z_$][A-Za-z0-9_$.]*)/g) || []).map(r => r.replace(/^@/, "").split(".")[0]))];
+}
+function _liftGateValueIndexed(rawText) {
+  const refs = _liftGateRefs(rawText);
   const pred = detectPredicateShapeBind(rawText);
-  if (pred.matched && refs.length === 1 && refs[0] === pred.cellName) return false;
-  for (const l of maybeWrapLiftPerItemEffect([`${elVar}.style.display = (${exprJS}) ? "" : "none";`])) lines.push(l);
-  return true;
+  return { refs, pred, valueIndexed: pred.matched && refs.length === 1 && refs[0] === pred.cellName };
+}
+/** Main's tryEmitLiftIfReactive test: a reconciled row and a condition that reads the row. */
+function _liftReadsRow(exprJS) {
+  return !!currentLiftReconcileCtx() && computeItemDerivedReplay(exprJS, [], 'return;').length > 0;
+}
+/**
+ * S469 round 6 — a lift emitted with no container inside a reconciled row factory goes to
+ * the AMBIENT target (`_scrml_lift(…)`), not into the row's fragment (a `while` in a row:
+ * g-while-lift-in-reconciled-row-escapes-the-row-s469). Its elements outlive the row
+ * scope — which the reconciler drops at mount when the factory returns nothing — so their
+ * updater subscriptions must not be registered with it. Counted on the row's ctx; a list
+ * nested inside the escaped markup has its own ctx and is unaffected.
+ */
+function _withLiftTarget(ambient, fn) {
+  const ctx = ambient ? currentLiftReconcileCtx() : null;
+  if (ctx) ctx.ambientLiftDepth = (ctx.ambientLiftDepth ?? 0) + 1;
+  try { return fn(); } finally { if (ctx) ctx.ambientLiftDepth -= 1; }
+}
+function _liftLandsOutsideRow() {
+  const ctx = currentLiftReconcileCtx();
+  return !!(ctx && ctx.ambientLiftDepth > 0);
+}
+
+/**
+ * Main's updater subscriptions (placement D) — the same triggers. Each one's release is
+ * registered with the owner scope open where the element is built (a row, an arm render,
+ * an if= mount — #1508's tree; none at top level), so a removed row / arm stops running
+ * them. Release only: what triggers the update is unchanged.
+ */
+function _liftPushUpdaterSubscriptions(lines, updaterVar, refs, pred, valueIndexed) {
+  // An element that does not land in the row it is built in (see _withLiftTarget) keeps
+  // main's plain subscriptions: no owner scope owns it.
+  const wrap = _liftLandsOutsideRow() ? (c) => c : (c) => `_scrml_mount_track(${c})`;
+  if (valueIndexed) {
+    lines.push(`${wrap(`_scrml_reactive_subscribe_when(${JSON.stringify(pred.cellName)}, ${pred.valueExprJS}, ${updaterVar})`)};`);
+  } else {
+    for (const ref of refs) lines.push(`${wrap(`_scrml_reactive_subscribe(${JSON.stringify(ref)}, ${updaterVar})`)};`);
+  }
+}
+function emitLiftIfGate(lines, elVar, exprJS, rawText, node = null) {
+  const phVar = genVar("ph");
+  const curVar = genVar("cur");
+  const swap = `${curVar} = _scrml_ifrow_apply(${curVar}, ${elVar}, ${phVar}, (${exprJS}));`;
+  lines.push(`const ${phVar} = _scrml_g.document.createComment("scrml-if-row");`);
+  const ctx = currentLiftReconcileCtx();
+  const { refs, pred, valueIndexed } = _liftGateValueIndexed(rawText);
+  if (ctx && node && ctx.soleRootMarkupNode === node && !valueIndexed) {          // A
+    lines.push(`let ${curVar} = (${exprJS}) ? ${elVar} : ${phVar};`);
+    for (const l of maybeWrapLiftPerItemEffect([swap])) lines.push(l);
+    return curVar;
+  }
+  if (!valueIndexed && _liftReadsRow(exprJS)) {                                    // B
+    lines.push(`let ${curVar} = ${elVar};`);
+    for (const l of maybeWrapLiftPerItemEffect([swap])) lines.push(l);
+    return curVar;
+  }
+  lines.push(`let ${curVar} = ${elVar};`);
+  const updaterVar = genVar("if");
+  lines.push(`function ${updaterVar}() { ${swap} }`);
+  if (liftLiveWraps(exprJS)) {                                                     // C
+    lines.push(`_scrml_effect(${updaterVar});`);
+    return curVar;
+  }
+  lines.push(`${updaterVar}();`);                                                  // D
+  _liftPushUpdaterSubscriptions(lines, updaterVar, refs, pred, valueIndexed);
+  return curVar;
+}
+
+// §17.2 — `show=` in lifted markup: a display toggle (the element stays mounted). Main
+// wrote it as a plain attribute (no toggle); it is now read at the placements an
+// `@`-expression `if=` takes there (B, C, D above — A is the if= swap's own).
+function emitLiftShowBinding(lines, elVar, exprJS, rawText) {
+  const stmt = `${elVar}.style.display = (${exprJS}) ? "" : "none";`;
+  const { refs, pred, valueIndexed } = _liftGateValueIndexed(rawText);
+  if (!valueIndexed && _liftReadsRow(exprJS)) {
+    for (const l of maybeWrapLiftPerItemEffect([stmt])) lines.push(l);
+    return;
+  }
+  const updaterVar = genVar("show");
+  lines.push(`function ${updaterVar}() { ${stmt} }`);
+  if (liftLiveWraps(exprJS)) {
+    lines.push(`_scrml_effect(${updaterVar});`);
+    return;
+  }
+  lines.push(`${updaterVar}();`);
+  _liftPushUpdaterSubscriptions(lines, updaterVar, refs, pred, valueIndexed);
+}
+
+// The condition of a lifted `if=` / `show=`, lowered from any value kind the markup
+// parser gives it: a cell or expression, a call (`if=allowed(@pw)`), or a QUOTED
+// condition — still an expression (§17.1 `if="@n >= 3"`), never a string (a
+// non-empty string is truthy). A variable-ref keeps its `@` in the text fallback: a
+// component body expanded into lifted markup reaches here without its expression
+// node, and the bare name (`ok`) was a ReferenceError (S469 round 2). Any other kind
+// is E-CG-003 and the condition is `false`.
+function liftConditionValue(val, attrName, tag, attr, node) {
+  if (val && (val.kind === "variable-ref" || val.kind === "expr")) {
+    const raw = val.kind === "variable-ref" ? (val.name || "") : (val.raw || "");
+    return { exprJS: emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx()), rawText: raw };
+  }
+  if (val && val.kind === "call-ref") {
+    const rawArgs = val.argExprNodes
+      ? val.argExprNodes.map(n => emitExprField(n, "", liftExprCtx())).join(", ")
+      : (val.args || []).map(a => emitExprField(null, a.trim(), liftExprCtx())).join(", ");
+    return { exprJS: `${emitExprField(null, val.name, liftExprCtx())}(${rawArgs})`, rawText: `${val.name}(${(val.args || []).join(", ")})` };
+  }
+  if (val && val.kind === "string-literal") {
+    const q = String(val.value ?? "").trim();
+    const interp = /^\$\{([\s\S]*)\}$/.exec(q);
+    const rawText = interp ? interp[1].trim() : q;
+    return { exprJS: rawText === "" ? "false" : emitExprField(null, rawText, liftExprCtx()), rawText };
+  }
+  recordRefusedLowering(new CGError(
+    "E-CG-003",
+    `E-CG-003: the \`${attrName}=\` on this \`<${tag || "element"}>\` in lifted markup has ` +
+    (val && val.kind ? `a value of kind "${String(val.kind)}"` : `no condition`) +
+    `, so the compiler cannot apply it. It is refused rather than rendered ungated (§17.1 / §17.2). ` +
+    `Write the condition as \`${attrName}=@cell\`, \`${attrName}=fn(…)\` or \`${attrName}=(expression)\`.`,
+    (attr && attr.span) ?? (node && node.span) ?? { start: 0, end: 0 },
+  ), node ?? attr);
+  return { exprJS: "false", rawText: "" };
 }
 
 // ---------------------------------------------------------------------------
@@ -1406,10 +1524,21 @@ function splitTagSegments(s) {
  * @param {object|null} engineCtx
  * @param {string} tag — the element's tag ("" when unknown: every URL-attribute name then counts
  *   for the §5.2 rule 3 runtime guard — fail closed)
+ * @param {{node: string}|null} mount — the element's MOUNT slot: `node` names the variable the
+ *   caller appends / returns for this element. An `if=` (a render gate, emitLiftIfGate) sets it
+ *   to the element⇄comment tracked node. Null when the caller has no slot to read.
  * @returns {string[]}
  */
-function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
+function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "", mount = null) {
   const lines = [];
+  // §17.1 — the render gate for an `if=` on this element (see emitLiftIfGate). The
+  // element may already be in its parent (an attribute continuation arrives after
+  // the element was appended): then the tracked node takes its place now.
+  const gateIf = (exprJS, rawText) => {
+    const cur = emitLiftIfGate(lines, elVar, exprJS, rawText, null);
+    lines.push(`if (${cur} !== ${elVar} && ${elVar}.parentNode) ${elVar}.parentNode.replaceChild(${cur}, ${elVar});`);
+    if (mount) mount.node = cur;
+  };
   for (const attr of attrs) {
     // §5.2 (S464) — codegen backstop: a QUOTED event-handler attribute with no `${…}` is never
     // written nor wired (E-ATTR-QUOTED-HANDLER, and a static executable value E-ATTR-STATIC-EXECUTABLE; `refuseStaticAttrWrite`). Without this the
@@ -1417,7 +1546,13 @@ function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
     if (attr && attr.quoted === true && refuseStaticAttrWrite(attr.name, attr.value, null, tag, attrs)) continue;
     // §17.1.1 (S469 review F4) — see refuseUnloweredElseChain; the refusal fails the compile.
     if (attr && refuseUnloweredElseChain(attr.name, "in lifted markup", null)) continue;
-    if (attr.value === null) {
+    if (attr.value === null && (attr.name === "if" || attr.name === "show")) {
+      // §17.1 / §17.2 — a bare `if` / `show` names no condition: refused, and the
+      // element gated off / hidden rather than rendered ungated (fail closed).
+      liftConditionValue(null, attr.name, tag, null, attr);
+      if (attr.name === "if") gateIf("false", "");
+      else emitLiftShowBinding(lines, elVar, "false", "");
+    } else if (attr.value === null) {
       // Boolean attribute
       lines.push(`${elVar}.setAttribute(${JSON.stringify(attr.name)}, "");`);
     } else if (/^bind:(value|checked|files|group)$/.test(attr.name)) {
@@ -1443,51 +1578,13 @@ function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
       const varJSON = JSON.stringify(varRef);
       pushLiftBind(lines, elVar, flavor, eventName, varJSON);
     } else if (attr.name === "if") {
-      // LIFT-3 fix (S88) — conditional display toggle inside lift template,
-      // parity with top-level if= attribute conditional rendering.
-      //
-      // Pre-fix: emitted literal setAttribute("if", String(expr ?? "")) which
-      // attached the raw expression as an HTML attribute with NO display
-      // toggle, NO conditional rendering.
-      //
-      // This fix emits:
-      //   1. An updater function that toggles style.display based on expr.
-      //   2. An initial call to apply the predicate at element-build time.
-      //   3. _scrml_reactive_subscribe for each @-prefixed cell referenced in
-      //      the expression, so changes re-evaluate the predicate.
-      //
-      // The for-loop iterable identifier (e.g. `item` in `if=@editingId == item.id`)
-      // is captured by the per-item factory closure — no subscription needed
-      // because the factory rebuilds per item.
-      const exprJS = emitExprField(null, attr.value, liftExprCtx());
-      if (tryEmitLiftIfReactive(lines, elVar, exprJS, attr.value)) continue;
-      const updaterVar = `_scrml_if_${genVar()}`;
-      lines.push(`function ${updaterVar}() { ${elVar}.style.display = (${exprJS}) ? "" : "none"; }`);
-      if (liftLiveWraps(exprJS)) {
-        // LIVE mode — the toggle is its own effect (see liftLiveWraps).
-        lines.push(`_scrml_effect(${updaterVar});`);
-        continue;
-      }
-      lines.push(`${updaterVar}();`);
-      // Extract @-prefixed reactive var names from the raw expression. Strip
-      // any dotted-path tail so `@form.field` subscribes to the compound root
-      // `form` (matches the top-level if= subscription granularity).
-      const refMatches = attr.value.match(/@([A-Za-z_$][A-Za-z0-9_$.]*)/g) || [];
-      const uniqueRefs = [...new Set(refMatches.map(r => r.replace(/^@/, "").split(".")[0]))];
-      // S103 Phase 3 select-row chip-away — value-indexed subscription
-      // dispatch. When the bind expression is a STRICTEST-scope predicate
-      // shape (cell == literal-or-closure-expr), register the updater under
-      // the value-indexed sub-registry so writes fire only the OLD-value +
-      // NEW-value buckets (O(2) per write instead of O(N) over all rows).
-      // Falls back to LEGACY for any non-predicate shape.
-      const predicate = detectPredicateShapeBind(attr.value);
-      if (predicate.matched && uniqueRefs.length === 1 && uniqueRefs[0] === predicate.cellName) {
-        lines.push(`_scrml_reactive_subscribe_when(${JSON.stringify(predicate.cellName)}, ${predicate.valueExprJS}, ${updaterVar});`);
-      } else {
-        for (const ref of uniqueRefs) {
-          lines.push(`_scrml_reactive_subscribe(${JSON.stringify(ref)}, ${updaterVar});`);
-        }
-      }
+      // §17.1 — a render gate, not a display toggle (S88 LIFT-3 wrote the raw
+      // expression as an `if` attribute; S88–S469 toggled `style.display`, which
+      // left the element and its listeners in the DOM while the condition was false).
+      gateIf(emitExprField(null, attr.value, liftExprCtx()), attr.value);
+    } else if (attr.name === "show") {
+      // §17.2 — a display toggle (emitLiftShowBinding); it was written as a plain attribute.
+      emitLiftShowBinding(lines, elVar, emitExprField(null, attr.value, liftExprCtx()), attr.value);
     } else if (attr.name.startsWith("class:")) {
       // §5.5.2 conditional class directive — see the parity branch in
       // emitCreateElementFromMarkup for the value-kind-AST equivalent.
@@ -1700,6 +1797,23 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
     lines.push(`const ${elVar} = _scrml_g.document.createComment("");`);
     return elVar;
   }
+  // An `<each>` that IS the lifted node (`lift <each in=@xs …>`, a markup value whose
+  // root is an `<each>`) is a list, not an element: it goes through the SAME shared
+  // emit-each lowering a nested `<each>` child takes below (tryEmitNestedLiftEach) —
+  // so it iterates, its `@.` / `as` names bind, and its `if=` is the row-scoped gate.
+  // Before S469 it was built as a literal `<each>` element: its body rendered once
+  // with the alias unbound, and its `if=` was a display toggle (content in the DOM).
+  // The list's mount node is the one node this factory returns.
+  if (tag === "each") {
+    const fragVar = genVar("lift_each_frag");
+    const eachLines = tryEmitNestedLiftEach(node, scopeVar, fragVar, engineCtx);
+    if (eachLines !== null) {
+      lines.push(`const ${fragVar} = _scrml_g.document.createDocumentFragment();`);
+      for (const l of eachLines) lines.push(l);
+      lines.push(`const ${elVar} = ${fragVar}.firstChild ?? _scrml_g.document.createComment("");`);
+      return elVar;
+    }
+  }
   // §17.1.1 (S469 review F4) — lifted markup builds no if=/else chain, so an `else` /
   // `else-if=` here would render unconditionally. Refused: the recorded error fails the
   // compile (no artifact ships); the element is still walked so its other refusals report.
@@ -1711,11 +1825,11 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
   // S464 round 5 — each markup child learns its parent's tag (`refuseStaticAttrWrite`).
   for (const c of children) if (c && typeof c === "object" && c.kind === "markup") c._parentTag = tag;
 
-  // g-lift-tier0-if-reactive-structural — the node this factory RETURNS. Normally
-  // the element itself; for a SOLE reconciled item root carrying a per-item `if=`
-  // it becomes the element⇄comment tracked var (`_scrml_cur_*`), so the factory
-  // mounts EITHER the element (cond true) OR a placeholder comment (cond false) —
-  // the §17.1 structural swap. Set only inside the AST `if=` branch below.
+  // §17.1 — the node this factory RETURNS (its parent appends it). Normally the
+  // element itself; for an element carrying an `if=` — at ANY position in lifted
+  // markup — it is the element⇄comment tracked var (`_scrml_cur_*`), so EITHER the
+  // element (cond true) OR a placeholder comment (cond false) is mounted, and the
+  // render gate swaps them (emitLiftIfGate). Set only inside the `if=` branch below.
   let _returnVar = elVar;
 
   // Emit setAttribute calls
@@ -1758,77 +1872,15 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       }
     }
 
-    // LIFT-3 fix (S88) — if= conditional display toggle (parity with top-level).
-    if (val && (val.kind === "variable-ref" || val.kind === "expr") && name === "if") {
-      // Get the predicate expression in emitted form.
-      const raw = val.kind === "variable-ref"
-        ? (val.name || "").replace(/^@/, "")
-        : (val.raw || "");
-      const exprJS = emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx());
-      const rawText = val.kind === "variable-ref" ? (val.name || "") : (val.raw || "");
-      // g-lift-tier0-if-reactive-structural (SPEC §17.1) — Tier-0 for-lift sibling
-      // of the Tier-1 <each> fix. A per-item `if=` on the SOLE reconciled item
-      // root is REACTIVE + STRUCTURAL, not a display toggle: the reconcile-tracked
-      // node is ALWAYS present — EITHER the element (cond true) OR a `<!--scrml-if-
-      // row-->` COMMENT placeholder (cond false). The factory returns that ONE
-      // tracked node (`_returnVar`), so root-count stays 1, and a live-keyed
-      // per-item effect swaps element⇄comment IN PLACE via `_scrml_ifrow_apply`
-      // (runtime-template.js — the SAME helper Tier-1 uses), transplanting
-      // `_scrml_key` so keying / reorder / delete keep working with zero reconcile-
-      // core change. First-run safe: the helper is a no-op while `_cur` already
-      // matches the create-time condition (before the reconciler assigns a key).
-      {
-        const _ctx = currentLiftReconcileCtx();
-        const _isSoleItemRoot = !!(_ctx && _ctx.soleRootMarkupNode === node);
-        // Preserve the S103 value-indexed select-row optimization: a
-        // `@cell == item.field` predicate keeps its `_scrml_reactive_subscribe_when`
-        // O(2) legacy path (routing it to the effect would auto-track the cell →
-        // O(N) per write). Its §17.1 structural-remove is a NARROWER deferred sub-
-        // gap (g-lift-tier0-if-value-indexed-display-toggle-deferred) — the row
-        // still hides rather than unmounts. Non-value-indexed sole-root predicates
-        // (item-reading `r.on` OR plain `@show`) take the structural swap.
-        const _refs = [...new Set((rawText.match(/@([A-Za-z_$][A-Za-z0-9_$.]*)/g) || []).map(r => r.replace(/^@/, "").split(".")[0]))];
-        const _pred = detectPredicateShapeBind(rawText);
-        const _isValueIndexed = _pred.matched && _refs.length === 1 && _refs[0] === _pred.cellName;
-        if (_isSoleItemRoot && !_isValueIndexed) {
-          const phVar = `_scrml_ph_${genVar()}`;
-          const curVar = `_scrml_cur_${genVar()}`;
-          lines.push(`const ${phVar} = _scrml_g.document.createComment("scrml-if-row");`);
-          lines.push(`let ${curVar} = (${exprJS}) ? ${elVar} : ${phVar};`);
-          for (const l of maybeWrapLiftPerItemEffect([`${curVar} = _scrml_ifrow_apply(${curVar}, ${elVar}, ${phVar}, (${exprJS}));`])) lines.push(l);
-          _returnVar = curVar;
-          continue;
-        }
-        if (_isSoleItemRoot && _isValueIndexed) {
-          lines.push(`// W-LIFT-TIER0-IF-VALUE-INDEXED-DISPLAY-TOGGLE-DEFERRED: sole-root value-indexed if= keeps the O(2) display toggle (structural remove would regress the S103 select-row opt). See docs/known-gaps.md.`);
-        } else if (_ctx && Array.isArray(_ctx.itemRootMarkupNodes) && _ctx.itemRootMarkupNodes.includes(node)) {
-          lines.push(`// W-LIFT-TIER0-IF-MULTIROOT-DEFERRED: multi-root item + per-item if= — display toggle (a structural swap would mis-track the sibling roots). See docs/known-gaps.md.`);
-        }
-      }
-      if (tryEmitLiftIfReactive(lines, elVar, exprJS, rawText)) continue;
-      const updaterVar = `_scrml_if_${genVar()}`;
-      lines.push(`function ${updaterVar}() { ${elVar}.style.display = (${exprJS}) ? "" : "none"; }`);
-      if (liftLiveWraps(exprJS)) {
-        // LIVE mode — the toggle is its own effect (see liftLiveWraps).
-        lines.push(`_scrml_effect(${updaterVar});`);
-        continue;
-      }
-      lines.push(`${updaterVar}();`);
-      // Subscribe to each @-prefixed reactive var in the raw expression. The
-      // for-loop iterable identifier is captured by the per-item factory
-      // closure — not a reactive cell, no subscription needed.
-      const refMatches = rawText.match(/@([A-Za-z_$][A-Za-z0-9_$.]*)/g) || [];
-      const uniqueRefs = [...new Set(refMatches.map(r => r.replace(/^@/, "").split(".")[0]))];
-      // S103 Phase 3 select-row chip-away — value-indexed dispatch (parity
-      // with the attrs-string path above). See that branch for the rationale.
-      const predicate = detectPredicateShapeBind(rawText);
-      if (predicate.matched && uniqueRefs.length === 1 && uniqueRefs[0] === predicate.cellName) {
-        lines.push(`_scrml_reactive_subscribe_when(${JSON.stringify(predicate.cellName)}, ${predicate.valueExprJS}, ${updaterVar});`);
-      } else {
-        for (const ref of uniqueRefs) {
-          lines.push(`_scrml_reactive_subscribe(${JSON.stringify(ref)}, ${updaterVar});`);
-        }
-      }
+    // §17.1 `if=` (a render gate, emitLiftIfGate: the element is returned / appended
+    // as the element⇄comment tracked node) and §17.2 `show=` (a display toggle,
+    // emitLiftShowBinding). Both read their condition with liftConditionValue — every
+    // value kind an `<each>` row reads; any other kind is refused (E-CG-003) and the
+    // element gated off / hidden, never written as a plain attribute (fail closed).
+    if (name === "if" || name === "show") {
+      const { exprJS, rawText } = liftConditionValue(val, name, tag, attr, node);
+      if (name === "if") _returnVar = emitLiftIfGate(lines, elVar, exprJS, rawText, node);
+      else emitLiftShowBinding(lines, elVar, exprJS, rawText);
       continue;
     }
 
@@ -1847,8 +1899,9 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       const className = name.slice(6);
       let condExpr;
       if (val.kind === "variable-ref") {
-        const rawRef = (val.name || "").replace(/^@/, "");
-        condExpr = emitExprField(val.exprNode, rawRef, liftExprCtx());
+        // The text fallback keeps the `@` (see liftConditionValue): a component body
+        // expanded into lifted markup arrives without its expression node.
+        condExpr = emitExprField(val.exprNode, val.name || "", liftExprCtx());
       } else if (val.kind === "expr") {
         const raw = val.raw ?? "";
         condExpr = emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx());
@@ -1913,8 +1966,10 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       // (no `.advance` / no assign); it stays a plain handler ref. Engine
       // transitions arrive as `call-ref` (`.advance(.X)`) or `expr` (`@e = .X` /
       // `@e.advance(.X)`), handled below. No engine path needed here.
-      const varName = (val.name || "").replace(/^@/, "");
-      const rewritten = emitExprField(val.exprNode, varName, liftExprCtx());
+      // The text fallback keeps the `@` (see liftConditionValue): a component body
+      // expanded into lifted markup arrives without its expression node, and the bare
+      // name was a ReferenceError at run time (S469 round 2).
+      const rewritten = emitExprField(val.exprNode, val.name || "", liftExprCtx());
       if (liftEventName(name) !== null) {
         const eventName = liftEventName(name);
         // Bug 73 — per-item handler live-keying. A bare cell ref (`onclick=@cell`)
@@ -2301,10 +2356,8 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
     }
   }
 
-  // Normally `elVar`; for a SOLE reconciled item root with a per-item `if=` this
-  // is the element⇄comment tracked var so the factory mounts the §17.1 structural
-  // node (see the `if=` branch above). Byte-identical to the prior `return elVar`
-  // for every shape that does NOT take the structural swap.
+  // Normally `elVar`; for an element with an `if=` the element⇄comment tracked
+  // var, so the parent mounts the §17.1 render-gate node (see the `if=` branch above).
   return _returnVar;
 }
 
@@ -2490,10 +2543,12 @@ function emitCreateElementFromExprString(expr) {
 
   lines.push(`const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(tag)});`);
 
-  // Parse and emit attributes
+  // Parse and emit attributes. `mount.node` is what the caller appends: the element,
+  // or — under an `if=` — its element⇄comment tracked node (§17.1).
+  const mount = { node: elVar };
   if (attrsStr) {
     const attrs = parseAttrs(attrsStr);
-    const attrLines = emitSetAttrs(elVar, attrs, null, tag);
+    const attrLines = emitSetAttrs(elVar, attrs, null, tag, mount);
     for (const l of attrLines) lines.push(l);
   }
 
@@ -2506,7 +2561,7 @@ function emitCreateElementFromExprString(expr) {
       ? sealed
       : (content || "").replace(/<\s*\/\s*[A-Za-z]*\s*>\s*$/, "").replace(/\s*\/\s*$/, "");
     if (body !== "") for (const l of rawContentDomLines(body, elVar, () => genVar("lift_raw"))) lines.push(l);
-    return { lines, varName: elVar };
+    return { lines, varName: mount.node };
   }
 
   // Emit content
@@ -2545,7 +2600,7 @@ function emitCreateElementFromExprString(expr) {
     }
   }
 
-  return { lines, varName: elVar };
+  return { lines, varName: mount.node };
 }
 
 /**
@@ -3371,6 +3426,9 @@ export function emitIfStmtWithContainer(ifNode, containerElVar, opts = {}) {
  *   instead of `_scrml_lift(factory)`. Used by reactive list render functions (§6.5.3).
  */
 export function emitConsolidatedLift(body, opts = {}) {
+  return _withLiftTarget(!(opts.containerVar ?? null) && !(opts.directReturn ?? false), () => _emitConsolidatedLift(body, opts));
+}
+function _emitConsolidatedLift(body, opts = {}) {
   // Find the first lift-expr
   const liftIdx = body.findIndex(n => n && n.kind === "lift-expr");
   if (liftIdx === -1) return "";
@@ -3473,6 +3531,10 @@ export function emitConsolidatedLift(body, opts = {}) {
     // S457 — kept on the element-stack entry so a BLOCK_REF-split value (`to = ${x}`) can ask
     // whether it is an SVG animation value writing a URL attribute (`attributeName="href"`).
     let elementAttrs = [];
+    // `mount.node` is what the parent appends / the factory returns: the element, or —
+    // under an `if=` (here or in a later attribute continuation) — its element⇄comment
+    // tracked node (§17.1, emitSetAttrs).
+    const mount = { node: elVar };
     if (attrsStr) {
       // Detect and strip a trailing incomplete attribute (e.g. `checked =` or `data - id =`)
       // BEFORE calling parseAttrs. This happens when a BLOCK_REF splits the attribute value
@@ -3489,15 +3551,15 @@ export function emitConsolidatedLift(body, opts = {}) {
       }
       const attrs = parseAttrs(cleanAttrsStr);
       elementAttrs = attrs;
-      const attrLines = emitSetAttrs(elVar, attrs, engineCtx, tag);
+      const attrLines = emitSetAttrs(elVar, attrs, engineCtx, tag, mount);
       for (const l of attrLines) lines.push(l);
     }
     const parent = currentParent();
     if (parent) {
-      lines.push(`${parent}.appendChild(${elVar});`);
+      lines.push(`${parent}.appendChild(${mount.node});`);
     }
-    elementStack.push({ varName: elVar, tag, attrs: elementAttrs });
-    return elVar;
+    elementStack.push({ varName: elVar, tag, attrs: elementAttrs, mount });
+    return mount;
   }
 
   /** Pop element stack on closing tag. */
@@ -3579,8 +3641,9 @@ export function emitConsolidatedLift(body, opts = {}) {
     }
   }
 
-  // Create the root element
-  const rootVar = pushElement(rootTag, rootAttrsStr);
+  // Create the root element. Its mount slot is read at the END: an attribute
+  // continuation below may still gate it (§17.1).
+  const rootMount = pushElement(rootTag, rootAttrsStr);
 
   // Process any content/nested tags from the lift-expr itself
   if (rootContent) {
@@ -3681,7 +3744,7 @@ export function emitConsolidatedLift(body, opts = {}) {
           const attrPart = firstTagIdx === -1 ? expr : expr.slice(0, firstTagIdx);
           const remainder = firstTagIdx === -1 ? "" : expr.slice(firstTagIdx);
           const attrs = parseAttrs(attrPart);
-          const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx, elEntry.tag);
+          const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx, elEntry.tag, elEntry.mount);
           for (const l of attrLines) lines.push(l);
           pendingAttrName = null;
           if (remainder.trim()) {
@@ -3723,7 +3786,7 @@ export function emitConsolidatedLift(body, opts = {}) {
           const attrPart = firstTagIdx === -1 ? expr : expr.slice(0, firstTagIdx);
           const remainder = firstTagIdx === -1 ? "" : expr.slice(firstTagIdx);
           const attrs = parseAttrs(attrPart);
-          const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx, elEntry.tag);
+          const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx, elEntry.tag, elEntry.mount);
           for (const l of attrLines) lines.push(l);
           pendingAttrName = null;
           if (remainder.trim()) {
@@ -3791,7 +3854,7 @@ export function emitConsolidatedLift(body, opts = {}) {
         // Apply the attribute to the current element using the existing attr/event emitter
         const syntheticAttrsStr = attrName + " = " + attrValue;
         const attrs = parseAttrs(syntheticAttrsStr);
-        const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx, elEntry.tag);
+        const attrLines = emitSetAttrs(elEntry.varName, attrs, engineCtx, elEntry.tag, elEntry.mount);
         for (const l of attrLines) lines.push(l);
         pendingAttrName = null;
 
@@ -3829,11 +3892,11 @@ export function emitConsolidatedLift(body, opts = {}) {
   const factoryBody = lines.join("\n    ");
   let factoryCode;
   if (directReturn) {
-    factoryCode = `${factoryBody}\n  return ${rootVar};`;
+    factoryCode = `${factoryBody}\n  return ${rootMount.node};`;
   } else if (containerVar) {
-    factoryCode = `${containerVar}.appendChild((() => {\n    ${factoryBody}\n    return ${rootVar};\n  })());`;
+    factoryCode = `${containerVar}.appendChild((() => {\n    ${factoryBody}\n    return ${rootMount.node};\n  })());`;
   } else {
-    factoryCode = `_scrml_lift(() => {\n    ${factoryBody}\n    return ${rootVar};\n  });`;
+    factoryCode = `_scrml_lift(() => {\n    ${factoryBody}\n    return ${rootMount.node};\n  });`;
   }
   const allLines = [...preStatements, factoryCode];
   return allLines.join("\n  ");
@@ -3863,6 +3926,9 @@ export function emitConsolidatedLift(body, opts = {}) {
  * @returns {string}
  */
 export function emitLiftExpr(node, opts = {}) {
+  return _withLiftTarget(!(opts.containerVar ?? null), () => _emitLiftExpr(node, opts));
+}
+function _emitLiftExpr(node, opts = {}) {
   if (!node || !node.expr) return "";
 
   const containerVar = opts.containerVar ?? null;

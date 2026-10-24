@@ -68,6 +68,10 @@ const POST_EMIT_HELPER_CHUNK_GATES: ReadonlyArray<readonly [string, string]> = [
   // covers a controller minted from the binding registry rather than a walkable
   // AST shape.
   ["_scrml_find_if_marker(", "ifmount"],
+  // §17.1 (S469) — `_scrml_ifrow_apply(` (the if= element⇄comment swap) is its own
+  // `ifrow` chunk (S469 round 5): a list-free lift page does not ship the reconciler and
+  // owner tree for it, and a gate-free list does not ship the swap.
+  ["_scrml_ifrow_apply(", "ifrow"],
   // g-when-handler-body-invisible-to-chunk-detection (S372 follow-up) — a
   // client `navigate(...)` lowers to `_scrml_navigate_soft(` / `_scrml_navigate(`
   // (rewrite.ts), both DEFINED in the `utilities` chunk. That chunk's pre-emit

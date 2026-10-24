@@ -893,6 +893,45 @@ export const LIFT_BRANCH_RUN_HELPER: readonly string[] = [
   "}",
 ];
 
+/**
+ * S469 — the arm-run helper when the file has owner-tracked content (a list's rows, an
+ * owner-registered release): each render of the arm is an owner scope (§6.7.2 tree), so a
+ * re-render or the arm's end destroys the rows it rendered and what they registered. Each
+ * tree call is behind a typeof guard (an arm never pulls the 'owner' chunk in). A file
+ * with none of that content gets LIFT_BRANCH_RUN_HELPER, byte-identical to before.
+ */
+export const LIFT_BRANCH_RUN_HELPER_SCOPED: readonly string[] = (() => {
+  const out: string[] = [];
+  for (const l of LIFT_BRANCH_RUN_HELPER) {
+    if (l === "  const render = mkEffect(guard(function() {") {
+      out.push(
+        "  let sid = null;",
+        "  const endScope = () => {",
+        "    const s = sid;",
+        "    sid = null;",
+        "    if (s === null) return;",
+        "    if (host._scrml_arm_sid === s) host._scrml_arm_sid = null;",
+        "    if (typeof _scrml_owner_destroy === \"function\") _scrml_owner_destroy(s);",
+        "  };",
+        l,
+      );
+    } else if (l === "    disposeOwned();" && out[out.length - 1] === "  const render = mkEffect(guard(function() {") {
+      out.push(l, "    endScope();",
+        "    if (typeof _scrml_scope_open === \"function\" && typeof _scrml_mount_owner === \"function\") { sid = _scrml_scope_open(\"as\", _scrml_mount_owner(host)); host._scrml_arm_sid = sid; }");
+    } else if (l === "      body(frag, own(mkEffect), own(mkStatic), arm);") {
+      out.push("      if (sid !== null && typeof _scrml_in_scope === \"function\") _scrml_in_scope(sid, () => body(frag, own(mkEffect), own(mkStatic), arm));",
+        "      else body(frag, own(mkEffect), own(mkStatic), arm);");
+    } else if (l === "    disposeOwned();") {
+      out.push(l, "    endScope();");
+    } else {
+      out.push(l);
+    }
+  }
+  return out;
+})();
+/** Owner-tracked content in a file's emitted client code: the arm-run helper gets the scope. */
+const OWNER_TRACKED_MARKERS = ["_scrml_reconcile_list(", "_scrml_mount_track(", "_scrml_arm_scope(", "_scrml_region_track("];
+
 /** Set by emitLiftGroup when it emits the arm-selector shape; reset per file. */
 let _liftBranchRunUsed = false;
 
@@ -1897,9 +1936,11 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // `${ if … }` lift group's arm-selector shape (emitLiftIfChainGroup). A
   // function declaration, so it hoists to every group that calls it.
   if (_liftBranchRunUsed) {
+    const _sofar = lines.join("\n");
+    const _scoped = OWNER_TRACKED_MARKERS.some((m) => _sofar.includes(m));
     lines.push("");
     lines.push(LIFT_BRANCH_RUN_BANNER);
-    lines.push(...LIFT_BRANCH_RUN_HELPER);
+    lines.push(...(_scoped ? LIFT_BRANCH_RUN_HELPER_SCOPED : LIFT_BRANCH_RUN_HELPER));
   }
 
   // Step 4c: Generate <var server> READ-authority sync infrastructure (§52.6).
