@@ -785,13 +785,18 @@ function _emitLiftGate(lines, attrName, exprJS, rawText, node, val, apply, decla
     if (vi && !vi.literal) {
       // The row side of `@cell == row.field`: a tracked per-item effect reads the LIVE row's
       // field and (re-)registers the bucket under it; the cell side is the bucket (O(2)).
+      // The bucket's callback reads the live row the effect last resolved (it must not resolve it
+      // itself: a cell write fires it from inside whatever effect wrote, which would then track
+      // the list).
       const updVar = genVar(attrName === "if" ? "if" : "show");
       const unsubVar = genVar("unsub");
-      const prelude = computeItemDerivedReplay(stmt, [ctx.iterVar], "return;");
-      lines.push(`function ${updVar}() { ${[...prelude, stmt].join(" ")} }`);
+      const liveVar = genVar("live");
+      lines.push(`let ${liveVar} = ${ctx.iterVar};`);
+      lines.push(`function ${updVar}() { const ${ctx.iterVar} = ${liveVar}; ${stmt} }`);
       lines.push(`let ${unsubVar} = null;`);
       lines.push(`_scrml_mount_track(() => { if (${unsubVar}) ${unsubVar}(); });`);
       for (const l of maybeWrapLiftPerItemEffect([
+        `${liveVar} = ${ctx.iterVar};`,
         `if (${unsubVar}) ${unsubVar}();`,
         `${unsubVar} = _scrml_reactive_subscribe_when(${JSON.stringify(vi.pred.cellName)}, ${vi.pred.valueExprJS}, ${updVar});`,
         `_scrml_untracked(${updVar});`,

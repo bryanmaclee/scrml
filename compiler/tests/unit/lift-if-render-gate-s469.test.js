@@ -101,8 +101,8 @@ describe("S469 — where a lifted gate is re-evaluated (rounds 5 placement A/B k
   test("value-indexed in a row: the O(2) bucket, re-registered under the LIVE row's field by a tracked effect", () => {
     const r = compile(`<sel> = 0\n<xs> = [{ id: 1 }]\n<div>\${ for (r of @xs) { lift <span><b if=(@sel == r.id)>x</b></span> } }</div>\n`);
     expect(r.errors).toEqual([]);
-    expect(r.js).toMatch(/function (_scrml_if_\w+)\(\) \{ let r = _scrml_resolve_item\([^)]*\); if \(r === null\) return; _scrml_cur_\w+ = _scrml_ifrow_apply\(/);
-    expect(r.js).toMatch(/let (_scrml_unsub_\w+) = null;\n\s*_scrml_mount_track\(\(\) => \{ if \(\1\) \1\(\); \}\);\n\s*_scrml_effect\(\(\) => \{\n\s*let r = _scrml_resolve_item\([^\n]*\n\s*if \(r === null\) return;\n\s*if \(\1\) \1\(\);\n\s*\1 = _scrml_cs_reactive_subscribe_when\("sel", r\.id, _scrml_if_\w+\);\n\s*_scrml_untracked\(_scrml_if_\w+\);/);
+    expect(r.js).toMatch(/let (_scrml_live_\w+) = r;\n\s*function (_scrml_if_\w+)\(\) \{ const r = \1; _scrml_cur_\w+ = _scrml_ifrow_apply\(/);
+    expect(r.js).toMatch(/let (_scrml_unsub_\w+) = null;\n\s*_scrml_mount_track\(\(\) => \{ if \(\1\) \1\(\); \}\);\n\s*_scrml_effect\(\(\) => \{\n\s*let r = _scrml_resolve_item\([^\n]*\n\s*if \(r === null\) return;\n\s*_scrml_live_\w+ = r;\n\s*if \(\1\) \1\(\);\n\s*\1 = _scrml_cs_reactive_subscribe_when\("sel", r\.id, _scrml_if_\w+\);\n\s*_scrml_untracked\(_scrml_if_\w+\);/);
   });
 
   test("an OPEN gate (a body local / a local closure) is read in the render, and the group re-renders", () => {
