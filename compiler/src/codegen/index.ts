@@ -27,6 +27,13 @@ import { assembleRuntime, applyChunkDependencies } from "./runtime-chunks.ts";
 import { toEsmRuntime } from "./runtime-esm.ts";
 import { toEsmClientChunk } from "./emit-client-esm.ts";
 import { fnv1aHash } from "./fnv1a-hash.ts";
+import {
+  BUILD_ID_PLACEHOLDER,
+  CLASSIC_CHUNK_BUILD_GATE,
+  ESM_CHUNK_BUILD_ADMIT,
+  computeBuildIdentity,
+  substituteBuildIdentity,
+} from "./build-identity.ts";
 import { CGError } from "./errors.ts";
 import { shipText, shipStripFallbackWarning } from "./ship-strip.ts";
 
@@ -888,7 +895,10 @@ function wrapBodyKeepingModuleStatementsOutside(body: string): string {
     else rest.push(line);
   }
   const hoistBlock = hoisted.length > 0 ? hoisted.join("\n") + "\n" : "";
-  return `${hoistBlock}(function() {\n${rest.join("\n")}\n})();\n`;
+  // §20.8.2 step 0 — the build gate is the scope's FIRST statement, so a chunk of
+  // another build (a deploy swapped the unhashed file under a live tab) refuses to
+  // run before any cell write, module registration or listener (build-identity.ts).
+  return `${hoistBlock}(function() {\n${CLASSIC_CHUNK_BUILD_GATE}\n${rest.join("\n")}\n})();\n`;
 }
 
 
@@ -3109,6 +3119,15 @@ export function runCG(input: CgInput): CgOutput {
       // its output stays byte-identical. This MUST precede the classic IIFE wrap
       // below (which the esm path skips — an IIFE cannot contain `import`/`export`).
       if (clientJs && !embedRuntime && moduleFormat === "esm") {
+        // §20.8.2 step 0 — a module has no body to `return` from, so the esm chunk
+        // only REGISTERS its build (the soft-nav same-build check reads it); the
+        // per-listener `_scrml_build_owns` checks still scope it to its own markup.
+        // Inserted BEFORE the transform so the runtime import picks the name up.
+        const reqHeader = "// Requires: ";
+        const nl = clientJs.indexOf("\n");
+        clientJs = clientJs.startsWith(reqHeader) && nl !== -1
+          ? clientJs.slice(0, nl + 1) + ESM_CHUNK_BUILD_ADMIT + "\n" + clientJs.slice(nl + 1)
+          : ESM_CHUNK_BUILD_ADMIT + "\n" + clientJs;
         const importerDistDir = cgOutputBaseDir
           ? dirname(relative(cgOutputBaseDir, filePath))
           : ".";
@@ -3194,7 +3213,9 @@ export function runCG(input: CgInput): CgOutput {
       if (htmlBody) {
         const docParts: string[] = [];
         docParts.push("<!DOCTYPE html>");
-        docParts.push("<html lang=\"en\">");
+        // §20.8.2 step 0 — the build identity (build-identity.ts); the soft-nav
+        // engine swaps in only a page whose stamp equals the running build's.
+        docParts.push(`<html lang="en" data-scrml-build="${BUILD_ID_PLACEHOLDER}">`);
         docParts.push("<head>");
         docParts.push("  <meta charset=\"UTF-8\">");
         docParts.push("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
@@ -4307,6 +4328,22 @@ export function runCG(input: CgInput): CgOutput {
         mutated = true;
       }
       if (mutated) {
+        outputs.set(path, { ...out, clientJs: nextClient, html: nextHtml });
+      }
+    }
+  }
+
+  // §20.8.2 step 0 — the build identity (build-identity.ts). Hashed over the
+  // assembled client code (runtime + every chunk) with the placeholder still in place (so the
+  // identity cannot depend on itself), then substituted into every page and chunk.
+  // Runs in BOTH runtime modes and BEFORE the per-route splitter below reads
+  // `clientJs`. Deterministic: same sources + compiler → same identity.
+  {
+    const buildId = computeBuildIdentity(outputs.values(), runtimeJs);
+    for (const [path, out] of outputs) {
+      const nextClient = substituteBuildIdentity(out.clientJs ?? null, buildId);
+      const nextHtml = substituteBuildIdentity(out.html ?? null, buildId);
+      if (nextClient !== (out.clientJs ?? null) || nextHtml !== (out.html ?? null)) {
         outputs.set(path, { ...out, clientJs: nextClient, html: nextHtml });
       }
     }

@@ -166,7 +166,26 @@ const RUNTIME_GZIP_TOLERANCE_BAND = 188;
 //   runtime statement reachable from the one helper its client calls) is
 //   3,510 B; the rest of the gap is the utilities chunk, which carries the
 //   soft-nav engine together with helpers the shell never calls.
-const SHELL_RUNTIME_GZIP_CEILING = 5907 + RUNTIME_GZIP_TOLERANCE_BAND; // 6,095 B
+//
+// ⚑ RAISED S469 — 6,095 B -> 6,489 B — RATIFIED by bryan (user-voice-scrml.md, scrml-support 0908198:
+//   "Raise to 6,489 B (Recommended)"; g-shell-runtime-ratchet-raised-s469-ruling-owed resolved).
+//   s469-softnav-build-guard (g-soft-nav-cross-build-handler-id-collision-s469, a
+//   HIGH security fix, SPEC §20.8.2 step 0) needs runtime bytes the band cannot
+//   hold: the build-identity admit + region-ownership check (core) and the
+//   soft-nav same-build check + outlet stamp + chunk-refusal abort (utilities).
+//   Measured with this file's pinned compressor, stripped:
+//
+//       shape     before (cd040ea25)      after
+//       shell     22,711 raw / 6,087 B    23,444 raw / 6,301 B   (+733 raw / +214 B)
+//       counter   17,681 raw / 3,912 B    18,157 raw / 4,087 B   (+476 raw / +175 B)
+//
+//   The shell had 8 B of headroom left (6,087 vs 6,095) before this change, so
+//   NO correct fix fits: the minimum (admit + nav check, no defence-in-depth, no
+//   diagnostics) measured 6,196 B. Offset already taken: the retired, never-called
+//   `_scrml_nav_same_chunk` is deleted (-48 B). New ceiling = 6,301 + the band.
+//   Round 2 (review F1/F2: admit count + stamp-seeded build) measured 6,377 B,
+//   inside the ratified ceiling. Lower it freely; raise it only by a new ruling.
+const SHELL_RUNTIME_GZIP_CEILING = 6301 + RUNTIME_GZIP_TOLERANCE_BAND; // 6,489 B
 
 /** The counter shape's aspiration, for the §3 cross-check. Not a ratchet. */
 const COUNTER_RUNTIME_GZIP_ASPIRATION = 16 * 1024;
@@ -249,7 +268,7 @@ describe("§1 client-runtime size ratchet (outlet-bearing shell)", () => {
           "CLIENT-RUNTIME SIZE REGRESSION — outlet-bearing shell shape.",
           "",
           `  measured : ${gzipped} B gzip (level ${RUNTIME_GZIP_LEVEL}), ${runtimeBytes.length} B raw`,
-          `  ceiling  : ${SHELL_RUNTIME_GZIP_CEILING} B  (5,907 recorded S461, stripped + ${RUNTIME_GZIP_TOLERANCE_BAND} B band)`,
+          `  ceiling  : ${SHELL_RUNTIME_GZIP_CEILING} B  (6,301 recorded S469, ratified by bryan — user-voice 0908198; 5,907 at S461 — stripped + ${RUNTIME_GZIP_TOLERANCE_BAND} B band)`,
           `  over by  : ${gzipped - SHELL_RUNTIME_GZIP_CEILING} B`,
           "",
           "SHELL_RUNTIME_GZIP_CEILING is a RATCHET. It may be LOWERED freely.",
@@ -363,13 +382,17 @@ describe("§3 the 16 KB aspiration, measured on both shapes", () => {
  *     <each> row if=              35,675 raw / 8,255 B    35,675 raw / 8,245 B
  *     lift, no if=                17,971 raw / 4,016 B    17,971 raw / 4,016 B  (no regression)
  *
+ * Re-recorded on the #1514 + #1517 merge (4,394 B / 4,228 B): the soft-nav build-guard core
+ * (`_scrml_build_admit` / `_scrml_build_owns`) ships on every page. Ruled S469 (user-voice
+ * 98a5292, "Re-record with guard"; the shell raise is 0908198).
+ *
  * ⚑ RATCHETS — same rule as §1: lower freely, never raise without a ruling.
  */
 const IF_GATE_SHAPES = [
   ["a lifted if= with no list", `<ok> = true
 <button onclick={ @ok = !@ok }>toggle</button>
 <div id="out">\${ lift <span><b if=@ok>secret</b></span> }</div>
-`, 4186, { ifrow: true, reconcile: false, owner: false }],
+`, 4394, { ifrow: true, reconcile: false, owner: false }],
   ["an <each> row if=", `<ok> = true
 <xs> = [1, 2]
 <button onclick={ @ok = !@ok }>toggle</button>
@@ -378,7 +401,7 @@ const IF_GATE_SHAPES = [
   ["a lift with no if=", `<n> = 0
 <button onclick={ @n = @n + 1 }>inc</button>
 <div id="out">\${ lift <span>\${@n}</span> }</div>
-`, 4016, { ifrow: false, reconcile: false, owner: false }],
+`, 4228, { ifrow: false, reconcile: false, owner: false }],
 ];
 
 describe("§4 the if= render gate ships only what the page calls", () => {

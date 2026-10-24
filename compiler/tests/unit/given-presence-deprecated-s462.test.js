@@ -22,6 +22,7 @@ import { compileScrml } from "../../src/api.js";
 import { fixGivenPresence, GIVEN_PRESENCE_RULE, normalizePresenceParens, compareMarkupClientJs, MARKUP_BODY_STATEMENTS, MARKUP_BODY_CALLS, isPureReadExpr } from "../../src/commands/fix-given-presence.js";
 import { parseExprToNode } from "../../src/expression-parser.ts";
 import { fixS66, IMPL1_SAFE_RULES, S66_RULES } from "../../src/commands/fix-s66.js";
+import { foldBuildIdentity } from "../../src/codegen/build-identity.ts";
 
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "given-presence-s462-")); });
@@ -167,7 +168,8 @@ describe("§B: the deprecated form compiles as before", () => {
     const a = compile("b/old.scrml", LOGIC("    given x, y :> { let _a = x }"));
     const b = compile("b/old.scrml", LOGIC("    if (x is given && y is given) { let _a = x }"));
     expect(clientJs(a)).not.toBe("");
-    expect(normalizePresenceParens(clientJs(a))).toBe(normalizePresenceParens(clientJs(b)));
+    // The §20.8.2 build identity hashes the chunk, so it differs with the parentheses — fold it.
+    expect(normalizePresenceParens(foldBuildIdentity(clientJs(a)))).toBe(normalizePresenceParens(foldBuildIdentity(clientJs(b))));
   });
 });
 

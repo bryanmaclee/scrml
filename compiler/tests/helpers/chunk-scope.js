@@ -28,6 +28,15 @@
  * correct if the token shape ever changes.
  */
 
+import { foldBuildIdentity } from "../../src/codegen/build-identity.ts";
+
+/**
+ * §20.8.2 step 0 — the chunk scope's first statement, the build gate
+ * (`if (typeof _scrml_build_admit === "function" && !_scrml_build_admit("<id>")) return;`).
+ * Matched by shape so a harness that unwraps the scope drops it with the wrap.
+ */
+const BUILD_GATE_LINE = /^if \(typeof _scrml_build_admit === "function" && !_scrml_build_admit\("[^"]*"\)\) return;\n/m;
+
 /** The IIFE closer the chunk wrap emits. */
 const CHUNK_CLOSER = "\n})();";
 
@@ -174,6 +183,8 @@ export function unwrapChunkScope(js, { hostAlias = false } = {}) {
     /\n?\/\/ --- chunk cell scope \([0-9a-z]{8}\) ---[\s\S]*?\/\/ --- end chunk cell scope ---\n/,
     "\n",
   );
+  // Drop the build gate (a top-level `return` once the wrap is gone) with the wrap.
+  out = out.replace(BUILD_GATE_LINE, "");
   // Drop the IIFE wrapper, keeping the body.
   const open = out.indexOf("(function() {\n");
   const close = out.lastIndexOf("\n})();");
@@ -205,7 +216,10 @@ export function unwrapChunkScope(js, { hostAlias = false } = {}) {
  * that happens to look token-shaped.
  */
 export function normalizeChunkToken(js) {
-  const src = String(js ?? "");
+  // The §20.8.2 build identity hashes the whole build (it differs whenever ANY
+  // artifact of the two compiles differs, the path-derived token included), so a
+  // byte-parity comparison folds it too.
+  const src = foldBuildIdentity(String(js ?? ""));
   const ns = chunkNamespaceToken(src);
   return ns ? src.split(ns).join("NSTOK") : src;
 }

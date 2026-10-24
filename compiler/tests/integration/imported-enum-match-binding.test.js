@@ -75,7 +75,9 @@ function build(name, files) {
     if (i === -1) throw new Error("unresolvable chunk deps: " + pending.map((c) => c.name).join(", "));
     const [c] = pending.splice(i, 1);
     // `_scrml_g`: the runtime's host-global alias (S457 2a), which this no-runtime harness stands in for.
-    new Function("_scrml_modules", "_scrml_structural_eq", "_scrml_g", c.src)(registry, eq, globalThis);
+    // `_scrml_build_admit` shadowed as absent (§20.8.2 step 0): no runtime here, and a
+    // runtime an earlier test file left on globalThis must not refuse these chunks.
+    new Function("_scrml_modules", "_scrml_structural_eq", "_scrml_g", "_scrml_build_admit", c.src)(registry, eq, globalThis, undefined);
   }
   const mods = {};
   for (const [k, v] of Object.entries(registry)) mods[k.replace(/\.client\.js$/, "").replace(/^.*\//, "")] = v;

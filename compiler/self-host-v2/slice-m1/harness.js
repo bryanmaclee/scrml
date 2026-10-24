@@ -147,7 +147,10 @@ export function evaluateChunks(chunks) {
     if (i === -1) throw new Error("cyclic or missing chunk dependency: " + pending.map((c) => c.name).join(", "));
     const [c] = pending.splice(i, 1);
     // `_scrml_g`: impl#1's host-global alias (S457 2a), which the runtime declares.
-    new Function("_scrml_modules", "_scrml_structural_eq", "_scrml_g", c.src)(registry, _scrml_structural_eq, globalThis);
+    // `_scrml_build_admit` is shadowed as absent: this loader IS the runtime here (no
+    // document, no build to admit into — SPEC §20.8.2 step 0), and a runtime some
+    // other code left on globalThis must not refuse these chunks.
+    new Function("_scrml_modules", "_scrml_structural_eq", "_scrml_g", "_scrml_build_admit", c.src)(registry, _scrml_structural_eq, globalThis, undefined);
   }
   const mods = {};
   for (const [k, v] of Object.entries(registry)) mods[k.replace(/\.client\.js$/, "").replace(/^.*\//, "")] = v;

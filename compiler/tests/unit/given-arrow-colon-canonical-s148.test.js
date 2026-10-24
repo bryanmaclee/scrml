@@ -31,6 +31,7 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { compileScrml } from "../../src/api.js";
 import { rewriteGivenGuardArrows } from "../../src/commands/migrate.js";
+import { foldBuildIdentity } from "../../src/codegen/build-identity.ts";
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -293,7 +294,8 @@ describe("§E: `given x :>` and `given x =>` emit byte-identical JS", () => {
     // PROGRAM carries `name="P"`, which the worker pre-pass treats as a worker; its
     // bundle URL is `<page>-P.worker.js` (S443), so it names the two different
     // source files. Only the file name differs — the given-guard emit is compared.
-    const sameWorkerUrl = (js) => js.replace(/new _scrml_g\.Worker\("[\w-]+-P\.worker\.js"\)/g, 'new _scrml_g.Worker("<page>-P.worker.js")');
+    // ...and the §20.8.2 build identity (a hash over the chunk) differs with it — fold it.
+    const sameWorkerUrl = (js) => foldBuildIdentity(js).replace(/new _scrml_g\.Worker\("[\w-]+-P\.worker\.js"\)/g, 'new _scrml_g.Worker("<page>-P.worker.js")');
     expect(sameWorkerUrl(ao.clientJs)).toBe(sameWorkerUrl(co.clientJs));
   });
 
