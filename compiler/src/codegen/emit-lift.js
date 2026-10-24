@@ -40,7 +40,7 @@ function isCallableJsExprText(text) {
   }
 }
 import { detectPredicateShapeBind } from "./predicate-bind-detector.js";
-import { liftGateReads, liftForTreeGatePins, liftGateInFunction, liftGateCellsAllNamed, liftGateBlockFnReadsItsBindings } from "./lift-gate-scope.js";
+import { liftGateReads, liftForTreeGatePins, liftGateInFunction, liftGateCellsAllNamed, liftGateBlockFnReadsItsBindings, liftRegionSafe } from "./lift-gate-scope.js";
 
 // ---------------------------------------------------------------------------
 // Bug 64 (S159) — Tier-0 per-item content reactivity on reconcile.
@@ -456,7 +456,7 @@ function scanItemDerivedLocals(body, newIterVar) {
 // so both push sites (this file's nested for-lift path + emit-control-flow.ts's
 // top-level Tier-0 path) capture aliases uniformly. MUST be called BEFORE the ctx
 // is pushed (the scan reads the ancestor-only stack).
-export function buildLiftReconcileCtx(wrapperVar, keyVar, iterVar, body) {
+export function buildLiftReconcileCtx(wrapperVar, keyVar, iterVar, body, forNode = null) {
   // g-lift-tier0-if-reactive-structural — the SOLE-structural-root discriminant (S297,
   // as on main): when exactly ONE structural root exists AND it is a MARKUP lift-expr,
   // that markup node IS the single reconcile-tracked item root; its `if=` is evaluated
@@ -476,6 +476,10 @@ export function buildLiftReconcileCtx(wrapperVar, keyVar, iterVar, body) {
     iterVar,
     itemDerivedLocals: scanItemDerivedLocals(body, iterVar),
     soleRootMarkupNode,
+    // S469 — the row's loop node, and how many re-runnable REGIONS (a nested plain loop re-run by
+    // its own tracked effect, see emitForStmtWithContainer) are being emitted inside the row.
+    forNode,
+    regionDepth: 0,
   };
 }
 
@@ -789,6 +793,15 @@ function _emitLiftGate(lines, attrName, exprJS, rawText, node, val, apply, decla
   if (!(inRow && declare && declare.sole)) { if (declare) lines.push(declare.plain); }
   if (inRow) {
     const closed = reads !== null && [...reads].every((n) => n === ctx.iterVar);
+    if (!closed && ctx.regionDepth > 0) {
+      // Built inside a REGION of the row (a nested plain loop re-run by its own tracked effect,
+      // emitForStmtWithContainer): read in that render, which re-runs on what it read.
+      if (declare && declare.sole) lines.push(declare.plain);
+      const updVar = genVar(attrName === "if" ? "if" : "show");
+      lines.push(`function ${updVar}() { ${stmt} }`);
+      lines.push(`${updVar}();`);
+      return;
+    }
     const vi = closed ? _liftGateValueIndexed(rawText, ctx.iterVar) : null;
     if (declare && declare.sole && (!closed || (vi && !vi.literal))) lines.push(declare.plain);
     if (!closed) {
@@ -854,13 +867,9 @@ function _emitLiftGate(lines, attrName, exprJS, rawText, node, val, apply, decla
     lines.push(`_scrml_mount_track(_scrml_effect(${updVar}, true));`);
     return;
   }
-  // OPEN: read in the render; the render re-runs on it. A condition that names no cell and calls
-  // nothing (operators over locals and literals) can read nothing reactive: evaluated once, where
-  // the element is built, it is never stale, and nothing needs to re-run.
-  if (liftGateCellsAllNamed(val, rawText) && _liftGateRefs(rawText).length === 0 && !/\b_scrml_/.test(exprJS)) {
-    lines.push(`${updVar}();`);
-    return;
-  }
+  // OPEN: read in the render; the render re-runs on it. Every open gate counts — even one whose own
+  // text names no cell and calls nothing: a local or parameter it reads may hold a value computed
+  // from a cell (`let ok = isAdmin()`), which only re-running the render re-reads.
   if (liftGateInFunction(node) || (!_liftLiveActive() && !_liftGroupWindow)) {
     _refuseLiftGate(attrName, node, reads, "it is built where no render re-runs (a function body, or markup outside a `${}` block)");
     lines.pop();
@@ -3183,7 +3192,7 @@ function _liftTreeWalk(forNode, outerDeclared) {
  * @returns {string}
  */
 export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
-  const lines = [];
+  let lines = [];
   // Bug 65 (S157) — engine codegen ctx threaded to inner lifted handlers
   // (null = engine-free file → tree-shaken, byte-identical pre-fix emission).
   const engineCtx = opts.engineCtx ?? null;
@@ -3339,7 +3348,7 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
     // MUST mirror the keyFn passed to _scrml_reconcile_list below (id-or-index).
     const keyVar = genVar('item_key');
     lines.push(`  const ${keyVar} = ${varName}?.id != null ? ${varName}.id : _scrml_idx;`);
-    pushLiftReconcileCtx(buildLiftReconcileCtx(wrapperVar, keyVar, varName, body));
+    pushLiftReconcileCtx(buildLiftReconcileCtx(wrapperVar, keyVar, varName, body, forNode));
     const bodyNames = withLoopBinders(liftScopeDeclaredNames(outerNames), forNode);
 
     for (const child of body) {
@@ -3413,8 +3422,34 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
     return lines.join('\n');
   }
 
+  // S469 (review of b57d697a9, MED-1) — a loop lowered plain ONLY because a lifted gate in its own
+  // tree reads a value of its render, nested in a keyed row: it is a REGION — its own tracked effect
+  // (live-keyed: the row's item is re-resolved) re-runs just this loop on what its render read, and
+  // replaces only the nodes the previous run built, inside a child owner scope of the row that the
+  // next run destroys. The row itself stays keyed (siblings keep their nodes and state). Only when
+  // the region reads no value of the row's render but its item (liftRegionSafe); otherwise the row
+  // was lowered plain by liftForTreeGatePins.
+  const _regionCtx = currentLiftReconcileCtx();
+  const _asRegion = !!_regionCtx && !_liftLandsOutsideRow() && _impure && _regionCtx.forNode &&
+    !_liftTreeWalk(forNode, outerNames).impure && liftRegionSafe(forNode, _regionCtx.forNode);
+  let _regionTarget = containerElVar;
+  let _regionLines = null;
+  let _regionVars = null;
+  if (_asRegion) {
+    _regionVars = { anchor: genVar("region_end"), nodes: genVar("region_nodes"), sid: genVar("region_sid"), frag: genVar("region_frag") };
+    lines.push(`const ${_regionVars.anchor} = _scrml_g.document.createComment("scrml-region");`);
+    lines.push(`${containerElVar}.appendChild(${_regionVars.anchor});`);
+    lines.push(`let ${_regionVars.nodes} = [];`);
+    lines.push(`let ${_regionVars.sid} = null;`);
+    _regionLines = lines;
+    lines = [];
+    _regionTarget = _regionVars.frag;
+    _regionCtx.regionDepth += 1;
+  }
+
   // Non-reactive path — plain for loop (pre-S96 behavior, preserved).
   lines.push(`for (${forHeadKeyword(forNode)} ${varName} of ${rewrittenIterable}) {`);
+  containerElVar = _regionTarget;
 
   const bodyNames = withLoopBinders(liftScopeDeclaredNames(outerNames), forNode);
   if (_impure) pushLiftNonKeyed();
@@ -3445,9 +3480,27 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
     }
   } finally {
     if (_impure) popLiftNonKeyed();
+    if (_asRegion) _regionCtx.regionDepth -= 1;
   }
 
   lines.push('}');
+  if (_asRegion) {
+    const v = _regionVars;
+    const loopLines = lines;
+    lines = _regionLines;
+    const body = [
+      `if (${v.sid} !== null) _scrml_owner_destroy(${v.sid});`,
+      `for (const _scrml_n of ${v.nodes}) if (_scrml_n.parentNode) _scrml_n.parentNode.removeChild(_scrml_n);`,
+      `const ${v.frag} = _scrml_g.document.createDocumentFragment();`,
+      `${v.sid} = _scrml_scope_open("as", _scrml_mount_owner(${v.anchor}));`,
+      `_scrml_in_scope(${v.sid}, () => {`,
+      ...loopLines.map((l) => '  ' + l),
+      `});`,
+      `${v.nodes} = [...${v.frag}.childNodes];`,
+      `${v.anchor}.parentNode.insertBefore(${v.frag}, ${v.anchor});`,
+    ];
+    for (const l of maybeWrapLiftPerItemEffect(body)) lines.push(l);
+  }
   return lines.join('\n');
 }
 

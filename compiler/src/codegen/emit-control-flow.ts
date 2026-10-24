@@ -1016,7 +1016,7 @@ function _emitForStmtInner(
     // MUST mirror the keyFn passed to _scrml_reconcile_list below (id-or-index).
     const keyVar = genVar("item_key");
     lines.push(`  const ${keyVar} = ${varName}?.id != null ? ${varName}.id : _scrml_idx;`);
-    pushLiftReconcileCtx(buildLiftReconcileCtx(wrapperVar, keyVar, varName, body));
+    pushLiftReconcileCtx(buildLiftReconcileCtx(wrapperVar, keyVar, varName, body, node));
     // s427-lift-body-lowering — the factory body is a block scope: a COPY of the
     // enclosing declared names, shared by every statement of the body. Before this
     // every statement was emitted with no set, so `let m = 0; m = m + x` in the body

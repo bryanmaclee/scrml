@@ -751,8 +751,14 @@ describe("S469 round 5 — the review's H1–H4 / M1 shapes: the gate's RESULT i
 `, [["n", 12], ["n", 1], ["n", 11], ["rows", [{ id: 2 }, { id: 1 }]], ["n", 2]], ["1", "2", "", "1", "1", ""]],
     // M1 — stale on main (a cell read only inside a file function the group never re-read: "m" at every
     // step). Now the gate's own effect tracks the cell `matches()` reads, and reads the file-level `mode`
-    // at its current value whenever it re-runs — what a re-run of the block would read. A write to the
-    // plain `let` alone notifies nothing (it is not a cell), so the click changes nothing until `@n` moves.
+    // at its current value whenever it re-runs — what a re-run of the block would read.
+    // ⚠ KNOWN RESIDUAL, NOT THE CONDITION'S TRUTH: after the click `mode` is 2 and `@n` is 1, so
+    // `matches()` is FALSE, yet the expectation below pins "m" VISIBLE at that step. A write to a plain
+    // (non-cell) `let` notifies nothing, so nothing re-evaluates the gate until a cell it reads changes.
+    // That is the language's non-reactive-`let` residual, filed as
+    // g-lift-gate-reads-plain-let-written-later-s469 (owner question: should impl#1 refuse a gate that reads
+    // a plain `let` some code writes later, or should such writes notify?). Change this expectation when
+    // that is ruled.
     ["M1b a file function reading a file-level let mutated after render", `<n> = 1
 \${ let mode = 1 }
 \${ function matches() { return mode == @n } }

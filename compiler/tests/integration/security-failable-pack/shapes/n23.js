@@ -257,4 +257,38 @@ shapes.push(["open gate in a function body", `<pw> = "secret"
 <button id="right" onclick=\${ @pw = "secret" }>go</button>
 <div id="out">\${ pill(true) }</div>
 `]);
+// Review of b57d697a9 (HIGH-1) — a LOCAL or PARAMETER holding a value computed by a call that reads the cell.
+// The gate's own text names no cell and calls nothing; only re-running the render re-reads the local.
+const FROMCALL = [
+  ["let ok = granted(), if=ok", `let ok = granted()\n lift <span><b if=ok>LOGGED IN</b></span>`],
+  ["const {a} = {a: granted()}", `const {a} = {a: granted()}\n lift <span><b if=(a)>LOGGED IN</b></span>`],
+  ["const [a] = [granted()]", `const [a] = [granted()]\n lift <span><b if=(a)>LOGGED IN</b></span>`],
+  ["const denied = !granted()", `const denied = !granted()\n lift <span><b if=(!denied)>LOGGED IN</b></span>`],
+  ["a ternary local", `const ok = granted() ? true : false\n lift <span><b if=(ok)>LOGGED IN</b></span>`],
+  ["let ok = false; ok = granted()", `let ok = false\n ok = granted()\n lift <span><b if=(ok)>LOGGED IN</b></span>`],
+  ["an if (true) arm", `if (true) { const ok = granted()\n lift <span><b if=(ok)>LOGGED IN</b></span> }`],
+  ["a plain for loop", `for (i of [1]) { const ok = granted()\n lift <span><b if=(ok)>LOGGED IN</b></span> }`],
+];
+const FROMCALL_PAGE = (body) => `<pw> = "secret"
+\${
+    function granted() { return @pw == "secret" }
+}
+<button id="wrong" onclick=\${ @pw = "wrong" }>go</button>
+<button id="right" onclick=\${ @pw = "secret" }>go</button>
+<div id="out">${body}</div>
+`;
+for (const [n, body] of FROMCALL) shapes.push([`local from a call (${n})`, FROMCALL_PAGE(`\${ ${body} }`)]);
+// (#out is inside the component, beside its trailing text: a component's expansion gains a trailing space, which would read as
+// PASS-DENY / mask a FAIL — the S465-era whitespace gap.)
+shapes.push(["local from a call (a component body)", FROMCALL_PAGE("").replace('<div id="out"></div>', `\${ const Pill = <span props={ q: string }><div id="out">\${ const z = granted(); lift <b if=(z)>LOGGED IN</b>}</div></span> }\n<Pill q="y"/>`)]);
+shapes.push(["local from a call (a function parameter, refused)", FROMCALL_PAGE(`\${ function pill(q: bool) { return <span><b if=(q)>LOGGED IN</b></span> } }\n\${ const q = granted()\n pill(q) }`)]);
+// Review of b57d697a9 (MED-1) — an open gate in an INNER loop: that loop is a re-runnable region of the outer
+// keyed row (the outer row stays keyed). The region must re-read the revoke.
+shapes.push(["inner-loop local in a region of a keyed row", `<pw> = "secret"
+<xs> = [{ id: 1, kids: [{ id: 11, ok: true }] }]
+<button id="wrong" onclick=\${ @pw = "wrong" }>go</button>
+<button id="right" onclick=\${ @pw = "secret" }>go</button>
+<div id="out">\${ for (r of @xs) { lift <div>\${ for (c of r.kids) { let t = c.ok
+ lift <b if=(t && @pw == "secret")>LOGGED IN</b> } }</div> } }</div>
+`]);
 export default shapes;

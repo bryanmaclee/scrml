@@ -506,6 +506,67 @@ function _forBinderSet(n) {
  * keyed when its iterable names a cell. When that prediction is wrong the gate's emission
  * refuses it (emit-lift.js _emitLiftGate) — it is never left stale.
  */
+/** Every identifier a subtree reads or names (over-collecting: binders included). */
+function _subtreeNames(root, out) {
+  const seen = new WeakSet();
+  const visit = (n) => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) visit(c); return; }
+    if (n.kind === "ident" && typeof n.name === "string" && !n.name.startsWith("@")) out.add(n.name);
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (typeof v === "string" && (k === "raw" || k === "expr" || k === "iterable" || k === "init" || k === "value" || k === "name" || k === "variable")) {
+        for (const t of v.replace(/@[A-Za-z_$][\w$]*/g, " ").matchAll(/[A-Za-z_$][\w$]*/g)) out.add(t[0]);
+      } else if (v && typeof v === "object") visit(v);
+    }
+  };
+  visit(root);
+  return out;
+}
+
+/**
+ * True when the nested loop `loop`, inside the keyed row of `rowLoop`, can be re-run on its own (a
+ * REGION, emit-lift.js emitForStmtWithContainer): everything it reads that the file declares
+ * below a block's top level, or that a block re-initialises, is declared inside `loop` itself or is
+ * the row's binder (re-resolved live). A value the row's render computes outside the loop would be
+ * read late by a re-run, so such a loop is not a region (the row is lowered plain instead).
+ */
+export function liftRegionSafe(loop, rowLoop) {
+  if (!loop || !rowLoop) return false;
+  // A `while` body's lift goes to the ambient target, not the region's (g-while-lift-in-reconciled-
+  // row-escapes-the-row-s469): no region holds it.
+  if (JSON.stringify(loop, (k, v) => (k === "span" ? undefined : v)).includes('"kind":"while-stmt"')) return false;
+  const own = new Set();
+  _collectDeclared(loop, own);
+  for (const b of _forBinderSet(rowLoop)) own.add(b);
+  const rowDecl = new Set();
+  _collectDeclared(Array.isArray(rowLoop.body) ? rowLoop.body : [], rowDecl);
+  const read = _subtreeNames(loop, new Set());
+  for (const nm of read) {
+    if (own.has(nm)) continue;
+    if (rowDecl.has(nm) || _nested.has(nm)) return false;
+    if (_fileLevel.has(nm) && !_regionTopOk(nm, loop)) return false;
+  }
+  return true;
+}
+function _regionTopOk(nm, loop) {
+  // A name a block declares at its top level is file-level unless that block is the one the loop
+  // is built in (a re-render of THAT block re-initialises it). Find any markup node of the loop.
+  let top;
+  const seen = new WeakSet();
+  const find = (n) => {
+    if (top !== undefined || !n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) find(c); return; }
+    if (n.kind === "markup" && _blockTop.has(n)) { top = _blockTop.get(n); return; }
+    for (const k of Object.keys(n)) { if (k !== "span" && n[k] && typeof n[k] === "object") find(n[k]); }
+  };
+  find(loop);
+  return top !== undefined && !top.has(nm);
+}
+
 export function liftForTreeGatePins(forNode) {
   let pinned = false;
   const scopes = []; // { names: Set, loop: for-node | null, fn: boolean }
@@ -515,8 +576,19 @@ export function liftForTreeGatePins(forNode) {
   };
   const gate = (val, node) => {
     const reads = liftGateReads(val, liftGateAttrRawText(val), node);
-    if (reads === null || reads.size > 1) { pinned = true; return; }
+    if (reads === null) { pinned = true; return; }
     if (reads.size === 0) return;
+    // A gate in a loop nested DIRECTLY in this row whose reads are all declared inside that loop:
+    // that loop is lowered as a re-runnable REGION of the row (it pins itself; liftRegionSafe), so
+    // this row stays keyed.
+    {
+      let li = -1;
+      for (let i = scopes.length - 1; i > 0; i--) if (scopes[i].loop) { li = i; break; }
+      if (li > 0 && !scopes.slice(1, li).some((s) => s.loop || s.fn) && !scopes.slice(li).some((s) => s.fn) &&
+          [...reads].every((nm) => resolve(nm) >= li) &&
+          liftForTreeGatePins(scopes[li].loop) && liftRegionSafe(scopes[li].loop, forNode)) return;
+    }
+    if (reads.size > 1) { pinned = true; return; }
     const [b] = reads;
     const j = resolve(b);
     if (j < 0 || !scopes[j].loop) { pinned = true; return; }

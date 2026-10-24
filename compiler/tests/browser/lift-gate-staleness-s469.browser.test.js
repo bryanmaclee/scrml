@@ -143,6 +143,90 @@ describe("a gate that reads a value of the render is re-read by re-running that 
   });
 });
 
+// Review of b57d697a9 (HIGH-1): a local or parameter can hold a value COMPUTED BY A CALL THAT READS A CELL.
+// A gate reading it — even one whose own text names no cell and calls nothing — is open: only re-running
+// the render re-reads the local. (43a6b7682 evaluated such a gate once: every case below stayed 1 1 1 1.)
+describe("a gate over a local computed from a cell re-reads it (the render re-runs)", () => {
+  const CASES = [
+    ["let ok = isAdmin(), if=ok", `\${ let ok = isAdmin()\n lift <span><b class="g" if=ok>x</b></span> }`, 1, "if"],
+    ["const ok = isAdmin(), show=(ok)", `\${ const ok = isAdmin()\n lift <span><b class="g" show=(ok)>x</b></span> }`, 1, "show"],
+    ["const {a} = {a: isAdmin()}", `\${ const {a} = {a: isAdmin()}\n lift <span><b class="g" if=(a)>x</b></span> }`, 1, "if"],
+    ["const [a] = [isAdmin()]", `\${ const [a] = [isAdmin()]\n lift <span><b class="g" if=(a)>x</b></span> }`, 1, "if"],
+    ["const denied = !isAdmin()", `\${ const denied = !isAdmin()\n lift <span><b class="g" if=(!denied)>x</b></span> }`, 1, "if"],
+    ["a ternary local", `\${ const ok = isAdmin() ? true : false\n lift <span><b class="g" if=(ok)>x</b></span> }`, 1, "if"],
+    ["let ok = false; ok = isAdmin()", `\${ let ok = false\n ok = isAdmin()\n lift <span><b class="g" if=(ok)>x</b></span> }`, 1, "if"],
+    ["an if (true) arm", `\${ if (true) { const ok = isAdmin()\n lift <span><b class="g" if=(ok)>x</b></span> } }`, 1, "if"],
+    ["a plain for loop", `\${ for (i of [1, 2]) { const ok = isAdmin()\n lift <span><b class="g" if=(ok)>x</b></span> } }`, 2, "if"],
+    ["a component body local from a call", `\${ const Pill = <span props={ q: string }>\${ const z = isAdmin()\n lift <b class="g" if=(z)>x</b> }</span> }\n<Pill q="y"/>`, 1, "if"],
+    ["a component body local from a prop", `\${ const Pill = <span props={ q: string }>\${ const z = q == "y"\n lift <b class="g" if=(z && isAdmin())>x</b> }</span> }\n<Pill q="y"/>`, 1, "if"],
+    ["a component prop read in lifted markup", `\${ const Pill = <span props={ q: string }>\${ lift <b class="g" if=(q == "y" && isAdmin())>x</b> }</span> }\n<Pill q="y"/>`, 1, "if"],
+  ];
+  for (const [name, body, open, attr] of CASES) {
+    test(`${name}: ${attr}= follows the cell true → false → true → false`, async () => {
+      const app = compileAndMount(PAGE(body));
+      await revokeCycle(app, { cell: "role", off: "user", on: "admin", sel: "#out b.g", open, attr });
+    });
+  }
+});
+
+// Review of b57d697a9 (MED-1): an open gate in an INNER loop lowered the OUTER keyed list plain, so a sibling
+// input in the outer row lost its typed value on every write the gate read. The inner loop is now a REGION of
+// the outer row (its own tracked effect re-runs just that loop); the outer row stays keyed.
+describe("an open gate in an inner loop re-runs only that loop (the outer row keeps its nodes)", () => {
+  const SRC = `<n> = 1
+<xs> = [{ id: 1, kids: [{ id: 11, ok: true }, { id: 12, ok: true }] }]
+<div id="out">\${ for (r of @xs) { lift <div><input class="in"/>\${ for (c of r.kids) { let t = c.ok
+ lift <b class="g" if=(t && @n == 1)>x</b> } }</div> } }</div>
+`;
+  test("a sibling input keeps its node and value while the gate cycles", async () => {
+    const app = compileAndMount(SRC);
+    expect(app.errors).toEqual([]);
+    expect(app.clientJs).toMatch(/_scrml_reconcile_list\(/); // the outer row is still keyed
+    await flush();
+    const input = document.querySelector("#out input.in");
+    input.value = "typed";
+    expect(count("#out b.g")).toBe(2);
+    for (const [v, want] of [[2, 0], [1, 2], [2, 0], [1, 2]]) {
+      await set("n", v);
+      expect(count("#out b.g")).toBe(want);
+      expect(document.querySelector("#out input.in")).toBe(input);
+      expect(input.value).toBe("typed");
+    }
+  });
+  test("the inner row's own field revokes and re-grants (same-key replace and in-place write)", async () => {
+    const app = compileAndMount(SRC);
+    expect(app.errors).toEqual([]);
+    await flush();
+    // In place first (on the store's own deep-reactive value; a raw value handed to the setter below is
+    // not wrapped, so writes into it after the replace would bypass the store — a harness detail).
+    globalThis.__lgs_get("xs")[0].kids[0].ok = false;
+    await flush();
+    expect(count("#out b.g")).toBe(1);
+    globalThis.__lgs_get("xs")[0].kids[0].ok = true;
+    await flush();
+    expect(count("#out b.g")).toBe(2);
+    const rows = (a, b) => [{ id: 1, kids: [{ id: 11, ok: a }, { id: 12, ok: b }] }];
+    for (const [a, b, want] of [[false, false, 0], [true, false, 1], [false, false, 0], [true, true, 2]]) {
+      await set("xs", rows(a, b));
+      expect(count("#out b.g")).toBe(want);
+    }
+  });
+  test("a removed outer row takes its region down; a re-added one rebuilds it", async () => {
+    const app = compileAndMount(SRC);
+    expect(app.errors).toEqual([]);
+    await flush();
+    await set("xs", []);
+    expect(count("#out b.g")).toBe(0);
+    await set("n", 2);
+    await set("n", 1);
+    expect(count("#out b.g")).toBe(0);
+    await set("xs", [{ id: 1, kids: [{ id: 11, ok: true }] }]);
+    expect(count("#out b.g")).toBe(1);
+    await set("n", 2);
+    expect(count("#out b.g")).toBe(0);
+  });
+});
+
 describe("the value-indexed row side follows the LIVE row's field", () => {
   for (const keyed of [true, false]) {
     for (const [nname, nest] of [["sole root", (b) => b], ["nested", (b) => `<span>${b}</span>`]]) {
@@ -178,11 +262,10 @@ describe("a gate no render can re-run is refused (fail closed)", () => {
     expect(app.errors).toContain("E-IMPL1-LIFT-GATE-UNTRACKED");
   });
 
-  test("…but one that names no cell and calls nothing can read nothing reactive: accepted, evaluated once", async () => {
-    const app = compileAndMount(PAGE(`\${ function pill(q: bool) { return <span><b class="g" if=(q)>x</b></span> } }\n\${ pill(true) }\n\${ pill(false) }`));
-    expect(app.errors).toEqual([]);
-    await flush();
-    expect(count("#out b.g")).toBe(1);
+  test("…and one reading only a parameter: the caller may have computed it from a cell (refused)", () => {
+    // `pill(q)` with `const q = isAdmin()` in the caller — the parameter holds a cell's value.
+    const app = compileAndMount(PAGE(`\${ function pill(q: bool) { return <span><b class="g" if=(q)>x</b></span> } }\n\${ const q = isAdmin()\n pill(q) }`));
+    expect(app.errors).toContain("E-IMPL1-LIFT-GATE-UNTRACKED");
   });
 
   test("a run-once block whose function reads its bindings cannot be made to re-render: refused", () => {

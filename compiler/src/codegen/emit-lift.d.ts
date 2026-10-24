@@ -61,6 +61,7 @@ export declare function buildLiftReconcileCtx(
   keyVar: string,
   iterVar: string,
   body: unknown,
+  forNode?: unknown,
 ): LiftReconcileCtx;
 
 export declare function pushLiftRequestIds(set: Set<string> | null | undefined): void;
