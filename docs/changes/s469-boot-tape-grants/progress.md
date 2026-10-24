@@ -54,6 +54,24 @@ Gaps: `g-bootstrap-whole-struct-write-bypasses-tape-field-grants-s469` (MED),
       a parameter's rebinding is judged by its WRITTEN type (`paramTypeOfSym`), not an inferred one; 4 more
       forms in the enumeration (for-of binder, parameter ×2, spread ordering).
 
+## Review round 2 (of `ccaa2b9ec`)
+
+- [x] H1 — `persist="local"` on a `let` struct with an append-only tape field compiled clean and a cross-tab
+      StorageEvent emptied the tape. `persistCellProblem` now runs `resetTapeProblem` (the one reader) for a
+      `local` store → E-BOOTSTRAP-UNSUPPORTED; Core check C17 `checkPersist` refuses the same (`structTapeKept`).
+      `session` unchanged (Q5). Tests: `persist.test.js` (refusal, session accepted, a `replace`-granted field
+      RUNS a cross-tab sync, C17 on a hand-planted Local store); acceptance `grants/neg-persist-local-struct-tape`,
+      `grants/persist-session-struct-tape` (runs).
+- [x] M1 — the source scan is an ALLOW-LIST over the reader's marked range (`THE TAPE GRANT READER` … `END OF
+      THE TAPE GRANT READER`): any `.grants.` / `grants.replace` / `grants.edits` read outside it fails unless its
+      function is listed with a reason. The list is empty: every decision routes through `grantsAdmit` /
+      `grantsAny` (capability minting, "fixed" sub-field) / `grantsHasEdits` (O57) / `grantsEditOnly` (message
+      advice); `grantsEdit` (a copy of hasEditKind) is deleted. A planted read proves the scan bites.
+- [x] L1 — check.scrml: `fieldAtProblem` counts a tape field as a contract; `tapeReplaceProblem` judges a
+      Replace / FieldAt / ElemAt whose target is a struct against its tape fields (kept = the StructOf entry
+      reads the same place). Four planted-Core tests in `tape-write-forms.test.js`, each failing on the old logic.
+- [x] L2 — noted in the call-site gap entry (typed binding launders grants; with Q3).
+
 ## Owner questions (not invented — refused fail-closed where the SPEC does not settle)
 
 1. **`reset(@b)` / `reset-on=` of a struct with a `replace`-less tape field.** §66.12.6 rule 4 says the reset is a

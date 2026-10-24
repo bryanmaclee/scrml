@@ -1197,6 +1197,12 @@ ${
         let out: string[] = []
         const local: boolean = ps.store == PersistStore.Local
         if (local && (f.graph is given || !f.grants.replace)) out = out.concat([at + " in localStorage, but its contract refuses a whole-value write — a cross-tab value is one (O-061-5)"])
+        // s469-boot-tape-grants (review r2 H1): that whole-value write replaces a struct's tape
+        // fields too (§66.12.6 rule 4) — a struct must not carry an append-only tape past the line above
+        if (local) {
+            const tp: string = structTapeKept(p, f.ty, not, d.sym, InstRef.Lexical(0), [], f.sym.hint, [])
+            if (tp != "") out = out.concat([at + " in localStorage, but a cross-tab value is a whole-value write and " + tp])
+        }
         const wb: WireBuild = wireBuild(p, f.ty)
         const wt: WireTable | not = wb.table
         if (wt is not) return out.concat([at + " but its type has no wire descriptor: " + wb.why.join("; ")])
@@ -2639,6 +2645,8 @@ ${
         }
         const problem: string = editProblem(p, f, edit)
         if (problem != "") out = out.concat(["C3: " + where + ": " + problem])
+        const tp: string = tapeReplaceProblem(p, d.sym, owner.idx, inst, f, edit, value)
+        if (tp != "") out = out.concat(["C3: " + where + ": " + tp])
         const cp: string = checkProblem(p, f, edit, value, check)
         if (cp != "") out = out.concat(["C6: " + where + ": " + cp])
         const rv: string = removalValueProblem(d.sym, owner.idx, inst, edit, value)
@@ -2899,7 +2907,10 @@ ${
             if (fs is not) return "FieldAt step " + i + ": `" + s.hint + "` is not a struct"
             if (step.idx < 0 || step.idx >= fs.length) return "FieldAt step " + i + ": `" + s.hint + "` has no field " + step.idx
             const fd: FieldDef = fs[step.idx]
-            if (fd.grants.edits.length > 0) contractInside = true
+            // s469-boot-tape-grants (review r2 L1): a TAPE field is a contract of its own
+            // even with no grant — an ungranted tape is immutable (§66.12.6 rules 1 and 4),
+            // so an outer `replace` never admits writing it
+            if (fd.grants.edits.length > 0 || isTapeType(fd.ty)) contractInside = true
             targetGrants = fd.grants.replace
             ty = fd.ty
             i = i + 1
@@ -2908,6 +2919,145 @@ ${
         if (f.grants.replace && !contractInside) return ""
         if (f.grants.replace) return "the path reaches a field with its own non-replace contract; an outer `replace` may not bypass it"
         return "the target struct field grants no write, and the field does not grant `replace`"
+    }
+
+    // -------------------------------------------------------------------------
+    // C3 (s469-boot-tape-grants, review r2 L1; SPEC §66.12.6 rule 4) — a whole
+    // value written to a STRUCT (a field's Replace, a FieldAt / ElemAt whose
+    // target is a struct) replaces each tape field it changes, and that is a
+    // `replace` of the FIELD, judged by the field's own grants — never the
+    // owner's `replace` (O58 = (b) is authoritative over graphs and lifecycles,
+    // not over a tape's grants). A tape field is kept only when the new value is
+    // a StructOf whose entry for it reads that same field of the same place;
+    // any other value (a Local, a call, InitOf for a reset) replaces it.
+    // The analyzer's twin is analyze.scrml `structTapeWrites`.
+    // -------------------------------------------------------------------------
+    fn tapeReplaceProblem(p: CoreProgram, d: Sym, idx: int, inst: InstRef, f: Field, edit: EditKind, value: Expr) -> string {
+        const base: FieldRef[] = [{ owner: d, idx: idx }]
+        return match edit {
+            .Replace :> structTapeKept(p, f.ty, value, d, inst, base, f.sym.hint, [])
+            .FieldAt(path: path) :> fieldAtTapeKept(p, f.ty, value, d, inst, base, path, f.sym.hint)
+            .ElemAt(index: ix, path: path) :> elemAtTapeKept(p, f, value, path)
+            .Append :> ""
+            .Prepend :> ""
+            .Anywhere :> ""
+            .PositionWrite :> ""
+            .Transition :> ""
+            .RemoveEnd :> ""
+            .RemoveFront :> ""
+            .RemoveAnywhere :> ""
+        }
+    }
+
+    fn fieldAtTapeKept(p: CoreProgram, fty: Type, value: Expr, d: Sym, inst: InstRef, base: FieldRef[], path: FieldRef[], label: string) -> string {
+        let ty: Type = fty
+        let at: string = label
+        for (const step of path) {
+            const fd: FieldDef | not = structStep(p, ty, step)
+            if (fd is not) return ""          // a malformed path is fieldAtProblem's to report
+            ty = fd.ty
+            at = at + "." + fd.sym.hint
+        }
+        return structTapeKept(p, ty, value, d, inst, base.concat(path), at, [])
+    }
+
+    fn elemAtTapeKept(p: CoreProgram, f: Field, value: Expr, path: FieldRef[]) -> string {
+        const et: Type | not = seqElemOf(f.ty)
+        if (et is not) return ""
+        let ty: Type = et
+        let at: string = f.sym.hint + "[…]"
+        for (const step of path) {
+            const fd: FieldDef | not = structStep(p, ty, step)
+            if (fd is not) return ""
+            ty = fd.ty
+            at = at + "." + fd.sym.hint
+        }
+        // an element has no place spelling here: no tape field of it is "kept"
+        return structTapeKept(p, ty, value, f.sym, InstRef.Lexical(0), [], at, [])
+    }
+
+    fn structStep(p: CoreProgram, ty: Type, step: FieldRef) -> FieldDef | not {
+        const s: Sym | not = namedSym(unMaybeC(ty))
+        if (s is not) return not
+        const td: TypeDef | not = findTypeDef(p, s)
+        if (td is not) return not
+        const fs: FieldDef[] | not = structFields(td)
+        if (fs is not) return not
+        if (step.idx < 0 || step.idx >= fs.length) return not
+        return fs[step.idx]
+    }
+
+    // "" when every tape field the value replaces grants `replace`, else why.
+    // `path` empty: the value has no place (nothing is kept).
+    fn structTapeKept(p: CoreProgram, ty: Type, v: Expr | not, d: Sym, inst: InstRef, path: FieldRef[], label: string, seen: int[]) -> string {
+        const s: Sym | not = namedSym(unMaybeC(ty))
+        if (s is not) return ""
+        if (seen.indexOf(s.id) >= 0) return ""
+        const td: TypeDef | not = findTypeDef(p, s)
+        if (td is not) return ""
+        const fs: FieldDef[] | not = structFields(td)
+        if (fs is not) return ""
+        let vals: Expr[] | not = not
+        if (v is given) vals = structOfFields(v)
+        let i = 0
+        for (const fd of fs) {
+            const sub: FieldRef[] = path.concat([{ owner: s, idx: i }])
+            let fv: Expr | not = not
+            if (vals is given) {
+                if (i < vals.length) fv = vals[i]
+            }
+            let kept = false
+            if (fv is given && path.length > 0) {
+                if (readKey(fv) == placeKeyOf(d, inst, sub)) kept = true
+            }
+            if (!kept) {
+                if (isTapeType(fd.ty)) {
+                    if (!fd.grants.replace) return "the write replaces the tape field `" + label + "." + fd.sym.hint + "`, whose type grants no `replace` — a whole-struct write never gets around a tape field's grants (§66.12.6 rule 4)"
+                } else {
+                    const r: string = structTapeKept(p, fd.ty, fv, d, inst, sub, label + "." + fd.sym.hint, seen.concat([s.id]))
+                    if (r != "") return r
+                }
+            }
+            i = i + 1
+        }
+        return ""
+    }
+
+    fn isTapeType(t: Type) -> boolean {
+        return seqElemOf(unMaybeC(t)) is given
+    }
+
+    fn unMaybeC(t: Type) -> Type {
+        return match t {
+            .Maybe(inner: i) :> unMaybeC(i)
+            .Int :> t
+            .Num :> t
+            .Str :> t
+            .Bool :> t
+            .Named(sym: s) :> t
+            .Seq(elem: e) :> t
+        }
+    }
+
+    fn structOfFields(e: Expr) -> Expr[] | not {
+        return match e {
+            .StructOf(ty: t, fields: fs) :> fs
+            .Lit(lit: x) :> not
+            .Local(sym: x) :> not
+            .Read(place: x) :> not
+            .Call(callee: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .Handle(inst: x) :> not
+            .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
+            .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
+            .Query(q: x) :> not
+        }
     }
 
     // -------------------------------------------------------------------------

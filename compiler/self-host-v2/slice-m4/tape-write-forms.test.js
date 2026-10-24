@@ -106,19 +106,93 @@ describe("every tape write form is judged by the grant reader (§66.12.6)", () =
   }
 });
 
+// review r2 L1: the Core checker (check.scrml C3) judges rule 4 as the analyzer does, so
+// a Core that slips past analyze is still refused. Each case starts from a clean lowered
+// Core and plants the bypass by hand.
+describe("Core check C3 judges a tape field's grants (the defence in depth, §66.12.6 rule 4)", () => {
+  const coreOf = (decls, body) => {
+    const r = frontEnd(mods, [{ path: "w.scrml", src: prog(decls, body) }]);
+    expect(r.diags.map((d) => d.code)).toEqual([]);
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+    return structuredClone(r.core);
+  };
+  const find = (n, pred, out = []) => {
+    if (n && typeof n === "object") {
+      if (pred(n)) out.push(n);
+      for (const v of Object.values(n)) find(v, pred, out);
+    }
+    return out;
+  };
+  const writes = (core) => find(core.fns, (n) => n.variant === "Write");
+  const boxField = (core, name) => find(core.types, (n) => n.sym && n.sym.hint === name && n.grants)[0];
+  test("a whole-struct Replace whose value replaces an append-only tape field", () => {
+    const core = coreOf(box("int[free, append]"), "@b = { title: \"u\", xs: @b.xs };");
+    const w = writes(core).find((x) => x.data.edit === "Replace" || x.data.edit?.variant === "Replace");
+    w.data.value.data.fields[1] = { variant: "ArrayOf", data: { elems: [] } };
+    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("tape field `b.xs`"))).toBe(true);
+  });
+  test("a Replace with an opaque value (a reset's InitOf, a Local) replaces every tape field", () => {
+    const core = coreOf(box("int[free, append]"), "@b = { title: \"u\", xs: @b.xs };");
+    const w = writes(core).find((x) => x.data.edit === "Replace" || x.data.edit?.variant === "Replace");
+    w.data.value = { variant: "Lit", data: { lit: { variant: "Absent" } } };
+    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("tape field `b.xs`"))).toBe(true);
+  });
+  test("a FieldAt write of an UNGRANTED tape under the owner's `replace` (fieldAtProblem: a tape is a contract)", () => {
+    const core = coreOf(box("int[replace]"), "@b.xs = [1];");
+    boxField(core, "xs").grants.replace = false;            // now `xs: int[]` — no grant, no edits
+    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("non-replace contract"))).toBe(true);
+  });
+  test("a FieldAt write of a struct-typed field replaces the tape inside it", () => {
+    const core = coreOf(nested("int[free, append, replace]"), "@o.inner = { ys: [] };");
+    boxField(core, "ys").grants.replace = false;
+    expect(mods.check.checkCore(core).some((m) => m.startsWith("C3:") && m.includes("tape field `o.inner.ys`"))).toBe(true);
+  });
+});
+
 describe("no write path reads a grant outside the reader (analyze.scrml source)", () => {
   const src = readFileSync(join(import.meta.dir, "..", "analyze.scrml"), "utf8");
-  test("no ad-hoc `….grants.replace || …` decision", () => {
-    expect(src.match(/\.grants\.replace\s*\|\|/g)).toBeNull();
+  const START = src.indexOf("THE TAPE GRANT READER (§66.12.3");
+  const END = src.indexOf("---- END OF THE TAPE GRANT READER");
+  // A read of a GrantSet's fields that is NOT inside the reader is allowed only in a
+  // function named here, with the reason. Every ADMISSION decision goes through the
+  // reader (grantsAdmit / grantsAny / grantsHasEdits / grantsEditOnly / tapeGrants);
+  // today nothing needs an exception.
+  const ALLOW = {
+    // "fnName": "one-line reason (message text / capability minting only)",
+  };
+  const GRANT_READ = /\.grants\.|\bgrants\.replace\b|\bgrants\.edits\b|\bgs\.replace\b|\bgs\.edits\b/g;
+  const enclosingFn = (at) => {
+    const head = src.slice(0, at);
+    const m = [...head.matchAll(/\n\s*(?:export\s+)?fn\s+(\w+)\s*\(/g)];
+    return m.length ? m[m.length - 1][1] : "?";
+  };
+  test("the reader's range is marked", () => {
+    expect(START).toBeGreaterThan(0);
+    expect(END).toBeGreaterThan(START);
   });
-  test("no ad-hoc `hasEditKind(….grants.edits, …)` decision", () => {
-    expect(src.match(/hasEditKind\(\s*\w+\.grants\.edits/g)).toBeNull();
+  test("every grant read outside the reader is allow-listed by name (none today)", () => {
+    const outside = [];
+    for (const m of src.matchAll(GRANT_READ)) {
+      if (m.index > START && m.index < END) continue;
+      const fn = enclosingFn(m.index);
+      if (!(fn in ALLOW)) outside.push(`${fn} @${src.slice(0, m.index).split("\n").length}: ${m[0]}`);
+    }
+    expect(outside).toEqual([]);
   });
-  test("the retired `shrinkGranted` reader is gone", () => {
+  test("the retired `shrinkGranted` / `grantsEdit` readers are gone", () => {
     expect(src.includes("fn shrinkGranted")).toBe(false);
+    expect(src.includes("fn grantsEdit(")).toBe(false);
   });
   test("the one predicate exists and is the reader the write paths call", () => {
     expect(src).toContain("fn grantsAdmit(gs: GrantSet, edit: EditKind) -> boolean");
     expect((src.match(/grantsAdmit\(/g) || []).length).toBeGreaterThanOrEqual(15);
+  });
+  test("the scan bites: a grant read planted outside the reader is reported", () => {
+    const planted = src.replace("fn persistCellProblem(", "fn plantedRead(f: FieldInfo) -> boolean { return f.grants.replace }\n    fn persistCellProblem(");
+    let hits = 0;
+    const s0 = planted.indexOf("THE TAPE GRANT READER (§66.12.3");
+    const e0 = planted.indexOf("---- END OF THE TAPE GRANT READER");
+    for (const m of planted.matchAll(GRANT_READ)) { if (!(m.index > s0 && m.index < e0)) hits++; }
+    expect(hits).toBe(1);
   });
 });

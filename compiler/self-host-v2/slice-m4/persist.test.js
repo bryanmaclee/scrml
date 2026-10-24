@@ -451,6 +451,37 @@ describe("§6.14 — refused, never accepted-and-ignored (E-BOOTSTRAP-UNSUPPORTE
   });
 });
 
+// s469-boot-tape-grants (review r2 H1): a `persist="local"` cross-tab value is a whole-value
+// write, so a STRUCT around an append-only tape must not carry the tape past O-061-5's
+// refusal (§66.12.6 rule 4: no spelling gets around a tape's grants).
+describe("§6.14 × §66.12.6 rule 4 — a struct's tape field and the cross-tab write", () => {
+  const BOX = (grants, store, key) => P(`    type Box:struct = { title: string, xs: int[${grants}] }\n    let <b:Box=({ title: "t", xs: [1, 2, 3] }) persist="${store}" key="${key}"/>`,
+    `        <p class="out">\${@b.title}:\${@b.xs.length}</p>`);
+  test("\"local\" on a struct whose tape field grants no `replace`: refused (E-BOOTSTRAP-UNSUPPORTED), not accepted", () => {
+    const d = diagsOf(BOX("free, append", "local", "h1.b"));
+    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(d[0].message).toContain("tape field `@b.xs`");
+  });
+  test("\"session\" (restore only, owner Q5) is accepted as before", () => {
+    expect(codes(BOX("free, append", "session", "h1.s"))).toEqual([]);
+  });
+  test("runs: a tape field that grants `replace` takes another tab's value (the sync the refusal guards)", async () => {
+    const core = coreOf(BOX("free, append, replace", "local", "h1.r"));
+    expect(mods.check.checkCore(core)).toEqual([]);
+    await loadProgram(core, "h1-replace-sync");
+    expect($("p.out").textContent).toBe("t:3");
+    otherTab(localStorage, "h1.r", "{\"title\":\"other\",\"xs\":[]}");
+    expect($("p.out").textContent).toBe("other:0");
+  });
+  test("Core check C17 refuses the same field hand-built into localStorage (the defence in depth)", () => {
+    const core = coreOf(BOX("free, append", "session", "h1.c"));
+    expect(mods.check.checkCore(core)).toEqual([]);
+    const c = structuredClone(core);
+    fieldsOf(c)[0].persist.store = "Local";
+    expect(mods.check.checkCore(c).some((m) => m.startsWith("C17:") && m.includes("tape field `b.xs`"))).toBe(true);
+  });
+});
+
 describe("Core check C17 (s451)", () => {
   test("a persisted field must be a writable program field with a wire descriptor; an Unpersist follows its own reset Write", () => {
     const core = coreOf(COUNTER("k16"));

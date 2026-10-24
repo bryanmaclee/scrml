@@ -161,6 +161,9 @@ const STATUS = {
   // fail closed: a reset's effect on a tape field is known only at run time; the call-site code is unruled
   "grants/neg-reset-struct-tape": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "grants/neg-callsite-subset": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // review r2 H1: a `persist="local"` cross-tab value is a whole-struct write — refused over an append-only tape field
+  "grants/neg-persist-local-struct-tape": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "grants/persist-session-struct-tape": ["PASS", []],
   // the W-STRING-INTERP-LITERAL lint (§34 row landed s469-spec-followup; name still provisional)
   "interp/logic-literal-warns": ["PASS", ["W-STRING-INTERP-LITERAL"]],
   "interp/attr-expression-warns": ["PASS", ["W-STRING-INTERP-LITERAL"]],
@@ -275,7 +278,8 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
   });
   test("s469-boot-tape-grants: every positive grant case RAN on the bootstrap (output checked)", () => {
     for (const rel of ["grants/struct-spread-keeps-tape", "grants/struct-genuine-keep", "grants/struct-replace-granted",
-                       "grants/local-sort-write", "grants/local-replace-granted", "grants/callsite-superset"]) {
+                       "grants/local-sort-write", "grants/local-replace-granted", "grants/callsite-superset",
+                       "grants/persist-session-struct-tape"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });

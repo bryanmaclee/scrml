@@ -3087,7 +3087,7 @@ ${
             mode = FieldMode.Derived
         }
         let wcap: Sym | not = not
-        if (grants.replace || grants.edits.length > 0) {
+        if (grantsAny(grants)) {
             const rw: RSym = mint(st, name)
             wcap = rw.s
             st = rw.st
@@ -3447,7 +3447,7 @@ ${
         let out: EditKind[] = []
         let i = 0
         for (const fd of fs) {
-            if (fd.grants.replace) out = out.concat([EditKind.FieldAt([{ owner: s, idx: i }])])
+            if (grantsAdmit(fd.grants, EditKind.Replace)) out = out.concat([EditKind.FieldAt([{ owner: s, idx: i }])])
             i = i + 1
         }
         return out
@@ -6955,7 +6955,7 @@ ${
         if (isDerived) return { w: not, st: addDiag(st, env.file, span, "E-DERIVED-WRITE", derivedMessage(p, f)) }
         // r2 F6: a field whose contract grants edits but not `replace` is not
         // locked — say which grant this whole-value write needs
-        if (f.grants.edits.length > 0) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", replaceNotGrantedMsg(f)) }
+        if (grantsHasEdits(f.grants)) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", replaceNotGrantedMsg(f)) }
         // s469 review: a SEQUENCE is never made writable by `let` (E-GRANT-LET-ON-SEQUENCE,
         // §66.12.3) — its whole-value write is the `replace` grant in its type
         if (seqElem(unMaybe(f.ty)) is given) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "` is a sequence whose type grants nothing — this whole-value write needs `replace` in the type's grants (`T[replace]`, §66.12.2); its grants live on the type, and `let` on a sequence is E-GRANT-LET-ON-SEQUENCE (§66.12.3)") }
@@ -6965,17 +6965,11 @@ ${
     fn replaceNotGrantedMsg(f: FieldInfo) -> string {
         const n: string = f.sym.hint
         let msg: string = "`@" + n + " = …` is a whole-value replace of `@" + n + "`, and its contract does not grant `replace` — it grants edits only (§66.11.2: a whole-value write is checked against the grants, whatever the spelling)"
-        if (grantsEdit(f.grants.edits, EditKind.RemoveAnywhere)) msg = msg + ". A removal is `@" + n + " = @" + n + ".filter(x => …)` of its OWN value (`remove`)"
+        if (grantsEditOnly(f.grants, EditKind.RemoveAnywhere)) msg = msg + ". A removal is `@" + n + " = @" + n + ".filter(x => …)` of its OWN value (`remove`)"
         if (seqElem(f.ty) is given) msg = msg + "; to write any value, add `replace` to the type's grants (§66.12.2)"
         return msg
     }
 
-    fn grantsEdit(es: EditKind[], k: EditKind) -> boolean {
-        for (const e of es) {
-            if (e == k) return true
-        }
-        return false
-    }
 
     // `@h = { ...@h, f: v, … }` over an instance: one field write per override,
     // each judged by that field's own contract exactly as `@h.f = v` is.
@@ -7114,7 +7108,7 @@ ${
         let granted = false
         if (grantsAdmit(target.grants, EditKind.Replace)) granted = true
         // O57 = no: a contract-free (non-tape) sub-field is written under the owner's `replace`
-        if (grantsAdmit(f.grants, EditKind.Replace) && target.grants.edits.length == 0) granted = true
+        if (grantsAdmit(f.grants, EditKind.Replace) && !grantsHasEdits(target.grants)) granted = true
         if (!granted) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`" + target.sym.hint + "` is not writable here — its contract grants no replace (§66.11.4)") }
         // a struct-typed field: its own tape fields are judged as a whole-struct write's are
         const st2: AS = checkStructTapes(env, target.ty, value, key, label, span, st)
@@ -7475,6 +7469,23 @@ ${
         return gs.replace || hasEditKind(gs.edits, edit)
     }
 
+    // Does the set grant ANY write (`replace` or an edit)? — who gets a write
+    // capability minted (fieldOf), and whether a sub-field is "fixed".
+    fn grantsAny(gs: GrantSet) -> boolean {
+        return gs.replace || gs.edits.length > 0
+    }
+
+    // Does the set grant some EDIT (a contract other than `replace`)? O57: a
+    // sub-field with one is not written under its owner's `replace`.
+    fn grantsHasEdits(gs: GrantSet) -> boolean {
+        return gs.edits.length > 0
+    }
+
+    // Does the set name edit `k` itself (not through `replace`)? — message advice only.
+    fn grantsEditOnly(gs: GrantSet, k: EditKind) -> boolean {
+        return hasEditKind(gs.edits, k)
+    }
+
     // A tape type's grants, read off the TYPE (through `| not`); `not` for a
     // type that is not a tape.
     fn tapeGrants(t: Type) -> GrantSet | not {
@@ -7778,6 +7789,7 @@ ${
             .ElemAt(index: i) :> "an element-field write"
         }
     }
+    // ---- END OF THE TAPE GRANT READER (tape-write-forms.test.js: no grant is read outside it) ----
 
     // =========================================================================
     // s442 — recognized sequence edit shapes (§66.11.2: "Edits … are classified
@@ -8269,7 +8281,7 @@ ${
         if (owner == "") return addDiag(st, env.file, e.span, "E-ASSIGN-TARGET", "`@" + f.sym.hint + "[…]." + ef.field + "` — the elements of `@" + f.sym.hint + "` are not structs")
         if (target is not) return addDiag(st, env.file, e.span, "E-SCOPE-001", "`" + owner + "` has no field `" + ef.field + "`")
         st = resolveExpr(env, value, target.ty, st).st
-        if (!target.grants.replace && target.grants.edits.length == 0) {
+        if (!grantsAny(target.grants)) {
             return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "[…]." + ef.field + " = …` is an edit of `" + owner + "." + ef.field + "`, which carries no contract — it is fixed (§66.11.4; an element-field write is judged by that field's own contract, dpa-052 Q3)")
         }
         // s444: `= v` REPLACES the element field — its contract must grant `replace`
@@ -18703,8 +18715,16 @@ ${
                 .Seeded :> "a cell whose contract grants no write"
             }
         }
-        if (store is given && store == PersistStore.Local && (f.graph is given || !f.grants.replace)) {
+        if (store is given && store == PersistStore.Local && (f.graph is given || !grantsAdmit(f.grants, EditKind.Replace))) {
             return "another tab's value reaches a `persist=\"local\"` cell as one whole-value write, and this cell's contract refuses one (" + contractText(f) + ") — whether its contract judges that write or it is applied like a restore is OPEN (O-061-5); use `persist=\"" + sessionWord() + "\"` (no cross-tab sync)"
+        }
+        // s469-boot-tape-grants (review r2 H1): the cross-tab value is a whole-value write of a
+        // STRUCT too, so it replaces each tape field it changes (§66.12.6 rule 4) — a struct
+        // must not carry an append-only tape past the check above. Which fields change is known
+        // only at run time: refused, as `reset` is (resetTapeProblem, the one reader).
+        if (store is given && store == PersistStore.Local) {
+            const tp: string = resetTapeProblem(g.types, f.ty, "@" + f.sym.hint)
+            if (tp != "") return "another tab's value reaches a `persist=\"local\"` cell as one whole-value write, and it would replace the tape field `" + tp + "`, whose type does not grant `replace` (§66.12.6 rule 4: no spelling — a struct around the tape included — gets around a tape's grants); the bootstrap has no run-time grant check, so this is refused, not approximated — use `persist=\"" + sessionWord() + "\"` (no cross-tab sync), or grant `replace` on the field's type"
         }
         // r8: an unresolved type is never checked against
         if (st.bad.fields.indexOf(f.sym.id) >= 0) return ""
