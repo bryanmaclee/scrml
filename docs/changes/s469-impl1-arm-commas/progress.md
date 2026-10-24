@@ -105,3 +105,13 @@ already ending in `,` is skipped); an arm ending in `;` is NOT rewritten and is 
 - [x] Reviewer fuzzers on head: fuzz5 seeds 51–60 + fuzz6 seeds 71–80, 150 lists each (21,000 list×position
       runs × 4 spellings): 0 PIPE-NOT-REFUSED, 0 BAD-SEQ, 0 SPLIT-BAD-SEQ, 0 DIFF-OUT, 0 SPLIT-DIFF-OUT.
 - [x] Corpus emit diff (r6 vs the same tree with fc046f011's four arm files): 171 diffs, all `_scrml_project_root`.
+
+## Round 7 (final review of 6c9f99474 — FIX, server text lowering)
+- [x] Option 1 (one reader): `rewriteMatchExpr` reads arms with the canonical reader (splitArmSeparatorCommas +
+      splitMultiArmString + parseMatchArm, under armPiecesCover); rewrite.ts's `_splitMultiArmString` /
+      `parseInlineMatchArm` deleted; unreadable → E-PARSE-001 (never skipped); literal alternations OR-chain.
+- [x] F3: the server no-call-in-text check reads arm bodies (a payload binder `(r)` is not a call).
+- [x] Seeded server / engine differential (`match-arm-list-server-differential-s469.test.js`); pack s3 (18) +
+      n24 engine derived= (6) = 607 shapes.
+- [x] fuzz5 / fuzz6 / fuzz7 seeds 91–100 (100 lists each): 0 BAD-SEQ, 0 SPLIT-BAD-SEQ, 0 DIFF-OUT, 0 SPLIT-DIFF-OUT,
+      0 PIPE-NOT-REFUSED. Corpus emit diff: 171, all `_scrml_project_root`.
