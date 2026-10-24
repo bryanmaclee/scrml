@@ -15,7 +15,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { spawnSync } from "child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, sep } from "path";
 import { parseDocMarkers } from "../../../scripts/doc-gate-markers.js";
 import { parseDoc, isDriftScanned, inSnippetCorpus, discoverDocs } from "../../../scripts/snippet-drift.js";
 import { bootCheck, classifySpecAhead, pinMismatch } from "../../../scripts/doc-boot-check.js";
@@ -156,6 +156,9 @@ beforeAll(async () => {
 }, 300_000);
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
+// The gates print POSIX paths on every OS (S469): `join` writes `\` on Windows, so an
+// expected path built here is compared in its `/` form.
+const posix = (p) => p.split(sep).join("/");
 const write = (name, lines) => {
   const p = join(dir, name);
   writeFileSync(p, lines.join("\n") + "\n");
@@ -251,7 +254,7 @@ describe("snippet-gate end to end", () => {
     const good = write("good-r2.scrml", GOOD);
     const md = write("cites-good.md", ["<!-- dialect: ruled -->", `<!-- snippet: ${good} -->`, ...fence("x")]);
     const r = snippet(`--docs=${md}`, good);
-    expect(r.stdout).toContain(`PASS  ${good}  (bootstrap)`);
+    expect(r.stdout).toContain(`PASS  ${posix(good)}  (bootstrap)`);
     expect(r.status).toBe(0);
   }, 120_000);
 });
