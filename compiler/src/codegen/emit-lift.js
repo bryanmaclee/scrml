@@ -40,6 +40,7 @@ function isCallableJsExprText(text) {
   }
 }
 import { detectPredicateShapeBind } from "./predicate-bind-detector.js";
+import { liftGateReads, liftForTreeGatePins, liftGateInFunction, liftGateCellsAllNamed } from "./lift-gate-scope.js";
 
 // ---------------------------------------------------------------------------
 // Bug 64 (S159) — Tier-0 per-item content reactivity on reconcile.
@@ -253,6 +254,8 @@ export function resetLiftModuleState() {
   _scrml_lift_non_keyed_depth = 0;
   _scrml_lift_live_stack.length = 0;
   _scrml_lift_request_ids_stack.length = 0;
+  _liftOpenGateCount = 0;
+  _liftGroupWindow = false;
 }
 
 // S293 — item-derived-local REPLAY prelude for per-item effect / handler wraps.
@@ -677,44 +680,56 @@ function pushLiftBind(lines, elVar, flavor, eventName, varJSON) {
 // sits: while the condition is false the element is NOT in the DOM — a placeholder
 // comment holds its place — so its subtree is unmounted and its listeners are
 // unreachable. The swap is `_scrml_ifrow_apply` (the `ifrow` runtime chunk), the one
-// `<each>` rows use.
+// `<each>` rows use. §17.2 — a `show=` is a display toggle read at the same places.
 //
-// S469 round 5 — WHERE the condition is evaluated is main's, unchanged; only WHAT is
-// done to the element changed (main toggled `style.display`). Main's placements, kept
-// exactly (the oracle — rounds 2–4 moved evaluation and each time opened a hole):
-//   A. the SOLE root of a reconciled row, non-value-indexed: a live-keyed per-item
-//      effect (main already swapped here);
-//   B. any other element of a reconciled row whose condition reads the row (item or
-//      item-derived local), non-value-indexed: a live-keyed per-item effect;
-//   C. LIVE mode (an `if … lift` arm; the condition reads a cell and no arm-declared
-//      name — liftLiveWraps): its own effect, owned by the arm;
-//   D. otherwise: evaluated where the element is built (so the enclosing group / arm
-//      render tracks it), plus main's updater subscriptions — the value-indexed
-//      `@cell == v` bucket (`_scrml_reactive_subscribe_when`, O(2)) or one
-//      `_scrml_reactive_subscribe` per `@name` in the text.
-// A position stale on main is stale here; it is filed, not re-engineered (known-gaps:
-// g-lift-gate-placement-inherits-main-staleness-s469).
+// S469 (g-lift-gate-placement-inherits-main-staleness-s469) — WHEN the condition is
+// re-evaluated follows one structural rule: by re-running the code that produced what it
+// reads, under the runtime's read tracking (`_scrml_effect` records every cell read, at
+// any call depth — `if=isAdmin()` subscribes to the cell `isAdmin` reads).
+//   - CLOSED — the condition reads only cells, file-level bindings and the binder of the
+//     reconciled row it is built in (lift-gate-scope.js decides, from the file's
+//     declaration tables): its OWN tracked effect re-evaluates it. In a reconciled row
+//     that is a live-keyed per-item effect (the item re-resolved by key, so a same-key
+//     replace is seen); elsewhere an effect of its own, owned by the scope it is built in.
+//   - OPEN — it reads a value of the render (a body local, a local closure, an
+//     item-derived local, an outer row's binder): only re-running that render reads it
+//     right. It is evaluated where the element is built, and the render re-runs on what
+//     that evaluation read: an `if … lift` arm's render is an effect; a plain group is
+//     made one (emit-reactive-wiring.ts, liftOpenGateCount); a reconciled row holding one
+//     is lowered as the plain loop (liftForTreeGatePins). Where no render re-runs it — a
+//     function body, a lift that escapes its row, a row the prediction kept keyed — the
+//     gate is REFUSED (E-IMPL1-LIFT-GATE-UNTRACKED), never left stale.
+//   - VALUE-INDEXED (`@cell == v`, S103 O(2) dispatch): the cell side stays a value
+//     bucket; `v` is a literal (registered once) or the row's own field — then a tracked
+//     per-item effect reads the LIVE row's field and re-registers the bucket under it.
 //
 // The element is built once; `cur` is the node currently in the DOM. Returns its name.
 function _liftGateRefs(rawText) {
   return [...new Set((rawText.match(/@([A-Za-z_$][A-Za-z0-9_$.]*)/g) || []).map(r => r.replace(/^@/, "").split(".")[0]))];
 }
-function _liftGateValueIndexed(rawText) {
+const _LIFT_JS_LITERAL = /^(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|-?\d+(?:\.\d+)?|true|false|null)$/;
+/**
+ * The value-indexed form of a condition, or null. `rowVar` is the binder of the row the gate
+ * is built in (null outside a row): its field may be the value side; any other value side but
+ * a literal is not value-indexed (a bucket registered once under a value that can change
+ * would miss the transition away from it).
+ */
+function _liftGateValueIndexed(rawText, rowVar) {
   const refs = _liftGateRefs(rawText);
   const pred = detectPredicateShapeBind(rawText);
-  return { refs, pred, valueIndexed: pred.matched && refs.length === 1 && refs[0] === pred.cellName };
-}
-/** Main's tryEmitLiftIfReactive test: a reconciled row and a condition that reads the row. */
-function _liftReadsRow(exprJS) {
-  return !!currentLiftReconcileCtx() && computeItemDerivedReplay(exprJS, [], 'return;').length > 0;
+  if (!(pred.matched && refs.length === 1 && refs[0] === pred.cellName)) return null;
+  const v = String(pred.valueExprJS ?? "").trim();
+  if (_LIFT_JS_LITERAL.test(v)) return { pred, literal: true };
+  if (rowVar && new RegExp(`^${rowVar.replace(/[$]/g, "\\$")}(?:\\.[A-Za-z_$][\\w$]*)+$`).test(v)) return { pred, literal: false };
+  return null;
 }
 /**
  * S469 round 6 — a lift emitted with no container inside a reconciled row factory goes to
  * the AMBIENT target (`_scrml_lift(…)`), not into the row's fragment (a `while` in a row:
  * g-while-lift-in-reconciled-row-escapes-the-row-s469). Its elements outlive the row
- * scope — which the reconciler drops at mount when the factory returns nothing — so their
- * updater subscriptions must not be registered with it. Counted on the row's ctx; a list
- * nested inside the escaped markup has its own ctx and is unaffected.
+ * scope — which the reconciler drops at mount when the factory returns nothing — so
+ * nothing they need may be owned by it. Counted on the row's ctx; a list nested inside
+ * the escaped markup has its own ctx and is unaffected.
  */
 function _withLiftTarget(ambient, fn) {
   const ctx = ambient ? currentLiftReconcileCtx() : null;
@@ -726,69 +741,130 @@ function _liftLandsOutsideRow() {
   return !!(ctx && ctx.ambientLiftDepth > 0);
 }
 
-/**
- * Main's updater subscriptions (placement D) — the same triggers. Each one's release is
- * registered with the owner scope open where the element is built (a row, an arm render,
- * an if= mount — #1508's tree; none at top level), so a removed row / arm stops running
- * them. Release only: what triggers the update is unchanged.
- */
-function _liftPushUpdaterSubscriptions(lines, updaterVar, refs, pred, valueIndexed) {
-  // An element that does not land in the row it is built in (see _withLiftTarget) keeps
-  // main's plain subscriptions: no owner scope owns it.
-  const wrap = _liftLandsOutsideRow() ? (c) => c : (c) => `_scrml_mount_track(${c})`;
-  if (valueIndexed) {
-    lines.push(`${wrap(`_scrml_reactive_subscribe_when(${JSON.stringify(pred.cellName)}, ${pred.valueExprJS}, ${updaterVar})`)};`);
-  } else {
-    for (const ref of refs) lines.push(`${wrap(`_scrml_reactive_subscribe(${JSON.stringify(ref)}, ${updaterVar})`)};`);
-  }
-}
-function emitLiftIfGate(lines, elVar, exprJS, rawText, node = null) {
-  const phVar = genVar("ph");
-  const curVar = genVar("cur");
-  const swap = `${curVar} = _scrml_ifrow_apply(${curVar}, ${elVar}, ${phVar}, (${exprJS}));`;
-  lines.push(`const ${phVar} = _scrml_g.document.createComment("scrml-if-row");`);
-  const ctx = currentLiftReconcileCtx();
-  const { refs, pred, valueIndexed } = _liftGateValueIndexed(rawText);
-  if (ctx && node && ctx.soleRootMarkupNode === node && !valueIndexed) {          // A
-    lines.push(`let ${curVar} = (${exprJS}) ? ${elVar} : ${phVar};`);
-    for (const l of maybeWrapLiftPerItemEffect([swap])) lines.push(l);
-    return curVar;
-  }
-  if (!valueIndexed && _liftReadsRow(exprJS)) {                                    // B
-    lines.push(`let ${curVar} = ${elVar};`);
-    for (const l of maybeWrapLiftPerItemEffect([swap])) lines.push(l);
-    return curVar;
-  }
-  lines.push(`let ${curVar} = ${elVar};`);
-  const updaterVar = genVar("if");
-  lines.push(`function ${updaterVar}() { ${swap} }`);
-  if (liftLiveWraps(exprJS)) {                                                     // C
-    lines.push(`_scrml_effect(${updaterVar});`);
-    return curVar;
-  }
-  lines.push(`${updaterVar}();`);                                                  // D
-  _liftPushUpdaterSubscriptions(lines, updaterVar, refs, pred, valueIndexed);
-  return curVar;
+// Open-gate accounting (see OPEN above). A group emission (emit-reactive-wiring.ts) opens a
+// WINDOW around its statements and reads the count after: an open gate emitted in it makes
+// the group re-render. An open gate emitted with no window and outside an arm — in a
+// function body, emitted apart from any group — has no render to re-run it: refused.
+let _liftOpenGateCount = 0;
+let _liftGroupWindow = false;
+export function liftOpenGateCount() { return _liftOpenGateCount; }
+export function setLiftGroupWindow(on) { _liftGroupWindow = !!on; }
+
+function _refuseLiftGate(attrName, node, reads, why) {
+  const names = reads && reads.size > 0 ? [...reads].map((n) => `\`${n}\``).join(", ") : null;
+  recordRefusedLowering(new CGError(
+    "E-IMPL1-LIFT-GATE-UNTRACKED",
+    `E-IMPL1-LIFT-GATE-UNTRACKED: impl#1 cannot keep this lifted \`${attrName}=\` fresh: ` +
+      (names ? `its condition reads ${names}, a value of the code that builds the element, ` : `impl#1 cannot read what its condition depends on, `) +
+      `and ${why}. A guard it cannot re-evaluate is refused rather than left open after it turns false (§17.1). ` +
+      `Read cells, file-level bindings or the row's own item in the condition, or move the computation into a ` +
+      `function of those.`,
+    (node && node.span) ?? { start: 0, end: 0 },
+  ), node);
 }
 
-// §17.2 — `show=` in lifted markup: a display toggle (the element stays mounted). Main
-// wrote it as a plain attribute (no toggle); it is now read at the placements an
-// `@`-expression `if=` takes there (B, C, D above — A is the if= swap's own).
-function emitLiftShowBinding(lines, elVar, exprJS, rawText) {
-  const stmt = `${elVar}.style.display = (${exprJS}) ? "" : "none";`;
-  const { refs, pred, valueIndexed } = _liftGateValueIndexed(rawText);
-  if (!valueIndexed && _liftReadsRow(exprJS)) {
+/**
+ * Emit one lifted gate: `apply(condJS)` is the statement that applies a condition value to the
+ * element (the `if=` swap, the `show=` display write). Returns nothing; the caller reads `cur`.
+ */
+function _emitLiftGate(lines, attrName, exprJS, rawText, node, val, apply, declare) {
+  const ctx = currentLiftReconcileCtx();
+  const reads = liftGateReads(val, rawText, node);
+  const inRow = !!ctx && !_liftLandsOutsideRow();
+  const stmt = apply(`(${exprJS})`);
+  if (!(inRow && declare && declare.sole)) { if (declare) lines.push(declare.plain); }
+  if (inRow) {
+    const closed = reads !== null && [...reads].every((n) => n === ctx.iterVar);
+    const vi = closed ? _liftGateValueIndexed(rawText, ctx.iterVar) : null;
+    if (declare && declare.sole && (!closed || (vi && !vi.literal))) lines.push(declare.plain);
+    if (!closed) {
+      _refuseLiftGate(attrName, node, reads, "a reconciled row is built once per key, so nothing re-runs that code when the condition changes");
+      lines.push(apply("false"));
+      return;
+    }
+    if (vi && !vi.literal) {
+      // The row side of `@cell == row.field`: a tracked per-item effect reads the LIVE row's
+      // field and (re-)registers the bucket under it; the cell side is the bucket (O(2)).
+      const updVar = genVar(attrName === "if" ? "if" : "show");
+      const unsubVar = genVar("unsub");
+      const prelude = computeItemDerivedReplay(stmt, [ctx.iterVar], "return;");
+      lines.push(`function ${updVar}() { ${[...prelude, stmt].join(" ")} }`);
+      lines.push(`let ${unsubVar} = null;`);
+      lines.push(`_scrml_mount_track(() => { if (${unsubVar}) ${unsubVar}(); });`);
+      for (const l of maybeWrapLiftPerItemEffect([
+        `if (${unsubVar}) ${unsubVar}();`,
+        `${unsubVar} = _scrml_reactive_subscribe_when(${JSON.stringify(vi.pred.cellName)}, ${vi.pred.valueExprJS}, ${updVar});`,
+        `_scrml_untracked(${updVar});`,
+      ])) lines.push(l);
+      return;
+    }
+    if (declare && declare.sole) lines.push(declare.sole);
     for (const l of maybeWrapLiftPerItemEffect([stmt])) lines.push(l);
     return;
   }
-  const updaterVar = genVar("show");
-  lines.push(`function ${updaterVar}() { ${stmt} }`);
-  if (liftLiveWraps(exprJS)) {
-    lines.push(`_scrml_effect(${updaterVar});`);
+  if (ctx) {
+    // A lift that escaped its row (see _withLiftTarget): the element outlives the row and
+    // every owner around it (an arm render, an `<each>` instance), so nothing that can be
+    // disposed may re-evaluate it, and nothing re-runs the row's code. It keeps main's
+    // unowned subscriptions — one per `@cell` the condition names, or the value bucket —
+    // which are complete only when the condition reads nothing but what it names (no call)
+    // and no value of the render; any other gate there is refused.
+    if (reads === null || reads.size > 0 || !liftGateCellsAllNamed(val, rawText)) {
+      _refuseLiftGate(attrName, node, reads, "it is lifted out of its reconciled row (a `while` loop in a row), where nothing re-runs that code and no effect may own it");
+      lines.push(apply("false"));
+      return;
+    }
+    const updVar = genVar(attrName === "if" ? "if" : "show");
+    lines.push(`function ${updVar}() { ${stmt} }`);
+    lines.push(`${updVar}();`);
+    const vi = _liftGateValueIndexed(rawText, null);
+    if (vi) lines.push(`_scrml_reactive_subscribe_when(${JSON.stringify(vi.pred.cellName)}, ${vi.pred.valueExprJS}, ${updVar});`);
+    else for (const ref of _liftGateRefs(rawText)) lines.push(`_scrml_reactive_subscribe(${JSON.stringify(ref)}, ${updVar});`);
     return;
   }
-  lines.push(`${updaterVar}();`);
-  _liftPushUpdaterSubscriptions(lines, updaterVar, refs, pred, valueIndexed);
+  const updVar = genVar(attrName === "if" ? "if" : "show");
+  lines.push(`function ${updVar}() { ${stmt} }`);
+  if (reads !== null && reads.size === 0) {
+    const vi = _liftGateValueIndexed(rawText, null);
+    if (vi) {
+      // `@cell == literal`: the value bucket (O(2)) is the whole dependency.
+      lines.push(`${updVar}();`);
+      lines.push(`_scrml_mount_track(_scrml_reactive_subscribe_when(${JSON.stringify(vi.pred.cellName)}, ${vi.pred.valueExprJS}, ${updVar}));`);
+      return;
+    }
+    lines.push(`_scrml_mount_track(_scrml_effect(${updVar}, true));`);
+    return;
+  }
+  // OPEN: read in the render; the render re-runs on it.
+  if (liftGateInFunction(node) || (!_liftLiveActive() && !_liftGroupWindow)) {
+    _refuseLiftGate(attrName, node, reads, "it is built where no render re-runs (a function body, or markup outside a `${}` block)");
+    lines.pop();
+    lines.push(apply("false"));
+    return;
+  }
+  _liftOpenGateCount++;
+  lines.push(`${updVar}();`);
+}
+
+function emitLiftIfGate(lines, elVar, exprJS, rawText, node = null, val = null) {
+  const phVar = genVar("ph");
+  const curVar = genVar("cur");
+  lines.push(`const ${phVar} = _scrml_g.document.createComment("scrml-if-row");`);
+  const ctx = currentLiftReconcileCtx();
+  const sole = !!(ctx && node && ctx.soleRootMarkupNode === node);
+  // The sole root of a reconciled row starts as what the condition says (main's placement A).
+  const declare = {
+    plain: `let ${curVar} = ${elVar};`,
+    sole: sole ? `let ${curVar} = (${exprJS}) ? ${elVar} : ${phVar};` : null,
+  };
+  _emitLiftGate(lines, "if", exprJS, rawText, node, val,
+    (c) => `${curVar} = _scrml_ifrow_apply(${curVar}, ${elVar}, ${phVar}, ${c});`, declare);
+  return curVar;
+}
+
+function emitLiftShowBinding(lines, elVar, exprJS, rawText, node = null, val = null) {
+  _emitLiftGate(lines, "show", exprJS, rawText, node, val,
+    (c) => `${elVar}.style.display = ${c} ? "" : "none";`, null);
 }
 
 // The condition of a lifted `if=` / `show=`, lowered from any value kind the markup
@@ -1879,8 +1955,8 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
     // element gated off / hidden, never written as a plain attribute (fail closed).
     if (name === "if" || name === "show") {
       const { exprJS, rawText } = liftConditionValue(val, name, tag, attr, node);
-      if (name === "if") _returnVar = emitLiftIfGate(lines, elVar, exprJS, rawText, node);
-      else emitLiftShowBinding(lines, elVar, exprJS, rawText);
+      if (name === "if") _returnVar = emitLiftIfGate(lines, elVar, exprJS, rawText, node, val);
+      else emitLiftShowBinding(lines, elVar, exprJS, rawText, node, val);
       continue;
     }
 
@@ -2784,7 +2860,12 @@ export function forLiftTreeHasImpureLoop(forNode, outerDeclared) {
   // factory receives the binder as a parameter and its row effects re-read the item
   // through `_scrml_resolve_item`, which silently discards the write; only the
   // plain loop renders what the source wrote (see forLoopWritesItsBinder).
-  return _liftTreeWalk(forNode, outerDeclared).impure;
+  //
+  // S469 (g-lift-gate-placement-inherits-main-staleness-s469) — and a tree holding a lifted
+  // `if=` / `show=` that reads a value of the render other than its own row's binder
+  // (liftForTreeGatePins, lift-gate-scope.js): a row built once per key cannot re-read it;
+  // the plain loop, re-run whole by the enclosing render, can.
+  return _liftTreeWalk(forNode, outerDeclared).impure || liftForTreeGatePins(forNode);
 }
 
 /**

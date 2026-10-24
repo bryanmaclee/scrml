@@ -45,6 +45,7 @@ import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-enc
 import { collectThemeContext, themeVariantAttr } from "./emit-theme-reset.ts";
 import type { CompileContext } from "./context.ts";
 import { judgeDefinitionsFor } from "./emit-predicates.ts";
+import { setLiftGateFileScopes, resetLiftGateScopes } from "./lift-gate-scope.js";
 
 /**
  * S461 — a reference, in emitted client text, to anything the 'errors' runtime
@@ -72,6 +73,13 @@ const POST_EMIT_HELPER_CHUNK_GATES: ReadonlyArray<readonly [string, string]> = [
   // `ifrow` chunk (S469 round 5): a list-free lift page does not ship the reconciler and
   // owner tree for it, and a gate-free list does not ship the swap.
   ["_scrml_ifrow_apply(", "ifrow"],
+  // S469 (g-lift-gate-placement-inherits-main-staleness-s469) — a lifted gate is its own
+  // tracked effect (`deep_reactive`); a value-indexed row gate re-registers its bucket
+  // untracked; a gate in a lift that escapes its row is created outside the row's owner
+  // scope (`_scrml_in_scope`, the 'owner' chunk — always present beside a list).
+  ["_scrml_effect(", "deep_reactive"],
+  ["_scrml_untracked(", "deep_reactive"],
+  ["_scrml_in_scope(", "owner"],
   // g-when-handler-body-invisible-to-chunk-detection (S372 follow-up) — a
   // client `navigate(...)` lowers to `_scrml_navigate_soft(` / `_scrml_navigate(`
   // (rewrite.ts), both DEFINED in the `utilities` chunk. That chunk's pre-emit
@@ -2304,6 +2312,9 @@ export function generateClientJs(ctx: CompileContext): string {
   // per-file set through every control-flow position, `reparseRequestRefEscapeHatch`
   // falls back to this set whenever the hand-threaded set is empty. Cleared below.
   setCurrentFileRequestIds(fileAST ? collectRequestIds(fileAST) : new Set<string>());
+  // S469 (g-lift-gate-placement-inherits-main-staleness-s469) — the declaration tables a
+  // lifted `if=` / `show=` is judged against (which names are values of the render).
+  setLiftGateFileScopes(fileAST);
   // s430-emit-state-leak — install this file's emit-logic state (the §6.8
   // structural-decl set + implicit-init tracker) BEFORE emitFunctions: function
   // bodies read it, and before this they read the previous file's. No-op when the
@@ -4698,6 +4709,8 @@ export function generateClientJs(ctx: CompileContext): string {
   if (_ownsEmitLogicState) endEmitLogicFile();
   // s441 — end of this file's client emission (see setActiveClientAsync above).
   setActiveClientAsync(null);
+  // S469 — release this file's lifted-gate declaration tables (lift-gate-scope.js).
+  resetLiftGateScopes();
 
   return clientCode;
 }
