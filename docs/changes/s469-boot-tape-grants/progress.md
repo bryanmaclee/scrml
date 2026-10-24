@@ -33,7 +33,7 @@ Gaps: `g-bootstrap-whole-struct-write-bypasses-tape-field-grants-s469` (MED),
   type with grants dropped (`inferredTape`), else (unsettled type, tape-shaped write) `inferredTapeProblems`.
 - Call site: `checkArgTape` → `argTapeProblem` (place arguments only), E-BOOTSTRAP-UNSUPPORTED (code unruled).
 - `fieldDefsOf`: E-GRANT-LET-ON-SEQUENCE on a `let` tape struct field.
-- Structural proof: `slice-m4/tape-write-forms.test.js` — 35 write forms × (ungranted refused, granted clean),
+- Structural proof: `slice-m4/tape-write-forms.test.js` — 39 write forms × (ungranted refused, granted clean),
   plus a source scan (no `….grants.replace ||`, no `hasEditKind(….grants.edits`, no `shrinkGranted`).
 
 ## Log
@@ -49,7 +49,10 @@ Gaps: `g-bootstrap-whole-struct-write-bypasses-tape-field-grants-s469` (MED),
 - [x] Acceptance `acceptance/grants/*` (18 cases: 6 positive, all RUN; 12 negative), STATUS pinned.
 - [x] Conformance before/after: no corpus case changed (PASS 250 · FAIL 63 · NOT-TWINNED 684 · UNSUPPORTED 815).
 - [x] SPEC §66.12.6 rule 4: the "does not check this yet" sentence now says it checks, and what it refuses.
-- [x] Gap entries resolved (3) / narrowed (1); `bun scripts/state.ts --write`.
+- [x] Gap entries resolved (3) / narrowed (1); `bun scripts/state.ts --write`. — commit 1.
+- [x] Self-review round: a self-spread keeps a field only when it is the LAST spread (`{ ...@b, ...other }`);
+      a parameter's rebinding is judged by its WRITTEN type (`paramTypeOfSym`), not an inferred one; 4 more
+      forms in the enumeration (for-of binder, parameter ×2, spread ordering).
 
 ## Owner questions (not invented — refused fail-closed where the SPEC does not settle)
 

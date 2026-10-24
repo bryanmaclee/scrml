@@ -79,6 +79,11 @@ const FORMS = [
   ["local: an in-place edit (`.append`)", ["", "let out: int[free, append] = [];\n        out.append(1);", ["E-BOOTSTRAP-UNSUPPORTED"]], null],
   ["local: a part write (`q.xs = v`)", [box("int[free, append, replace]"), "let q: Box = @b;\n        q.xs = [];", ["E-BOOTSTRAP-UNSUPPORTED"]], null],
   ["local: a `const` tape rebound", ["", "const out: int[replace] = [1];\n        out = [2];", ["E-ASSIGN-CONST"]], null],
+  ["local: a `for … of` binder rebound (inferred: no grants)", ["", "for (let x of [[1], [2]]) {\n            x = [3];\n        }", ["E-WRITE-NOT-GRANTED"]], null],
+  ["parameter: rebound — §50 refuses the rebinding; the tape write is judged by the WRITTEN type",
+    ["    function h(xs: int[]) -> int {\n        xs = [1];\n        return 1;\n    }\n", "const n = h([]);", ["E-ASSIGN-CONST", "E-WRITE-NOT-GRANTED"]],
+    ["    function h(xs: int[replace]) -> int {\n        xs = [1];\n        return 1;\n    }\n", "const n = h([]);", ["E-ASSIGN-CONST"]]],
+  ["whole struct: a self-spread overridden by a later spread (not kept)", [box("int[free, append]"), "const nb: Box = { title: \"u\", xs: [] };\n        @b = { ...@b, ...nb };", ["E-WRITE-NOT-GRANTED"]], null],
 
   // ---- a call argument (checkArgTape, §66.12.3 subset) — the code is unruled: fail closed
   ["call: a place granting less than the parameter", [param("int[]"), "const n = size(@src);", ["E-BOOTSTRAP-UNSUPPORTED"]], [param("int[free, append, pop]"), "const n = size(@src);", []]],
@@ -93,7 +98,7 @@ describe("every tape write form is judged by the grant reader (§66.12.6)", () =
       expect(got.filter((c) => want.includes(c))).toEqual(want);
     });
     if (granted) {
-      test(`${form} — granted: clean`, () => {
+      test(`${form} — granted: no grant refusal`, () => {
         const [d, b, want] = granted;
         expect(codes(d, b)).toEqual(want);
       });

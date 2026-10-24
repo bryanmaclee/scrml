@@ -7517,9 +7517,11 @@ ${
         if (fs is not) return []
         let props: AProp[] = []
         if (v is given) props = propsOf(v)
+        // a spread of the place itself keeps the fields no LATER property names —
+        // only when it is the last spread (`{ ...@b, ...other }`: `other` may override)
         let selfSpread = false
         for (const pr of props) {
-            if (pr.spread && key != "" && placeKey(pr.value) == key) selfSpread = true
+            if (pr.spread) selfSpread = key != "" && placeKey(pr.value) == key
         }
         let out: TapeHit[] = []
         for (const fd of fs) {
@@ -7665,6 +7667,17 @@ ${
         const tg: GrantSet | not = tapeGrants(lt)
         if (tg is not) return structTapeProblems(types, lt, value, name, name)
         return localTapeEdit(name, tapeTypeName(lt), tg, growsFixed(lt), value)
+    }
+
+    // The written type of the parameter `s` binds, if `s` is a parameter.
+    fn paramTypeOfSym(t: Tables, s: Sym) -> Type | not {
+        for (const f of t.binds.facts) {
+            const bs: Sym | not = bindSym(f)
+            if (bs is given) {
+                if (bs.id == s.id) return boundParamType(f)
+            }
+        }
+        return not
     }
 
     // An un-annotated local's type as §66.12.6 rule 1 reads it: a tape (or a
@@ -16466,6 +16479,7 @@ ${
                 // its annotation, else its inferred type (which carries none, §66.12.6 rule 1)
                 if (bareLocal) {
                     let lt: Type | not = la
+                    if (lt is not) lt = paramTypeOfSym(env.t, ls)      // a parameter's type is written, not inferred
                     if (lt is not) {
                         // inferred: the tape the local holds carries NO grant, whatever
                         // value it was given (`let s = @audit`, §66.12.6 rule 1)
