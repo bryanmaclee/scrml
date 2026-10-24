@@ -170,4 +170,91 @@ for (const [cn, ctx] of LOCAL_CTX) {
 `]);
   }
 }
+
+// s469-lift-gate-staleness (g-lift-gate-placement-inherits-main-staleness-s469) — the positions main's
+// evaluation placement missed, each at more depth:
+//   - a cell read TWO calls deep, or through a file-level `const` closure, at the gate positions above;
+//   - a run-once group whose gate names no cell (it is read inside the function) beside a body local —
+//     the group must re-render to re-read it;
+//   - the value-indexed row side written IN PLACE (`@keys[0].k = …`, the same row object);
+//   - an item-derived local / a group-level local / a local closure over the row item, read in a row;
+//   - an open gate in a function body — no render re-runs it: refused (fail closed).
+const DEEP = (guard, wrap) => `<pw> = "secret"
+<xs> = [1]
+\${
+    function granted() { return @pw == "secret" }
+    function deeper() { return granted() }
+    const viaConst = () => @pw == "secret"
+}
+<button id="wrong" onclick=\${ @pw = "wrong" }>go</button>
+<button id="right" onclick=\${ @pw = "secret" }>go</button>
+${wrap(`<b if=${guard}>LOGGED IN</b>`, guard)}
+`;
+const DEEP_GUARDS = [["two calls deep", "deeper()"], ["file-level const closure", "(viaConst())"]];
+const DEEP_WRAPS = ["for-lift sole root", "for-lift nested", "for-lift in for-lift, nested", "if-lift nested", "bare lift nested",
+  "function returning markup", "ternary markup value", "component in for-lift, gate in its body"];
+for (const [g, guard] of DEEP_GUARDS) {
+  for (const w of DEEP_WRAPS) shapes.push([`${g} (${w})`, DEEP(guard, WRAPS.find(([n]) => n === w)[1])]);
+}
+for (const [cn, ctx] of [["run-once group", (b) => `\${ ${b} }`], ["if-lift arm", (b) => `\${ if (true) { ${b} } }`]]) {
+  shapes.push([`indirect beside a body local (${cn})`, `<pw> = "secret"
+\${
+    function granted() { return @pw == "secret" }
+}
+<button id="wrong" onclick=\${ @pw = "wrong" }>go</button>
+<button id="right" onclick=\${ @pw = "secret" }>go</button>
+<div id="out">${ctx(`let ok = false
+ lift <b if=(ok || granted())>LOGGED IN</b>
+ ok = true`)}</div>
+`]);
+}
+for (const keyed of [true, false]) {
+  for (const [n, nest] of [["sole root", (b) => b], ["nested", (b) => `<span>${b}</span>`]]) {
+    shapes.push([`value-indexed row side, in-place field write (${n}), ${keyed ? "id" : "index"} keys`, `<pw> = "secret"
+<keys> = [{ ${keyed ? "id: 1, " : ""}k: "secret" }]
+\${
+    function keyFor(p) { return p }
+}
+<button id="wrong" onclick=\${ @keys[0].k = keyFor("wrong") }>go</button>
+<button id="right" onclick=\${ @keys[0].k = keyFor("secret") }>go</button>
+<div id="out">\${ for (r of @keys) { lift ${nest(`<b if=(@pw == r.k)>LOGGED IN</b>`)} } }</div>
+`]);
+  }
+}
+const ROWLOCAL = [
+  ["item-derived local", `let ok = r.ok
+ lift <span><b if=(ok)>LOGGED IN</b></span>`],
+  ["local closure over the row item", `const allowed = () => r.ok
+ lift <span><b if=(allowed())>LOGGED IN</b></span>`],
+];
+for (const keyed of [true, false]) {
+  const row = (ok) => `[{ ${keyed ? "id: 1, " : ""}ok: ${ok} }]`;
+  for (const [ln, body] of ROWLOCAL) {
+    shapes.push([`row local (${ln}), ${keyed ? "id" : "index"} keys`, `<rows> = ${row("true")}
+\${
+    function grant(p) { return p == "secret" }
+}
+<button id="wrong" onclick=\${ @rows = ${row('grant("wrong")')} }>go</button>
+<button id="right" onclick=\${ @rows = ${row('grant("secret")')} }>go</button>
+<div id="out">\${ for (r of @rows) { ${body} } }</div>
+`]);
+  }
+}
+shapes.push(["group local read in a row (a flag set after the loop)", `<pw> = "secret"
+<rows> = [{ id: 1 }]
+<button id="wrong" onclick=\${ @pw = "wrong" }>go</button>
+<button id="right" onclick=\${ @pw = "secret" }>go</button>
+<div id="out">\${ let ok = false
+ for (row of @rows) { lift <span><b if=(ok || @pw == "secret")>LOGGED IN</b></span> }
+ ok = true }</div>
+`]);
+shapes.push(["open gate in a function body", `<pw> = "secret"
+\${
+    function granted() { return @pw == "secret" }
+    function pill(q: bool) { return <span><b if=(q && granted())>LOGGED IN</b></span> }
+}
+<button id="wrong" onclick=\${ @pw = "wrong" }>go</button>
+<button id="right" onclick=\${ @pw = "secret" }>go</button>
+<div id="out">\${ pill(true) }</div>
+`]);
 export default shapes;

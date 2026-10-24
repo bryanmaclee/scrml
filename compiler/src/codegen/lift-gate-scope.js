@@ -460,10 +460,6 @@ function _forBinderSet(n) {
   return out;
 }
 
-function _reText(nm) {
-  return nm.replace(/[$]/g, "\\$");
-}
-
 /**
  * True when the tree of the rendering `for … lift` loop `forNode` holds a lifted `if=` / `show=`
  * its keyed row could not re-read right: the condition reads a render name other than the
@@ -471,14 +467,12 @@ function _reText(nm) {
  * caller holds non-keyed mode for its nested loops), which the enclosing render re-runs.
  *
  * The row a gate is built in is the innermost KEYED loop around it. A nested loop counts as
- * keyed when its iterable names a cell or an enclosing loop's binder (the emitters' keyed
- * test). When that prediction is wrong the gate's emission refuses it (emit-lift.js
- * emitLiftGate) — it is never left stale.
+ * keyed when its iterable names a cell. When that prediction is wrong the gate's emission
+ * refuses it (emit-lift.js _emitLiftGate) — it is never left stale.
  */
 export function liftForTreeGatePins(forNode) {
   let pinned = false;
   const scopes = []; // { names: Set, loop: for-node | null, fn: boolean }
-  const loops = [];
   const resolve = (name) => {
     for (let i = scopes.length - 1; i >= 0; i--) if (scopes[i].names.has(name)) return i;
     return -1;
@@ -493,12 +487,12 @@ export function liftForTreeGatePins(forNode) {
     for (let i = j + 1; i < scopes.length; i++) if (scopes[i].fn) { pinned = true; return; }
     const loop = scopes[j].loop;
     if (loop === forNode) return;
-    // A nested loop's binder: the gate is in THAT loop's row only if that loop is keyed.
+    // A nested loop's binder: the gate is in THAT loop's row only if that loop is keyed. Only a
+    // loop whose iterable names a cell is counted (every emitter keys it); one keyed through an
+    // enclosing row's item or a function (emit-lift's S288 path) is not — over-pinning is the
+    // safe direction (the plain loop is correct, only not keyed).
     const text = typeof loop.iterable === "string" ? loop.iterable : "";
-    const outer = loops.slice(0, loops.indexOf(loop));
-    const keyed = /@[A-Za-z_$]/.test(text) || outer.some((l) => [..._forBinderSet(l)].some(
-      (nm) => new RegExp(`(^|[^\\w$.])${_reText(nm)}(?![\\w$])`).test(text)));
-    if (!keyed) pinned = true;
+    if (!/@[A-Za-z_$]/.test(text)) pinned = true;
   };
   const visitBlock = (arr) => {
     scopes.push({ names: _blockDeclNames(arr), loop: null, fn: false });
@@ -509,6 +503,21 @@ export function liftForTreeGatePins(forNode) {
     if (pinned || !n || typeof n !== "object") return;
     if (Array.isArray(n)) { visitBlock(n); return; }
     switch (n.kind) {
+      case "lift-expr":
+        // A lift whose markup reached the AST as TEXT (the tokenized `< li … >` expression form the
+        // string-parsed emitter lowers) has no attribute nodes to read: any `if=` / `show=` in it
+        // pins the loop (over-pinning is the safe direction).
+        if (n.expr && n.expr.kind !== "markup" && /(?:^|[^\w$.-])(?:if|show)\s*=/.test(JSON.stringify(n.expr))) { pinned = true; return; }
+        break;
+      case "html-fragment":
+      case "bare-expr":
+        // The fragments of a consolidated lift body (emit-lift.js hasFragmentedLiftBody) — likewise.
+        if (/[<>]/.test(JSON.stringify(n)) && /(?:^|[^\w$.-])(?:if|show)\s*=/.test(JSON.stringify(n))) { pinned = true; return; }
+        break;
+      case "tilde-decl":
+        // An attribute token misparsed as a keywordless declaration (`if = …` inside a fragment).
+        if (n.name === "if" || n.name === "show") { pinned = true; return; }
+        break;
       case "markup":
         for (const a of Array.isArray(n.attrs) ? n.attrs : []) {
           if (a && (a.name === "if" || a.name === "show")) gate(a.value, n);
@@ -520,9 +529,7 @@ export function liftForTreeGatePins(forNode) {
       case "for-stmt":
       case "for-expr":
         scopes.push({ names: _forBinderSet(n), loop: n, fn: false });
-        loops.push(n);
         visitBlock(Array.isArray(n.body) ? n.body : []);
-        loops.pop();
         scopes.pop();
         return;
       case "function-decl":
@@ -546,7 +553,6 @@ export function liftForTreeGatePins(forNode) {
     }
   };
   scopes.push({ names: _forBinderSet(forNode), loop: forNode, fn: false });
-  loops.push(forNode);
   visitBlock(Array.isArray(forNode.body) ? forNode.body : []);
   return pinned;
 }
